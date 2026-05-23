@@ -114,7 +114,7 @@ describe("getAllLinkedNodes", () => {
   });
 });
 
-import { getNodeRegistrations } from "@/lib/osf/registrations";
+import { getNodeRegistrations, getRegistration } from "@/lib/osf/registrations";
 
 describe("getNodeRegistrations", () => {
   it("returns all registrations of a node", async () => {
@@ -143,6 +143,44 @@ describe("getNodeRegistrations", () => {
     const regs = await getNodeRegistrations("ezcuj");
     expect(regs).toHaveLength(1);
     expect(regs[0]).toMatchObject({ id: "reg1", title: "Pre-registration", dateRegistered: "2018-01-01T00:00:00Z" });
+  });
+});
+
+describe("getRegistration", () => {
+  it("returns extended view with responses", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/registrations/reg1/", () =>
+        HttpResponse.json({
+          data: {
+            id: "reg1",
+            type: "registrations",
+            attributes: {
+              title: "Pre-registration",
+              description: "Some abstract",
+              date_registered: "2018-01-01T00:00:00Z",
+              public: true,
+              registration_responses: { q1: "Yes", q2: "We expect …", "q3.a": ["A", "B"] },
+            },
+            relationships: {
+              registered_from: { data: { id: "node1", type: "nodes" } },
+              registration_schema: { links: { related: { href: "https://api.osf.io/v2/schemas/registrations/sch1/" } } },
+            },
+            links: { html: "https://osf.io/reg1/" },
+          },
+        })
+      )
+    );
+    const reg = await getRegistration("reg1");
+    expect(reg).toMatchObject({
+      id: "reg1",
+      title: "Pre-registration",
+      description: "Some abstract",
+      dateRegistered: "2018-01-01T00:00:00Z",
+      public: true,
+      registeredFromNodeId: "node1",
+      osfUrl: "https://osf.io/reg1/",
+    });
+    expect(reg.responses).toEqual({ q1: "Yes", q2: "We expect …", "q3.a": ["A", "B"] });
   });
 });
 
