@@ -1,6 +1,7 @@
 import "@/styles/globals.css";
 import type { Metadata } from "next";
 import { UserMenu } from "@/components/UserMenu";
+import { QuotaBanner } from "@/components/QuotaBanner";
 
 export const metadata: Metadata = {
   title: "BetterOSF",
@@ -18,6 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
           <UserMenu />
         </header>
+        <QuotaBanner />
         <main className="px-6 py-8">{children}</main>
         <footer className="border-t border-neutral-200 dark:border-neutral-800 px-6 py-4 text-sm text-neutral-500">
           BetterOSF is an unofficial alternative interface to the Open Science Framework. Data lives on OSF.
