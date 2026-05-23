@@ -6,7 +6,6 @@ function getKv() {
   if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) return null;
   // Lazy require so dev/test environments without KV don't load it
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  // @ts-expect-error - lazy require
   kvImpl = require("@vercel/kv");
   return kvImpl;
 }
