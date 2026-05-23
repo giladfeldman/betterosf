@@ -67,3 +67,16 @@ test("whole-project ZIP route responds with application/zip headers", async () =
   }
   controller.abort();
 });
+
+test("/me redirects to /login when not signed in", async ({ page }) => {
+  await page.goto("/me");
+  await expect(page).toHaveURL(/\/login/);
+  // Both the header UserMenu and the login page itself render the sign-in button.
+  await expect(page.getByRole("button", { name: /sign in with osf/i }).first()).toBeVisible();
+});
+
+test("landing page shows Sign in button when signed out", async ({ page }) => {
+  await page.goto("/");
+  // Rendered by the header UserMenu (signed-out branch).
+  await expect(page.getByRole("button", { name: /sign in with osf/i }).first()).toBeVisible();
+});
