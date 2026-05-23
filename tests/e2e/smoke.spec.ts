@@ -80,3 +80,18 @@ test("landing page shows Sign in button when signed out", async ({ page }) => {
   // Rendered by the header UserMenu (signed-out branch).
   await expect(page.getByRole("button", { name: /sign in with osf/i }).first()).toBeVisible();
 });
+
+test("/search renders empty-state when q is missing", async ({ page }) => {
+  await page.goto("/search");
+  await expect(page.getByRole("heading", { name: /search osf/i })).toBeVisible();
+  await expect(page.getByText(/type a query above/i)).toBeVisible();
+});
+
+test("/search?q=replication returns project results with real anchor links", async ({ page }) => {
+  test.setTimeout(30_000);
+  await page.goto("/search?q=replication&type=projects");
+  await expect(page.getByRole("heading", { name: /search osf/i })).toBeVisible();
+  // Should have at least one real anchor (right-click → open in new tab works)
+  const links = page.locator("a[href^='/']");
+  await expect(links.first()).toBeVisible({ timeout: 15_000 });
+});
