@@ -2,16 +2,28 @@
 
 Alternative interface for the [Open Science Framework](https://osf.io). See [`docs/superpowers/specs/2026-05-23-betterosf-v1-design.md`](docs/superpowers/specs/2026-05-23-betterosf-v1-design.md) for the design.
 
+**Production:** https://betterosf.vercel.app
+
 ## Development
 
     npm install
     cp .env.example .env.local   # fill in OSF_APP_TOKEN
     npm run dev
 
+### Windows quick-launch
+
+Double-click `start_app.bat` — it soft-kills anything on port 4747, runs `next dev -p 4747`, waits for the server, and opens your default browser to http://localhost:4747.
+
 ## Tests
 
     npm test          # unit + integration
     npm run test:e2e  # Playwright smoke (needs network)
+
+## Deploy
+
+Production deploys automatically on every push to `main` via the Vercel GitHub integration. To deploy manually:
+
+    vercel deploy --prod
 
 ## v0.1.0 (Plan 1: Foundation + Anonymous Browsing) — what works
 
