@@ -1,6 +1,8 @@
 import "server-only";
 import { selectToken } from "./tokens";
 import { OsfError } from "./types";
+import { incrementDaily } from "@/lib/limits";
+import { auth } from "@/auth";
 
 const OSF_API_BASE = "https://api.osf.io/v2";
 
@@ -32,12 +34,23 @@ export async function osfGetUrl<T = unknown>(
   url: string,
   init?: { revalidate?: number; tags?: string[] }
 ): Promise<T> {
+  // Track app-token quota usage when no user session.
+  // Per-user OAuth requests consume the USER'S quota, not ours.
+  try {
+    const session = await auth();
+    if (!session?.accessToken) {
+      const today = new Date().toISOString().slice(0, 10);
+      void incrementDaily(`app:osf:calls:${today}`);
+    }
+  } catch {
+    // auth() may throw in non-request contexts; count as anonymous
+    const today = new Date().toISOString().slice(0, 10);
+    void incrementDaily(`app:osf:calls:${today}`);
+  }
+
   const res = await fetch(url, {
     headers: await authHeaders(),
-    next: {
-      revalidate: init?.revalidate ?? 300,
-      tags: init?.tags,
-    },
+    next: { revalidate: init?.revalidate ?? 300, tags: init?.tags },
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
