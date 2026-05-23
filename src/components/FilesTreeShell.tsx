@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { FileEntry, ProviderRoot } from "@/lib/osf/files";
+import { WithinProjectSearch } from "./WithinProjectSearch";
 
 type ProviderInitial = ProviderRoot & { initialEntries: FileEntry[] };
 
@@ -15,52 +16,71 @@ export function FilesTreeShell({
   const [expanded, setExpanded] = useState<Record<string, boolean>>(
     Object.fromEntries(providers.map((p) => [p.provider, true]))
   );
+  const [query, setQuery] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return providers;
+    return providers.map((p) => ({
+      ...p,
+      initialEntries: p.initialEntries.filter((e) => e.name.toLowerCase().includes(q)),
+    }));
+  }, [providers, query]);
 
   return (
-    <div className="font-mono-files text-sm">
-      {providers.map((p) => (
-        <div key={p.provider} className="mb-3">
-          <button
-            type="button"
-            onClick={() => setExpanded((e) => ({ ...e, [p.provider]: !e[p.provider] }))}
-            className="font-semibold text-left w-full hover:underline"
-          >
-            <span aria-hidden="true">{expanded[p.provider] ? "▼" : "▶"}</span>{" "}
-            <span>{p.name}</span>
-            <a
-              href={`/api/zip/${guid}/${p.provider}`}
-              className="ml-3 text-xs text-blue-600 hover:underline"
-              onClick={(e) => e.stopPropagation()}
+    <div>
+      <div className="mb-3">
+        <WithinProjectSearch value={query} onChange={setQuery} />
+        {query && (
+          <p className="text-xs text-neutral-500 mt-1">
+            Filtering top-level entries only. Expand folders to load deeper levels.
+          </p>
+        )}
+      </div>
+      <div className="font-mono-files text-sm">
+        {filtered.map((p) => (
+          <div key={p.provider} className="mb-3">
+            <button
+              type="button"
+              onClick={() => setExpanded((e) => ({ ...e, [p.provider]: !e[p.provider] }))}
+              className="font-semibold text-left w-full hover:underline"
             >
-              [⬇ ZIP]
-            </a>
-          </button>
-          {expanded[p.provider] && (
-            <ul className="ml-4 mt-1 space-y-0.5">
-              {p.initialEntries.map((entry) => (
-                <li key={entry.id}>
-                  {entry.kind === "folder" ? (
-                    <a
-                      href={`/${guid}/files/${p.provider}${entry.materializedPath}`}
-                      className="text-blue-600 hover:underline"
-                    >
-                      <span aria-hidden="true">📁</span> <span>{entry.name}</span>
-                    </a>
-                  ) : (
-                    <a href={entry.downloadUrl} className="hover:underline">
-                      <span aria-hidden="true">📄</span> <span>{entry.name}</span>
-                      {entry.size !== null && (
-                        <span className="ml-2 text-neutral-500 text-xs">{formatSize(entry.size)}</span>
-                      )}
-                    </a>
-                  )}
-                </li>
-              ))}
-              {p.initialEntries.length === 0 && <li className="text-neutral-500">(empty)</li>}
-            </ul>
-          )}
-        </div>
-      ))}
+              <span aria-hidden="true">{expanded[p.provider] ? "▼" : "▶"}</span> <span>{p.name}</span>
+              <a
+                href={`/api/zip/${guid}/${p.provider}`}
+                className="ml-3 text-xs text-blue-600 hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                [⬇ ZIP]
+              </a>
+            </button>
+            {expanded[p.provider] && (
+              <ul className="ml-4 mt-1 space-y-0.5">
+                {p.initialEntries.map((entry) => (
+                  <li key={entry.id}>
+                    {entry.kind === "folder" ? (
+                      <a
+                        href={`/${guid}/files/${p.provider}${entry.materializedPath}`}
+                        className="text-blue-600 hover:underline"
+                      >
+                        <span aria-hidden="true">📁</span> <span>{entry.name}</span>
+                      </a>
+                    ) : (
+                      <a href={entry.downloadUrl} className="hover:underline">
+                        <span aria-hidden="true">📄</span> <span>{entry.name}</span>
+                        {entry.size !== null && (
+                          <span className="ml-2 text-neutral-500 text-xs">{formatSize(entry.size)}</span>
+                        )}
+                      </a>
+                    )}
+                  </li>
+                ))}
+                {p.initialEntries.length === 0 && <li className="text-neutral-500">(empty)</li>}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
