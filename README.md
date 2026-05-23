@@ -40,8 +40,14 @@ Production deploys automatically on every push to `main` via the Vercel GitHub i
 - Failures during the tree walk are logged into `_BETTEROSF_ERRORS.txt` at the ZIP root instead of aborting the download.
 - Within-project search now has an "include collapsed folders" toggle that lazy-expands every folder client-side so the filter sees the whole tree.
 
+## v0.3.0 (Plan 3: Auth + Dashboard) — what's new
+
+- Sign in with OSF (OAuth, read-only `osf.full_read` scope). Tokens live in encrypted httpOnly session cookies — no database.
+- `/me` dashboard listing your projects (including private ones).
+- Private OSF projects you have access to are now browseable through BetterOSF.
+- Anonymous browsing of public projects still works exactly as before.
+
 ## Not yet — coming in subsequent plans
 
-- OSF OAuth login + private projects + `/me` dashboard (Plan 3)
 - Global search page + registration detail (Plan 4)
 - Rate-limit + abuse caps + public-launch polish (Plan 5)
