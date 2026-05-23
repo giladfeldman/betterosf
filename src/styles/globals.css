@@ -3,3 +3,9 @@
 :root { color-scheme: light dark; }
 html, body { font-family: ui-sans-serif, system-ui, sans-serif; }
 .font-mono-files { font-family: ui-monospace, "SF Mono", Menlo, monospace; word-break: break-word; }
+
+*:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  border-radius: 2px;
+}

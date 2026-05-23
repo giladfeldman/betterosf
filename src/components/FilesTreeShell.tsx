@@ -104,7 +104,7 @@ export function FilesTreeShell({
         </div>
       )}
 
-      <div className="font-mono-files text-sm">
+      <div className="font-mono-files text-sm overflow-x-auto">
         {topFiltered.map((p) => (
           <div key={p.provider} className="mb-3">
             <button
