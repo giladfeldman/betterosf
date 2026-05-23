@@ -112,3 +112,35 @@ describe("getAllLinkedNodes", () => {
     expect(ln[0]?.id).toBe("ln1");
   });
 });
+
+import { getNodeRegistrations } from "@/lib/osf/registrations";
+
+describe("getNodeRegistrations", () => {
+  it("returns all registrations of a node", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/ezcuj/registrations/", () =>
+        HttpResponse.json({
+          data: [
+            {
+              id: "reg1",
+              type: "registrations",
+              attributes: {
+                title: "Pre-registration",
+                date_registered: "2018-01-01T00:00:00Z",
+                public: true,
+                category: "project",
+                tags: [],
+              },
+              relationships: {},
+              links: { html: "https://osf.io/reg1/" },
+            },
+          ],
+          links: { next: null },
+        })
+      )
+    );
+    const regs = await getNodeRegistrations("ezcuj");
+    expect(regs).toHaveLength(1);
+    expect(regs[0]).toMatchObject({ id: "reg1", title: "Pre-registration", dateRegistered: "2018-01-01T00:00:00Z" });
+  });
+});
