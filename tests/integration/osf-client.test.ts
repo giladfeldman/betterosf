@@ -144,3 +144,75 @@ describe("getNodeRegistrations", () => {
     expect(regs[0]).toMatchObject({ id: "reg1", title: "Pre-registration", dateRegistered: "2018-01-01T00:00:00Z" });
   });
 });
+
+import { getProviderRoots, getFolderContents } from "@/lib/osf/files";
+
+describe("getProviderRoots", () => {
+  it("returns one entry per storage provider, with the root listing URL", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/ezcuj/files/", () =>
+        HttpResponse.json({
+          data: [
+            {
+              id: "osfstorage",
+              type: "files",
+              attributes: { name: "osfstorage", provider: "osfstorage", kind: "folder", path: "/" },
+              relationships: { files: { links: { related: { href: "https://api.osf.io/v2/nodes/ezcuj/files/osfstorage/" } } } },
+            },
+            {
+              id: "googledrive",
+              type: "files",
+              attributes: { name: "googledrive", provider: "googledrive", kind: "folder", path: "/" },
+              relationships: { files: { links: { related: { href: "https://api.osf.io/v2/nodes/ezcuj/files/googledrive/" } } } },
+            },
+          ],
+          links: { next: null },
+        })
+      )
+    );
+    const roots = await getProviderRoots("ezcuj");
+    expect(roots).toHaveLength(2);
+    expect(roots[0]).toMatchObject({ provider: "osfstorage", listingUrl: "https://api.osf.io/v2/nodes/ezcuj/files/osfstorage/" });
+    expect(roots[1]?.provider).toBe("googledrive");
+  });
+});
+
+describe("getFolderContents", () => {
+  it("lists files and folders at a given listing URL", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/ezcuj/files/osfstorage/", () =>
+        HttpResponse.json({
+          data: [
+            {
+              id: "f1",
+              type: "files",
+              attributes: { name: "raw.csv", kind: "file", size: 12345, materialized_path: "/raw.csv", modified: "2025-01-01T00:00:00Z" },
+              links: { download: "https://files.osf.io/v1/resources/ezcuj/providers/osfstorage/f1" },
+              relationships: {},
+            },
+            {
+              id: "fold1",
+              type: "files",
+              attributes: { name: "analysis", kind: "folder", materialized_path: "/analysis/" },
+              relationships: { files: { links: { related: { href: "https://api.osf.io/v2/nodes/ezcuj/files/osfstorage/fold1/" } } } },
+            },
+          ],
+          links: { next: null },
+        })
+      )
+    );
+    const contents = await getFolderContents("https://api.osf.io/v2/nodes/ezcuj/files/osfstorage/", "ezcuj");
+    expect(contents).toHaveLength(2);
+    expect(contents[0]).toMatchObject({
+      kind: "file",
+      name: "raw.csv",
+      size: 12345,
+      downloadUrl: "https://files.osf.io/v1/resources/ezcuj/providers/osfstorage/f1",
+    });
+    expect(contents[1]).toMatchObject({
+      kind: "folder",
+      name: "analysis",
+      listingUrl: "https://api.osf.io/v2/nodes/ezcuj/files/osfstorage/fold1/",
+    });
+  });
+});
