@@ -43,3 +43,27 @@ test("provider ZIP link returns application/zip", async ({ page, request }) => {
   expect(res.status()).toBe(200);
   expect(res.headers()["content-type"]).toContain("zip");
 });
+
+test("whole-project ZIP route responds with application/zip headers", async () => {
+  // The route is server-streamed and Many Labs 2 takes a long time to fully drain;
+  // here we only verify headers (status + content-type + disposition) by aborting
+  // the body read after the first chunk. Byte-magic verification of the actual
+  // archive is covered by the integration suite.
+  test.setTimeout(120_000);
+  const controller = new AbortController();
+  const res = await fetch(`http://localhost:3000/api/zip/${PUBLIC_GUID}`, { signal: controller.signal });
+  expect(res.status).toBe(200);
+  expect(res.headers.get("content-type")).toContain("zip");
+  expect(res.headers.get("content-disposition") ?? "").toMatch(/\.zip"?$/);
+  // Read just the first chunk to confirm body is streaming, then abort.
+  const reader = res.body?.getReader();
+  if (reader) {
+    const { value } = await reader.read();
+    expect(value).toBeDefined();
+    expect(value!.byteLength).toBeGreaterThan(0);
+    // First bytes of any non-empty ZIP must be PK\x03\x04 (local file header).
+    expect(Array.from(value!.slice(0, 4))).toEqual([0x50, 0x4b, 0x03, 0x04]);
+    await reader.cancel();
+  }
+  controller.abort();
+});
