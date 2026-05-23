@@ -12,7 +12,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="min-h-screen bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
         <header className="border-b border-neutral-200 dark:border-neutral-800 px-6 py-3 flex justify-between items-center">
-          <a href="/" className="font-semibold">BetterOSF</a>
+          <div className="flex items-center gap-4">
+            <a href="/" className="font-semibold">BetterOSF</a>
+            <a href="/search" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">Search</a>
+          </div>
           <UserMenu />
         </header>
         <main className="px-6 py-8">{children}</main>
