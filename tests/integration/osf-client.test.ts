@@ -52,3 +52,63 @@ describe("osfGetUrl", () => {
     expect(result).toBeDefined();
   });
 });
+
+import { getNode, getAllChildren, getAllLinkedNodes } from "@/lib/osf/nodes";
+
+describe("getNode", () => {
+  it("fetches and parses a node", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/ezcuj/", () =>
+        HttpResponse.json({
+          data: {
+            id: "ezcuj",
+            type: "nodes",
+            attributes: { title: "Many Labs 2", public: true, tags: [], category: "project" },
+            relationships: {},
+          },
+        })
+      )
+    );
+    const node = await getNode("ezcuj");
+    expect(node.id).toBe("ezcuj");
+    expect(node.title).toBe("Many Labs 2");
+  });
+});
+
+describe("getAllChildren", () => {
+  it("follows pagination to return every child", async () => {
+    const page1 = {
+      data: [{ id: "c1", type: "nodes", attributes: { title: "Study 1", public: true, tags: [], category: "project" }, relationships: {} }],
+      links: { next: "https://api.osf.io/v2/nodes/ezcuj/children/?page=2" },
+    };
+    const page2 = {
+      data: [{ id: "c2", type: "nodes", attributes: { title: "Study 2", public: true, tags: [], category: "project" }, relationships: {} }],
+      links: { next: null },
+    };
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/ezcuj/children/", ({ request }) => {
+        const url = new URL(request.url);
+        return HttpResponse.json(url.searchParams.has("page") ? page2 : page1);
+      })
+    );
+    const children = await getAllChildren("ezcuj");
+    expect(children).toHaveLength(2);
+    expect(children.map((c) => c.id)).toEqual(["c1", "c2"]);
+  });
+});
+
+describe("getAllLinkedNodes", () => {
+  it("returns all linked nodes (single page)", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/ezcuj/linked_nodes/", () =>
+        HttpResponse.json({
+          data: [{ id: "ln1", type: "nodes", attributes: { title: "Linked", public: true, tags: [], category: "project" }, relationships: {} }],
+          links: { next: null },
+        })
+      )
+    );
+    const ln = await getAllLinkedNodes("ezcuj");
+    expect(ln).toHaveLength(1);
+    expect(ln[0]?.id).toBe("ln1");
+  });
+});
