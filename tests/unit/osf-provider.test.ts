@@ -45,7 +45,7 @@ describe("osfProvider", () => {
     const profile = config.profile?.(
       { data: { id: "u1", type: "users", attributes: { full_name: "X" } } },
       undefined as never
-    );
+    ) as { email?: string | null } | undefined;
     expect(profile?.email).toBeNull();
   });
 });

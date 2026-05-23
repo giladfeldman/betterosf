@@ -1,4 +1,4 @@
-import type { OAuthConfig, OAuthUserConfig } from "next-auth/providers";
+import type { OAuth2Config, OAuthUserConfig } from "next-auth/providers";
 
 type OsfUserinfo = {
   data: {
@@ -15,7 +15,7 @@ type OsfUserinfo = {
 
 export type OsfProfile = OsfUserinfo;
 
-export function osfProvider(opts: OAuthUserConfig<OsfProfile>): OAuthConfig<OsfProfile> {
+export function osfProvider(opts: OAuthUserConfig<OsfProfile>): OAuth2Config<OsfProfile> {
   return {
     id: "osf",
     name: "OSF",
@@ -48,6 +48,6 @@ export function osfProvider(opts: OAuthUserConfig<OsfProfile>): OAuthConfig<OsfP
         email: a.email ?? null,
       };
     },
-    ...opts,
+    options: opts,
   };
 }
