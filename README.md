@@ -54,6 +54,17 @@ Production deploys automatically on every push to `main` via the Vercel GitHub i
 - New `/registrations/<guid>` page renders schema responses inline.
 - Header now has a Search link.
 
-## Not yet — coming in subsequent plans
+## v0.5.0 (Plan 5: Public-launch polish) — what's new
 
-- Rate-limit + abuse caps + public-launch polish (Plan 5)
+- Per-IP rate limit (60 page navs/min) for anonymous traffic. Signed-in users unaffected.
+- Whole-tree ZIP cap (5/hr per IP) for anonymous downloads.
+- Daily app-token quota tracking; banner appears if BetterOSF is over its OSF API budget for the day.
+- Privacy and About pages; footer links; mobile responsive sweep; focus-visible keyboard rings.
+
+After this release, **provision Vercel KV** at https://vercel.com/your-team/betterosf/stores to enable persistent rate-limit counters across edge regions. Until then the limits work per-instance with in-memory state (still safe — just less aggressive about persistence).
+
+## Not yet — possible future work
+
+- Full-text search inside file contents
+- OAuth refresh-token flow (currently relies on OSF's token expiry schedule)
+- Pool of multiple OSF app tokens for higher anonymous quota
