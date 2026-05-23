@@ -8,8 +8,9 @@ export type ZipFetchResult =
 export async function fetchProviderZip(guid: string, provider: string): Promise<ZipFetchResult> {
   const url = `https://files.osf.io/v1/resources/${guid}/providers/${provider}/?zip=`;
   try {
+    const token = await selectToken();
     const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${selectToken()}` },
+      headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) {
       return { status: "error", code: res.status, message: `Provider ${provider} on node ${guid}: HTTP ${res.status}` };

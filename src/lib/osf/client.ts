@@ -4,9 +4,9 @@ import { OsfError } from "./types";
 
 const OSF_API_BASE = "https://api.osf.io/v2";
 
-function authHeaders(): HeadersInit {
+async function authHeaders(): Promise<HeadersInit> {
   return {
-    Authorization: `Bearer ${selectToken()}`,
+    Authorization: `Bearer ${await selectToken()}`,
     Accept: "application/vnd.api+json",
   };
 }
@@ -33,7 +33,7 @@ export async function osfGetUrl<T = unknown>(
   init?: { revalidate?: number; tags?: string[] }
 ): Promise<T> {
   const res = await fetch(url, {
-    headers: authHeaders(),
+    headers: await authHeaders(),
     next: {
       revalidate: init?.revalidate ?? 300,
       tags: init?.tags,

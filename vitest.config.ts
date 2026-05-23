@@ -11,9 +11,13 @@ export default defineConfig({
     include: ["tests/unit/**/*.test.ts", "tests/integration/**/*.test.{ts,tsx}"],
   },
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "src"),
-      "server-only": path.resolve(__dirname, "node_modules/next/dist/compiled/server-only/empty.js"),
-    },
+    // Array form so we can order entries: `@/auth` must match before the generic `@`
+    // alias, otherwise tests pull in next-auth (which fails to resolve `next/server`
+    // under Vitest). Individual tests can still override with `vi.mock("@/auth", ...)`.
+    alias: [
+      { find: /^@\/auth$/, replacement: path.resolve(__dirname, "tests/stubs/auth.ts") },
+      { find: /^@\//, replacement: path.resolve(__dirname, "src") + "/" },
+      { find: "server-only", replacement: path.resolve(__dirname, "node_modules/next/dist/compiled/server-only/empty.js") },
+    ],
   },
 });

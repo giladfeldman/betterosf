@@ -24,7 +24,7 @@ export async function GET(
 
   const upstream = await fetch(wbUrl, {
     headers: {
-      Authorization: `Bearer ${selectToken()}`,
+      Authorization: `Bearer ${await selectToken()}`,
     },
   });
 

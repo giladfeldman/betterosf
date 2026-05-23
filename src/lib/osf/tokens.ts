@@ -1,10 +1,17 @@
 import { env } from "@/lib/env";
+import { auth } from "@/auth";
 
 /**
  * Returns the OSF API token to use for this request.
- * In Plan 1, anonymous-only: always the app token.
- * Plan 3 will branch on whether the request has an authenticated user.
+ * If a user is signed in via Auth.js, use their OAuth access token.
+ * Otherwise fall back to the app-owned PAT (env var).
  */
-export function selectToken(): string {
+export async function selectToken(): Promise<string> {
+  try {
+    const session = await auth();
+    if (session?.accessToken) return session.accessToken;
+  } catch {
+    // auth() can throw in some non-request contexts (build, scripts) — fall through to app token
+  }
   return env().OSF_APP_TOKEN;
 }
