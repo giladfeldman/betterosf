@@ -21,8 +21,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </header>
         <QuotaBanner />
         <main className="px-6 py-8">{children}</main>
-        <footer className="border-t border-neutral-200 dark:border-neutral-800 px-6 py-4 text-sm text-neutral-500">
-          BetterOSF is an unofficial alternative interface to the Open Science Framework. Data lives on OSF.
+        <footer className="border-t border-neutral-200 dark:border-neutral-800 px-6 py-4 text-sm text-neutral-500 flex justify-between flex-wrap gap-2">
+          <span>
+            BetterOSF is an unofficial alternative interface to the{" "}
+            <a href="https://osf.io" className="hover:underline">Open Science Framework</a>. Data lives on OSF.
+          </span>
+          <span className="flex gap-4">
+            <a href="/about" className="hover:underline">About</a>
+            <a href="/privacy" className="hover:underline">Privacy</a>
+            <a href="https://github.com/giladfeldman/betterosf" className="hover:underline">GitHub</a>
+          </span>
         </footer>
       </body>
     </html>
