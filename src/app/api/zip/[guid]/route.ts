@@ -21,6 +21,25 @@ export async function GET(
   const { guid } = await params;
   if (!isValidGuid(guid)) return new Response("Invalid GUID", { status: 400 });
 
+  // Anonymous whole-tree ZIPs: cap at 5 per IP per hour to protect against abuse.
+  // Signed-in users have OSF's own 10k/day per-token limit, which is self-throttling.
+  const cookies = _req.headers.get("cookie") ?? "";
+  const isSignedIn = cookies.includes("authjs.session-token");
+  if (!isSignedIn) {
+    const ip =
+      _req.headers.get("x-real-ip") ??
+      _req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+      "unknown";
+    const { incrementWindow } = await import("@/lib/limits");
+    const count = await incrementWindow(`ip:${ip}:wholetree-zip:1hr`, 3600);
+    if (count > 5) {
+      return new Response(
+        "Anonymous whole-project ZIP downloads are capped at 5 per IP per hour. Sign in for higher limits.",
+        { status: 429, headers: { "Retry-After": "3600", "Content-Type": "text/plain" } }
+      );
+    }
+  }
+
   let tree: TreeNode[];
   try {
     tree = await collectNodeTree(guid);
