@@ -1,9 +1,33 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { isValidGuid } from "@/lib/osf/guid";
 import { getNode, getAllChildren, getAllLinkedNodes } from "@/lib/osf/nodes";
 import { getNodeRegistrations } from "@/lib/osf/registrations";
 import { OsfError } from "@/lib/osf/types";
 import { Breadcrumb } from "@/components/Breadcrumb";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ guid: string }>;
+}): Promise<Metadata> {
+  const { guid } = await params;
+  if (!isValidGuid(guid)) return { title: "BetterOSF" };
+  try {
+    const node = await getNode(guid);
+    return {
+      title: `${node.title} — BetterOSF`,
+      description: node.description.slice(0, 200),
+      openGraph: {
+        title: node.title,
+        description: node.description.slice(0, 200),
+        url: `${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/${guid}`,
+      },
+    };
+  } catch {
+    return { title: "BetterOSF" };
+  }
+}
 
 export default async function ProjectPage({ params }: { params: Promise<{ guid: string }> }) {
   const { guid } = await params;
