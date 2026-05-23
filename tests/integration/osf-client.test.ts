@@ -3,6 +3,7 @@ import { http, HttpResponse } from "msw";
 import { server } from "../msw/server";
 import { osfGet, osfGetUrl } from "@/lib/osf/client";
 import { OsfError } from "@/lib/osf/types";
+import { getCurrentUser, getMyProjects } from "@/lib/osf/users";
 
 describe("osfGet", () => {
   it("attaches bearer token and returns parsed JSON", async () => {
@@ -214,5 +215,44 @@ describe("getFolderContents", () => {
       name: "analysis",
       listingUrl: "https://api.osf.io/v2/nodes/ezcuj/files/osfstorage/fold1/",
     });
+  });
+});
+
+describe("getCurrentUser", () => {
+  it("returns parsed user from /users/me/", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/users/me/", () =>
+        HttpResponse.json({
+          data: {
+            id: "abc12",
+            type: "users",
+            attributes: { full_name: "Ada", given_name: "Ada", family_name: "L" },
+            links: { html: "https://osf.io/abc12/" },
+          },
+        })
+      )
+    );
+    const user = await getCurrentUser();
+    expect(user).toMatchObject({ id: "abc12", fullName: "Ada", osfUrl: "https://osf.io/abc12/" });
+  });
+});
+
+describe("getMyProjects", () => {
+  it("returns all nodes from /users/me/nodes/ (paginated)", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/users/me/nodes/", () =>
+        HttpResponse.json({
+          data: [
+            { id: "p1", type: "nodes", attributes: { title: "Project 1", public: true, tags: [], category: "project" }, relationships: {} },
+            { id: "p2", type: "nodes", attributes: { title: "Project 2", public: false, tags: [], category: "project" }, relationships: {} },
+          ],
+          links: { next: null },
+        })
+      )
+    );
+    const projects = await getMyProjects();
+    expect(projects).toHaveLength(2);
+    expect(projects.map((p) => p.id)).toEqual(["p1", "p2"]);
+    expect(projects.map((p) => p.public)).toEqual([true, false]);
   });
 });
