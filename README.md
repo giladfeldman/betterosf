@@ -47,7 +47,13 @@ Production deploys automatically on every push to `main` via the Vercel GitHub i
 - Private OSF projects you have access to are now browseable through BetterOSF.
 - Anonymous browsing of public projects still works exactly as before.
 
+## v0.4.0 (Plan 4: Discovery) — what's new
+
+- Global `/search` page across projects / files / registrations / users — metadata-only (no full-text inside files).
+- Type filter chips, real anchor links throughout, paginated, with result counts.
+- New `/registrations/<guid>` page renders schema responses inline.
+- Header now has a Search link.
+
 ## Not yet — coming in subsequent plans
 
-- Global search page + registration detail (Plan 4)
 - Rate-limit + abuse caps + public-launch polish (Plan 5)
