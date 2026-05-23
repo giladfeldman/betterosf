@@ -120,9 +120,9 @@ export default async function ProjectPage({ params }: { params: Promise<{ guid: 
               href={`/api/zip/${guid}`}
               className="block border rounded px-3 py-2 text-center hover:bg-neutral-50 dark:hover:bg-neutral-900"
             >
-              ⬇ Download all files as ZIP
+              <span aria-hidden="true">⬇</span> <span>Download whole project as ZIP</span>
             </a>
-            <p className="text-xs text-neutral-500 mt-1">Whole-tree download arrives in Plan 2. For now, ZIP per folder is on the Files page.</p>
+            <p className="text-xs text-neutral-500 mt-1">Bundles every storage provider, every component, every linked project. Per-provider archives are nested inside the outer ZIP.</p>
           </div>
         </aside>
       </div>

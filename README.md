@@ -34,9 +34,14 @@ Production deploys automatically on every push to `main` via the Vercel GitHub i
 - ZIP download of any folder (proxied through WaterButler)
 - Within-project search of top-level tree entries
 
+## v0.2.0 (Plan 2: Whole-tree ZIP + Deep Search) — what's new
+
+- One-click download of the whole project tree (root + every component + every linked project, across every storage provider) as a streamed ZIP via `/api/zip/<guid>`. Per-provider archives are nested as `<provider>.zip` inside the outer ZIP — unzip twice if needed.
+- Failures during the tree walk are logged into `_BETTEROSF_ERRORS.txt` at the ZIP root instead of aborting the download.
+- Within-project search now has an "include collapsed folders" toggle that lazy-expands every folder client-side so the filter sees the whole tree.
+
 ## Not yet — coming in subsequent plans
 
-- Whole-project ZIP (Plan 2)
 - OSF OAuth login + private projects + `/me` dashboard (Plan 3)
 - Global search page + registration detail (Plan 4)
 - Rate-limit + abuse caps + public-launch polish (Plan 5)
