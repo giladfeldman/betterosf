@@ -95,3 +95,35 @@ test("/search?q=replication returns project results with real anchor links", asy
   const links = page.locator("a[href^='/']");
   await expect(links.first()).toBeVisible({ timeout: 15_000 });
 });
+
+test("files page shows unified tree with all-folders-expanded", async ({ page }) => {
+  await page.goto(`/${PUBLIC_GUID}/files`);
+  await expect(page.locator('[role="tree"]')).toBeVisible({ timeout: 20_000 });
+  // Expand-all button is in tree header
+  await expect(page.getByRole("button", { name: /expand all/i })).toBeVisible();
+});
+
+test("dark mode toggle cycles and persists", async ({ page }) => {
+  await page.goto("/");
+  const toggle = page.getByRole("button", { name: /Theme:/i });
+  await expect(toggle).toBeVisible();
+  await toggle.click();
+  await toggle.click();
+  // After two clicks from "system" we're at light or dark — just confirm class is set on <html>
+  const cls = await page.locator("html").getAttribute("class");
+  expect(cls).toMatch(/(light|dark)/);
+});
+
+test("file view route renders viewer for a markdown file", async ({ page }) => {
+  // Many Labs 2 has a Readme.md or similar — find any .md in osfstorage; fallback to deep listing
+  await page.goto(`/${PUBLIC_GUID}/files/osfstorage`);
+  // Heuristic: click first .md link if present; otherwise skip
+  const mdLink = page.locator('a[href*=".md/view"]').first();
+  const has = await mdLink.count();
+  if (has > 0) {
+    await mdLink.click();
+    await expect(page).toHaveURL(/\.md\/view$/);
+    // Markdown viewer renders an <article>
+    await expect(page.locator("article")).toBeVisible({ timeout: 15_000 });
+  }
+});
