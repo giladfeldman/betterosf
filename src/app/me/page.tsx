@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { getCurrentUser, getMyProjects } from "@/lib/osf/users";
 import { OsfError } from "@/lib/osf/types";
+import { PinnedRecentPanels } from "@/components/PinnedRecentPanels";
 
 export const metadata = { title: "My Dashboard — BetterOSF" };
 
@@ -35,6 +36,8 @@ export default async function MyDashboard() {
       <p className="mb-4 text-sm">
         <a href="/search?scope=user:me" className="text-blue-600 hover:underline">Search my projects</a>
       </p>
+
+      <PinnedRecentPanels />
 
       <h2 className="text-xl font-semibold mb-2">Your projects ({projects.length})</h2>
       <ul className="space-y-1">
