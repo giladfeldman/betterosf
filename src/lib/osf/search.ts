@@ -1,6 +1,8 @@
 import "server-only";
 import { osfGet } from "./client";
 import { parseNode, type NodeView } from "./parse";
+import { parseQuery } from "@/lib/search/parser";
+import { compileQuery, type FilterPair } from "@/lib/search/compile";
 
 export type SearchPage<T> = {
   results: T[];
@@ -14,14 +16,61 @@ type RawCollection<R> = {
   meta?: { total?: number };
 };
 
-function buildQs(query: string, filterField: string, opts?: { page?: number; perPage?: number }): string {
+async function executeMulti<T>(
+  resource: "nodes" | "files" | "registrations" | "users",
+  field: string,
+  query: string,
+  opts: { page?: number; perPage?: number; sort?: string } | undefined,
+  parseItems: (raw: RawCollection<unknown>) => T[],
+  idOf: (item: T) => string,
+  textOf: (item: T) => string,
+  tagSuffix: string,
+): Promise<SearchPage<T>> {
+  const ast = parseQuery(query);
+  const plan = compileQuery(ast, field);
   const page = opts?.page ?? 1;
   const size = opts?.perPage ?? 20;
-  const qs = new URLSearchParams();
-  qs.set(`filter[${filterField}]`, query);
-  qs.set("page", String(page));
-  qs.set("page[size]", String(size));
-  return qs.toString();
+  const sort = opts?.sort;
+
+  // For OR-union, fetch each request; for intersect (single request) just one fetch.
+  // OSF paginates per request; for union we paginate per branch and union page-by-page,
+  // taking the first <size> after dedup. Limit to first 5 branches to bound cost.
+  const branches = plan.requests.slice(0, 5);
+
+  const fetchOne = async (req: { filters: FilterPair[] }) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of req.filters) qs.append(`filter[${k}]`, v);
+    qs.set("page", String(page));
+    qs.set("page[size]", String(size));
+    if (sort) qs.set("sort", sort);
+    return osfGet<RawCollection<unknown>>(
+      `/${resource}/?${qs.toString()}`,
+      { tags: ["search", `search:${tagSuffix}:${query}`], revalidate: 60 }
+    );
+  };
+
+  const responses = await Promise.all(branches.map(fetchOne));
+
+  let total = 0;
+  let hasMore = false;
+  const seen = new Set<string>();
+  const merged: T[] = [];
+
+  for (const raw of responses) {
+    total = Math.max(total, raw.meta?.total ?? raw.data.length);
+    if (raw.links.next !== null) hasMore = true;
+    const parsed = parseItems(raw);
+    for (const item of parsed) {
+      const id = idOf(item);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const text = textOf(item).toLowerCase();
+      if (plan.exclusions.some((e) => text.includes(e.toLowerCase()))) continue;
+      merged.push(item);
+    }
+  }
+
+  return { results: merged.slice(0, size), total, hasMore };
 }
 
 type RawNodeForParse = {
@@ -32,17 +81,17 @@ type RawNodeForParse = {
   links?: { html?: string };
 };
 
-export async function searchNodes(query: string, opts?: { page?: number; perPage?: number }): Promise<SearchPage<NodeView>> {
-  const qs = buildQs(query, "title", opts);
-  const raw = await osfGet<RawCollection<RawNodeForParse>>(`/nodes/?${qs}`, {
-    tags: ["search", `search:nodes:${query}`],
-    revalidate: 60,
-  });
-  return {
-    results: raw.data.map((r) => parseNode({ data: r })),
-    total: raw.meta?.total ?? raw.data.length,
-    hasMore: raw.links.next !== null,
-  };
+export async function searchNodes(query: string, opts?: { page?: number; perPage?: number; sort?: string }): Promise<SearchPage<NodeView>> {
+  return executeMulti<NodeView>(
+    "nodes",
+    "title",
+    query,
+    opts,
+    (raw) => (raw.data as RawNodeForParse[]).map((r) => parseNode({ data: r })),
+    (item) => item.id,
+    (item) => item.title ?? "",
+    "nodes",
+  );
 }
 
 export type SearchedFile = {
@@ -64,14 +113,13 @@ type RawSearchedFile = {
   relationships?: { node?: { data?: { id?: string } } };
 };
 
-export async function searchFiles(query: string, opts?: { page?: number; perPage?: number }): Promise<SearchPage<SearchedFile>> {
-  const qs = buildQs(query, "name", opts);
-  const raw = await osfGet<RawCollection<RawSearchedFile>>(`/files/?${qs}`, {
-    tags: ["search", `search:files:${query}`],
-    revalidate: 60,
-  });
-  return {
-    results: raw.data.map((r) => ({
+export async function searchFiles(query: string, opts?: { page?: number; perPage?: number; sort?: string }): Promise<SearchPage<SearchedFile>> {
+  return executeMulti<SearchedFile>(
+    "files",
+    "name",
+    query,
+    opts,
+    (raw) => (raw.data as RawSearchedFile[]).map((r) => ({
       id: r.id,
       name: String(r.attributes.name ?? ""),
       kind: r.attributes.kind ?? "file",
@@ -81,9 +129,10 @@ export async function searchFiles(query: string, opts?: { page?: number; perPage
       downloadUrl: r.links?.download ?? "",
       nodeId: r.relationships?.node?.data?.id ?? null,
     })),
-    total: raw.meta?.total ?? raw.data.length,
-    hasMore: raw.links.next !== null,
-  };
+    (item) => item.id,
+    (item) => item.name,
+    "files",
+  );
 }
 
 export type SearchedRegistration = {
@@ -100,22 +149,22 @@ type RawReg = {
   links?: { html?: string };
 };
 
-export async function searchRegistrations(query: string, opts?: { page?: number; perPage?: number }): Promise<SearchPage<SearchedRegistration>> {
-  const qs = buildQs(query, "title", opts);
-  const raw = await osfGet<RawCollection<RawReg>>(`/registrations/?${qs}`, {
-    tags: ["search", `search:regs:${query}`],
-    revalidate: 60,
-  });
-  return {
-    results: raw.data.map((r) => ({
+export async function searchRegistrations(query: string, opts?: { page?: number; perPage?: number; sort?: string }): Promise<SearchPage<SearchedRegistration>> {
+  return executeMulti<SearchedRegistration>(
+    "registrations",
+    "title",
+    query,
+    opts,
+    (raw) => (raw.data as RawReg[]).map((r) => ({
       id: r.id,
       title: String(r.attributes.title ?? ""),
       dateRegistered: String(r.attributes.date_registered ?? ""),
       osfUrl: r.links?.html ?? `https://osf.io/${r.id}/`,
     })),
-    total: raw.meta?.total ?? raw.data.length,
-    hasMore: raw.links.next !== null,
-  };
+    (item) => item.id,
+    (item) => item.title,
+    "regs",
+  );
 }
 
 export type SearchedUser = {
@@ -131,19 +180,55 @@ type RawUser = {
   links?: { html?: string };
 };
 
-export async function searchUsers(query: string, opts?: { page?: number; perPage?: number }): Promise<SearchPage<SearchedUser>> {
-  const qs = buildQs(query, "full_name", opts);
-  const raw = await osfGet<RawCollection<RawUser>>(`/users/?${qs}`, {
-    tags: ["search", `search:users:${query}`],
-    revalidate: 60,
-  });
-  return {
-    results: raw.data.map((r) => ({
+export async function searchUsers(query: string, opts?: { page?: number; perPage?: number; sort?: string }): Promise<SearchPage<SearchedUser>> {
+  return executeMulti<SearchedUser>(
+    "users",
+    "full_name",
+    query,
+    opts,
+    (raw) => (raw.data as RawUser[]).map((r) => ({
       id: r.id,
       fullName: String(r.attributes.full_name ?? r.id),
       osfUrl: r.links?.html ?? `https://osf.io/${r.id}/`,
     })),
-    total: raw.meta?.total ?? raw.data.length,
-    hasMore: raw.links.next !== null,
+    (item) => item.id,
+    (item) => item.fullName,
+    "users",
+  );
+}
+
+// Scoped search within a project: post-filters children/linked/registrations of a root node.
+import { getAllChildren, getAllLinkedNodes } from "@/lib/osf/nodes";
+import { getNodeRegistrations } from "@/lib/osf/registrations";
+
+export async function searchInProjectScope(rootGuid: string, query: string): Promise<{
+  components: NodeView[];
+  linked: NodeView[];
+  registrations: { id: string; title: string; dateRegistered: string; osfUrl: string }[];
+}> {
+  const ast = parseQuery(query);
+  const plan = compileQuery(ast, "title");
+  const include = (text: string) => {
+    const t = text.toLowerCase();
+    if (plan.exclusions.some((e) => t.includes(e.toLowerCase()))) return false;
+    if (plan.requests.length === 0 || plan.requests[0]?.filters.length === 0) return true;
+    // Test text against each request branch; OR-union means any branch matching is OK
+    return plan.requests.some((req) =>
+      req.filters.every(([, val]) => t.includes(val.toLowerCase()))
+    );
+  };
+
+  const [children, linked, registrations] = await Promise.all([
+    getAllChildren(rootGuid),
+    getAllLinkedNodes(rootGuid),
+    getNodeRegistrations(rootGuid),
+  ]);
+
+  return {
+    components: children.filter((c) => include(c.title || c.id)),
+    linked: linked.filter((l) => include(l.title || l.id)),
+    registrations: registrations.filter((r) => include(r.title || r.id)).map((r) => ({
+      id: r.id, title: r.title, dateRegistered: r.dateRegistered, osfUrl: r.osfUrl,
+    })),
   };
 }
