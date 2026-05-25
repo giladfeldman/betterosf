@@ -13,6 +13,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <link rel="preconnect" href="https://api.osf.io" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://files.osf.io" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://accounts.osf.io" />
+      </head>
       <body className="min-h-screen bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <header className="border-b border-neutral-200 dark:border-neutral-800 px-4 sm:px-6 py-3 flex flex-wrap justify-between items-center gap-2">
