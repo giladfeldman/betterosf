@@ -2,6 +2,8 @@ import "server-only";
 import { osfGet, osfGetUrl } from "./client";
 import { parseNode, type NodeView } from "./parse";
 import { collectAll } from "./paginate";
+import { parseQuery } from "@/lib/search/parser";
+import { compileQuery } from "@/lib/search/compile";
 
 export type UserView = {
   id: string;
@@ -36,6 +38,53 @@ type NodeCollectionResponse = {
   data: RawNode[];
   links: { next: string | null };
 };
+
+export async function searchUserNodes(
+  userId: string,
+  query: string,
+  opts?: { page?: number; perPage?: number; sort?: string },
+): Promise<{ results: NodeView[]; total: number; hasMore: boolean }> {
+  const ast = parseQuery(query);
+  const plan = compileQuery(ast, "title");
+  const page = opts?.page ?? 1;
+  const size = opts?.perPage ?? 20;
+  const sort = opts?.sort;
+
+  // OR-union across branches, single user's nodes endpoint
+  const userPath = userId === "me" ? "users/me" : `users/${userId}`;
+  const branches = plan.requests.slice(0, 5);
+
+  const responses = await Promise.all(branches.map(async (req) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of req.filters) qs.append(`filter[${k}]`, v);
+    qs.set("page", String(page));
+    qs.set("page[size]", String(size));
+    if (sort) qs.set("sort", sort);
+    return osfGet<NodeCollectionResponse & { meta?: { total?: number } }>(
+      `/${userPath}/nodes/?${qs.toString()}`,
+      { tags: ["users:me"], revalidate: 60 },
+    );
+  }));
+
+  let total = 0;
+  let hasMore = false;
+  const seen = new Set<string>();
+  const merged: NodeView[] = [];
+  for (const raw of responses) {
+    total = Math.max(total, raw.meta?.total ?? raw.data.length);
+    if (raw.links.next !== null) hasMore = true;
+    for (const r of raw.data) {
+      const node = parseNode({ data: r });
+      if (seen.has(node.id)) continue;
+      seen.add(node.id);
+      if (!plan.exclusions.some((e) => node.title.toLowerCase().includes(e.toLowerCase()))) {
+        merged.push(node);
+      }
+    }
+  }
+
+  return { results: merged.slice(0, size), total, hasMore };
+}
 
 export async function getMyProjects(): Promise<NodeView[]> {
   return collectAll<NodeView>(async (nextUrl) => {

@@ -32,6 +32,10 @@ export default async function MyDashboard() {
         Signed in as <a href={user.osfUrl} className="underline text-blue-600">OSF user {user.id}</a>.
       </p>
 
+      <p className="mb-4 text-sm">
+        <a href="/search?scope=user:me" className="text-blue-600 hover:underline">Search my projects</a>
+      </p>
+
       <h2 className="text-xl font-semibold mb-2">Your projects ({projects.length})</h2>
       <ul className="space-y-1">
         {projects.map((p) => (

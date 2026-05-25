@@ -52,6 +52,9 @@ export default async function ProjectPage({ params }: { params: Promise<{ guid: 
       <header className="mb-6">
         <h1 className="text-3xl font-semibold">{node.title}</h1>
         <p className="mt-2 text-neutral-600 whitespace-pre-wrap">{node.description}</p>
+        <p className="mt-3 text-sm">
+          <a href={`/search?scope=project:${guid}`} className="text-blue-600 hover:underline">Search this project</a>
+        </p>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_18rem] gap-8">
