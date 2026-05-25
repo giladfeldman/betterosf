@@ -1,6 +1,7 @@
 import { searchNodes, searchFiles, searchRegistrations, searchUsers } from "@/lib/osf/search";
 import { SearchTypeChips, type SearchType } from "@/components/SearchTypeChips";
 import { ProjectResult, FileResult, RegistrationResult, UserResult } from "@/components/SearchResultRow";
+import { SearchSyntaxHelp } from "@/components/SearchSyntaxHelp";
 
 export const metadata = { title: "Search — BetterOSF" };
 
@@ -82,7 +83,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   return (
     <div className="max-w-4xl">
       <h1 className="text-3xl font-semibold mb-4">Search OSF</h1>
-      <form action="/search" method="get" className="flex gap-2 mb-6 max-w-2xl">
+      <form action="/search" method="get" className="flex gap-2 mb-6 max-w-2xl relative items-center">
         <input
           type="text"
           name="q"
@@ -93,6 +94,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
         />
         <input type="hidden" name="type" value={type} />
         <button type="submit" className="border rounded px-4 py-2 bg-blue-600 text-white hover:bg-blue-700">Search</button>
+        <SearchSyntaxHelp />
       </form>
 
       {q ? <SearchTypeChips q={q} active={type} /> : null}
