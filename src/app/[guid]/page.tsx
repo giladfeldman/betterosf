@@ -9,6 +9,8 @@ import { FilterChips } from "@/components/FilterChips";
 import { SortControl } from "@/components/SortControl";
 import { PinButton } from "@/components/PinButton";
 import { RecordView } from "@/components/RecordView";
+import { CitationExport } from "@/components/CitationExport";
+import { getCitation, getStyledCitation, toBibTeX, toRIS } from "@/lib/osf/citation";
 
 const COMPONENT_CATEGORIES = [
   "project",
@@ -73,6 +75,15 @@ export default async function ProjectPage({
     if (e instanceof OsfError && e.code === "not_found") notFound();
     throw e;
   }
+
+  const citation = await getCitation(guid).catch(() => null);
+  const [apa, mla, chicago] = await Promise.all([
+    getStyledCitation(guid, "apa").catch(() => ""),
+    getStyledCitation(guid, "mla").catch(() => ""),
+    getStyledCitation(guid, "chicago-author-date").catch(() => ""),
+  ]);
+  const bibtex = citation ? toBibTeX(citation, guid) : "";
+  const ris = citation ? toRIS(citation, guid) : "";
 
   // Filter
   let filteredChildren = children;
@@ -200,6 +211,7 @@ export default async function ProjectPage({
             </a>
             <p className="text-xs text-neutral-500 mt-1">Bundles every storage provider, every component, every linked project. Per-provider archives are nested inside the outer ZIP.</p>
           </div>
+          <CitationExport apa={apa} mla={mla} chicago={chicago} bibtex={bibtex} ris={ris} />
         </aside>
       </div>
     </article>
