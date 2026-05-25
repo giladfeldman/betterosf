@@ -1,11 +1,17 @@
 "use client";
 
-// PDF viewer placeholder using native browser iframe.
-// Will be upgraded to @react-pdf-viewer/core once dep install finishes.
+import { Worker, Viewer } from "@react-pdf-viewer/core";
+import { defaultLayoutPlugin } from "@react-pdf-viewer/default-layout";
+import "@react-pdf-viewer/core/lib/styles/index.css";
+import "@react-pdf-viewer/default-layout/lib/styles/index.css";
+
 export function PdfViewer({ url }: { url: string }) {
+  const layout = defaultLayoutPlugin();
   return (
     <div className="h-full">
-      <iframe src={url} className="w-full h-full border-0" title="PDF preview" />
+      <Worker workerUrl="https://unpkg.com/pdfjs-dist@5.7.284/build/pdf.worker.min.js">
+        <Viewer fileUrl={url} plugins={[layout]} />
+      </Worker>
     </div>
   );
 }
