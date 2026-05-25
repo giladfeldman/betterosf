@@ -4,6 +4,7 @@ import { SearchTypeChips, type SearchType } from "@/components/SearchTypeChips";
 import { ProjectResult, FileResult, RegistrationResult, UserResult } from "@/components/SearchResultRow";
 import { SearchSyntaxHelp } from "@/components/SearchSyntaxHelp";
 import { PageSizeSelector } from "@/components/PageSizeSelector";
+import { SortControl } from "@/components/SortControl";
 
 export const metadata = { title: "Search — BetterOSF" };
 
@@ -189,6 +190,24 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       {q ? (
         <div className="flex flex-wrap items-center gap-4 my-3">
           <PageSizeSelector prefKey="search" />
+          <SortControl
+            options={
+              type === "files"
+                ? [
+                    { value: "-date_modified", label: "Modified (newest)" },
+                    { value: "date_modified", label: "Modified (oldest)" },
+                    { value: "name", label: "Name (A–Z)" },
+                    { value: "-size", label: "Size (largest)" },
+                  ]
+                : [
+                    { value: "-date_modified", label: "Modified (newest)" },
+                    { value: "date_modified", label: "Modified (oldest)" },
+                    { value: "-date_created", label: "Created (newest)" },
+                    { value: "date_created", label: "Created (oldest)" },
+                    { value: "title", label: "Title (A–Z)" },
+                  ]
+            }
+          />
         </div>
       ) : null}
 
