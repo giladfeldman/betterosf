@@ -1,4 +1,4 @@
-import { searchNodes, searchFiles, searchRegistrations, searchUsers, searchInProjectScope } from "@/lib/osf/search";
+import { searchNodes, searchFiles, searchRegistrations, searchUsers, searchInProjectScope, type SearchPage as SearchPageResult } from "@/lib/osf/search";
 import { searchUserNodes } from "@/lib/osf/users";
 import { SearchTypeChips, type SearchType } from "@/components/SearchTypeChips";
 import { ProjectResult, FileResult, RegistrationResult, UserResult } from "@/components/SearchResultRow";
@@ -8,6 +8,37 @@ import { SortControl } from "@/components/SortControl";
 import { FilterChips } from "@/components/FilterChips";
 import { parseQuery } from "@/lib/search/parser";
 import { collectPositiveTerms } from "@/lib/search/highlight";
+import { OsfError } from "@/lib/osf/types";
+
+// Defensive runner: any OsfError (404 from OSF, rate limit, upstream 5xx) is
+// rendered as an empty page with a banner instead of crashing the whole search
+// route. Required because OSF sometimes 404s on legitimate filter queries
+// (especially /v2/files/ with certain filter values).
+async function safeSearch<T>(p: Promise<SearchPageResult<T>>): Promise<{ ok: true; data: SearchPageResult<T> } | { ok: false; reason: string }> {
+  try {
+    return { ok: true, data: await p };
+  } catch (e) {
+    if (e instanceof OsfError) {
+      return {
+        ok: false,
+        reason:
+          e.code === "not_found" ? "OSF returned no results for that query (or the endpoint isn't available for this query shape)."
+            : e.code === "forbidden" ? "Access to this OSF search endpoint is restricted."
+            : e.code === "rate_limited" ? "OSF rate limit hit. Try again in a moment."
+            : "OSF upstream error.",
+      };
+    }
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+function SearchError({ reason }: { reason: string }) {
+  return (
+    <div className="border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950 text-amber-900 dark:text-amber-100 rounded p-3 text-sm">
+      <strong>No results.</strong> {reason}
+    </div>
+  );
+}
 
 const EXT_GROUPS: Record<string, string[]> = {
   pdf: ["pdf"],
@@ -117,15 +148,15 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     body = <p className="text-neutral-600">Type a query above to search OSF.</p>;
   } else if (type === "projects" && isUserScope) {
     const userId = scope.slice("user:".length);
-    const out = await searchUserNodes(userId, q, { page, perPage, sort });
-    body = (
+    const result = await safeSearch(searchUserNodes(userId, q, { page, perPage, sort }));
+    body = result.ok ? (
       <>
-        <p className="text-sm text-neutral-600 mb-3">Showing {out.results.length} of {out.total} result{out.total === 1 ? "" : "s"}.</p>
-        <ul>{out.results.map((n) => <ProjectResult key={n.id} node={n} terms={terms} />)}</ul>
-        {out.results.length === 0 && <p className="text-neutral-500">No projects match.</p>}
-        <Pagination q={q} type="projects" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
+        <p className="text-sm text-neutral-600 mb-3">Showing {result.data.results.length} of {result.data.total} result{result.data.total === 1 ? "" : "s"}.</p>
+        <ul>{result.data.results.map((n) => <ProjectResult key={n.id} node={n} terms={terms} />)}</ul>
+        {result.data.results.length === 0 && <p className="text-neutral-500">No projects match.</p>}
+        <Pagination q={q} type="projects" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={result.data.hasMore} />
       </>
-    );
+    ) : <SearchError reason={result.reason} />;
   } else if (isProjectScope && (type === "projects" || type === "registrations")) {
     const guid = scope.slice("project:".length);
     const out = await searchInProjectScope(guid, q);
@@ -153,48 +184,52 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       </>
     );
   } else if (type === "projects") {
-    const out = await searchNodes(q, { page, perPage, sort });
-    body = (
+    const result = await safeSearch(searchNodes(q, { page, perPage, sort }));
+    body = result.ok ? (
       <>
-        <p className="text-sm text-neutral-600 mb-3">Showing {out.results.length} of {out.total} result{out.total === 1 ? "" : "s"}.</p>
-        <ul>{out.results.map((n) => <ProjectResult key={n.id} node={n} terms={terms} />)}</ul>
-        {out.results.length === 0 && <p className="text-neutral-500">No projects match.</p>}
-        <Pagination q={q} type="projects" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
+        <p className="text-sm text-neutral-600 mb-3">Showing {result.data.results.length} of {result.data.total} result{result.data.total === 1 ? "" : "s"}.</p>
+        <ul>{result.data.results.map((n) => <ProjectResult key={n.id} node={n} terms={terms} />)}</ul>
+        {result.data.results.length === 0 && <p className="text-neutral-500">No projects match.</p>}
+        <Pagination q={q} type="projects" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={result.data.hasMore} />
       </>
-    );
+    ) : <SearchError reason={result.reason} />;
   } else if (type === "files") {
-    const out = await searchFiles(q, { page, perPage, sort });
-    const filtered = ext ? out.results.filter((f) => matchesExt(f.name, ext)) : out.results;
-    body = (
-      <>
-        <p className="text-sm text-neutral-600 mb-3">
-          Showing {filtered.length}{ext ? ` filtered of ${out.results.length}` : ""} of {out.total} result{out.total === 1 ? "" : "s"}.
-        </p>
-        <ul>{filtered.map((f) => <FileResult key={f.id} file={f} terms={terms} />)}</ul>
-        {filtered.length === 0 && <p className="text-neutral-500">No files match.</p>}
-        <Pagination q={q} type="files" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
-      </>
-    );
+    const result = await safeSearch(searchFiles(q, { page, perPage, sort }));
+    if (result.ok) {
+      const filtered = ext ? result.data.results.filter((f) => matchesExt(f.name, ext)) : result.data.results;
+      body = (
+        <>
+          <p className="text-sm text-neutral-600 mb-3">
+            Showing {filtered.length}{ext ? ` filtered of ${result.data.results.length}` : ""} of {result.data.total} result{result.data.total === 1 ? "" : "s"}.
+          </p>
+          <ul>{filtered.map((f) => <FileResult key={f.id} file={f} terms={terms} />)}</ul>
+          {filtered.length === 0 && <p className="text-neutral-500">No files match.</p>}
+          <Pagination q={q} type="files" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={result.data.hasMore} />
+        </>
+      );
+    } else {
+      body = <SearchError reason={result.reason} />;
+    }
   } else if (type === "registrations") {
-    const out = await searchRegistrations(q, { page, perPage, sort });
-    body = (
+    const result = await safeSearch(searchRegistrations(q, { page, perPage, sort }));
+    body = result.ok ? (
       <>
-        <p className="text-sm text-neutral-600 mb-3">Showing {out.results.length} of {out.total} result{out.total === 1 ? "" : "s"}.</p>
-        <ul>{out.results.map((r) => <RegistrationResult key={r.id} reg={r} terms={terms} />)}</ul>
-        {out.results.length === 0 && <p className="text-neutral-500">No registrations match.</p>}
-        <Pagination q={q} type="registrations" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
+        <p className="text-sm text-neutral-600 mb-3">Showing {result.data.results.length} of {result.data.total} result{result.data.total === 1 ? "" : "s"}.</p>
+        <ul>{result.data.results.map((r) => <RegistrationResult key={r.id} reg={r} terms={terms} />)}</ul>
+        {result.data.results.length === 0 && <p className="text-neutral-500">No registrations match.</p>}
+        <Pagination q={q} type="registrations" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={result.data.hasMore} />
       </>
-    );
+    ) : <SearchError reason={result.reason} />;
   } else {
-    const out = await searchUsers(q, { page, perPage, sort });
-    body = (
+    const result = await safeSearch(searchUsers(q, { page, perPage, sort }));
+    body = result.ok ? (
       <>
-        <p className="text-sm text-neutral-600 mb-3">Showing {out.results.length} of {out.total} result{out.total === 1 ? "" : "s"}.</p>
-        <ul>{out.results.map((u) => <UserResult key={u.id} user={u} terms={terms} />)}</ul>
-        {out.results.length === 0 && <p className="text-neutral-500">No users match.</p>}
-        <Pagination q={q} type="users" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
+        <p className="text-sm text-neutral-600 mb-3">Showing {result.data.results.length} of {result.data.total} result{result.data.total === 1 ? "" : "s"}.</p>
+        <ul>{result.data.results.map((u) => <UserResult key={u.id} user={u} terms={terms} />)}</ul>
+        {result.data.results.length === 0 && <p className="text-neutral-500">No users match.</p>}
+        <Pagination q={q} type="users" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={result.data.hasMore} />
       </>
-    );
+    ) : <SearchError reason={result.reason} />;
   }
 
   return (
