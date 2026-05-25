@@ -1,0 +1,99 @@
+import { notFound } from "next/navigation";
+import { isValidGuid } from "@/lib/osf/guid";
+import { getProviderRoots, getFolderContents, type FileEntry } from "@/lib/osf/files";
+import { getNode, getAllChildren, getAllLinkedNodes } from "@/lib/osf/nodes";
+import { getNodeRegistrations } from "@/lib/osf/registrations";
+import { collectFolderSkeleton } from "@/lib/osf/folder-skeleton";
+import { OsfError } from "@/lib/osf/types";
+import { Breadcrumb } from "@/components/Breadcrumb";
+import { UnifiedTree } from "@/components/UnifiedTree";
+import { SplitPane } from "@/components/SplitPane";
+import { ViewerDispatcher } from "@/components/viewers/Dispatcher";
+
+export default async function FileViewerPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ guid: string; path: string[] }>;
+  searchParams: Promise<{ force?: string }>;
+}) {
+  const { guid, path } = await params;
+  const { force } = await searchParams;
+  if (!isValidGuid(guid)) notFound();
+  if (path.length < 2) notFound();
+
+  const [provider, ...rest] = path;
+  if (!provider) notFound();
+  const filename = rest[rest.length - 1] ?? "";
+  const folderSegments = rest.slice(0, -1);
+
+  let node, providers, skeleton, components, linked, registrations;
+  try {
+    [node, providers, skeleton, components, linked, registrations] = await Promise.all([
+      getNode(guid),
+      getProviderRoots(guid),
+      collectFolderSkeleton(guid),
+      getAllChildren(guid),
+      getAllLinkedNodes(guid),
+      getNodeRegistrations(guid),
+    ]);
+  } catch (e) {
+    if (e instanceof OsfError && e.code === "not_found") notFound();
+    throw e;
+  }
+
+  const providerMatch = providers.find((p) => p.provider === provider);
+  if (!providerMatch) notFound();
+
+  let listingUrl = providerMatch.listingUrl;
+  let entries: FileEntry[] = await getFolderContents(listingUrl, guid);
+  for (const seg of folderSegments) {
+    const next = entries.find((e) => e.kind === "folder" && e.name === seg);
+    if (!next || next.kind !== "folder") notFound();
+    listingUrl = next.listingUrl;
+    entries = await getFolderContents(listingUrl, guid);
+  }
+  const file = entries.find((e) => e.kind === "file" && e.name === filename);
+  if (!file || file.kind !== "file") notFound();
+
+  return (
+    <div>
+      <Breadcrumb
+        crumbs={[
+          { label: "Home", href: "/" },
+          { label: node.title || guid, href: `/${guid}` },
+          { label: "Files", href: `/${guid}/files` },
+          { label: provider, href: `/${guid}/files/${provider}` },
+          ...folderSegments.map((seg, i) => ({
+            label: seg,
+            href: `/${guid}/files/${provider}/${folderSegments.slice(0, i + 1).join("/")}`,
+          })),
+          { label: filename, href: `/${guid}/files/${provider}/${rest.join("/")}/view` },
+        ]}
+      />
+      <SplitPane
+        prefKey="files"
+        defaultLeftWidth={360}
+        left={
+          <UnifiedTree
+            guid={guid}
+            rootTitle={node.title || guid}
+            skeleton={skeleton}
+            components={components}
+            linkedNodes={linked}
+            registrations={registrations}
+            pinned={[]}
+          />
+        }
+        right={
+          <ViewerDispatcher
+            filename={filename}
+            url={file.downloadUrl}
+            sizeBytes={file.size}
+            forceOpen={force === "1"}
+          />
+        }
+      />
+    </div>
+  );
+}
