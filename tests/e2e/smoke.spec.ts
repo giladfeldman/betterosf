@@ -103,13 +103,20 @@ test("files page shows unified tree with all-folders-expanded", async ({ page })
   await expect(page.getByRole("button", { name: /expand all/i })).toBeVisible();
 });
 
-test("dark mode toggle cycles and persists", async ({ page }) => {
+test("theme segmented control cycles through Light/System/Dark and updates <html> class", async ({ page }) => {
   await page.goto("/");
-  const toggle = page.getByRole("button", { name: /Theme:/i });
-  await expect(toggle).toBeVisible();
-  await toggle.click();
-  await toggle.click();
-  // After two clicks from "system" we're at light or dark — just confirm class is set on <html>
+  const radiogroup = page.getByRole("radiogroup", { name: /theme/i });
+  await expect(radiogroup).toBeVisible();
+  // Three radios with accessible names "Light theme" / "System theme" / "Dark theme"
+  const light = radiogroup.getByRole("radio", { name: /light theme/i });
+  const dark = radiogroup.getByRole("radio", { name: /dark theme/i });
+  const system = radiogroup.getByRole("radio", { name: /system theme/i });
+  await dark.click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await light.click();
+  await expect(page.locator("html")).toHaveClass(/light/);
+  await system.click();
+  // System mode delegates to OS preference; class is either 'light' or 'dark'
   const cls = await page.locator("html").getAttribute("class");
   expect(cls).toMatch(/(light|dark)/);
 });
@@ -171,4 +178,55 @@ test("citation export renders 5 formats", async ({ page }) => {
   await expect(page.getByText(/^APA$/)).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/^BibTeX$/)).toBeVisible();
   await expect(page.getByText(/^RIS$/)).toBeVisible();
+});
+
+test("folder left-click expands inline without navigating away", async ({ page }) => {
+  await page.goto(`/${PUBLIC_GUID}/files`);
+  await expect(page.locator('[role="tree"]')).toBeVisible({ timeout: 20_000 });
+  // Find the first folder-kind anchor inside the tree
+  const folderLink = page.locator('[role="tree"] a[href*="/files/osfstorage/"]').first();
+  await expect(folderLink).toBeVisible({ timeout: 15_000 });
+  const beforeUrl = page.url();
+  await folderLink.click();
+  // URL stays on /files — the click was intercepted to toggle expansion
+  expect(page.url()).toBe(beforeUrl);
+  // The aria-expanded state of the row flipped to true
+  const treeitem = folderLink.locator('xpath=ancestor::*[@role="treeitem"][1]');
+  await expect(treeitem).toHaveAttribute("aria-expanded", "true", { timeout: 5_000 });
+});
+
+test("right-click target on a folder is a real anchor (open-in-new-tab works)", async ({ page }) => {
+  await page.goto(`/${PUBLIC_GUID}/files`);
+  await expect(page.locator('[role="tree"]')).toBeVisible({ timeout: 20_000 });
+  const folderLink = page.locator('[role="tree"] a[href*="/files/osfstorage/"]').first();
+  await expect(folderLink).toBeVisible({ timeout: 15_000 });
+  // Anchor has a real href — browser context menu can offer "Open in new tab"
+  const href = await folderLink.getAttribute("href");
+  expect(href).toMatch(/^\/8cd4r\/files\/osfstorage\//);
+  // And the anchor is tag-A (no client-side button substitute)
+  await expect(folderLink).toHaveJSProperty("tagName", "A");
+});
+
+test("Expand all reveals more rows than the initial state", async ({ page }) => {
+  await page.goto(`/${PUBLIC_GUID}/files`);
+  await expect(page.locator('[role="tree"]')).toBeVisible({ timeout: 20_000 });
+  // Collapse first so we have a low baseline
+  await page.getByRole("button", { name: /collapse all/i }).click();
+  const baseline = await page.locator('[role="treeitem"]').count();
+  await page.getByRole("button", { name: /expand all/i }).click();
+  // After a short tick, the row count should be strictly greater than baseline
+  await expect.poll(async () => page.locator('[role="treeitem"]').count(), { timeout: 5_000 }).toBeGreaterThan(baseline);
+});
+
+test("search highlights matched keywords with <mark> in result rows", async ({ page }) => {
+  test.setTimeout(30_000);
+  await page.goto("/search?q=replication&type=projects");
+  // Wait for at least one result anchor or the explicit empty-state
+  await page.waitForSelector("a[href^='/']", { timeout: 15_000 }).catch(() => undefined);
+  // At least one <mark> should appear somewhere in the result rows
+  const marks = page.locator("mark");
+  await expect.poll(async () => marks.count(), { timeout: 10_000 }).toBeGreaterThan(0);
+  // And the matched text is the keyword (case-insensitive)
+  const firstMarkText = (await marks.first().textContent())?.toLowerCase() ?? "";
+  expect(firstMarkText).toContain("replication");
 });
