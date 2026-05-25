@@ -28,3 +28,30 @@ html, body { font-family: ui-sans-serif, system-ui, sans-serif; }
 @media (forced-colors: active) {
   a, button { forced-color-adjust: none; }
 }
+
+/* Print stylesheet — archival snapshots */
+@media print {
+  header, footer, nav, [role="separator"], [role="tree"] {
+    display: none !important;
+  }
+  main, article {
+    max-width: 100% !important;
+    padding: 0 !important;
+  }
+  a {
+    text-decoration: underline !important;
+    color: black !important;
+  }
+  /* Print URLs after links */
+  a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 80%;
+  }
+  /* Expand all detail/summary for archival snapshots */
+  details {
+    page-break-inside: avoid;
+  }
+  details > * {
+    display: block !important;
+  }
+}
