@@ -70,7 +70,7 @@ export default async function FileViewerPage({
             label: seg,
             href: `/${guid}/files/${provider}/${folderSegments.slice(0, i + 1).join("/")}`,
           })),
-          { label: filename, href: `/${guid}/files/${provider}/${rest.join("/")}/view` },
+          { label: filename, href: `/${guid}/files/view/${provider}/${rest.join("/")}` },
         ]}
       />
       <div className="flex items-center justify-between gap-3 mb-3">

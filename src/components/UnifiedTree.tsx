@@ -95,12 +95,19 @@ export function UnifiedTree({
       });
       if (expanded["pinned-root"]) {
         for (const p of pinned) {
-          const href =
-            p.kind === "registration"
-              ? `/registrations/${p.id}`
-              : p.kind === "file"
-              ? `/${p.id}/view`
+          // Files pin id is `${guid}/${provider}/${...rest}` (set in viewer page).
+          // Reformat to `/${guid}/files/view/${provider}/${...rest}` to match the new route.
+          let href: string;
+          if (p.kind === "registration") {
+            href = `/registrations/${p.id}`;
+          } else if (p.kind === "file") {
+            const firstSlash = p.id.indexOf("/");
+            href = firstSlash > 0
+              ? `/${p.id.slice(0, firstSlash)}/files/view/${p.id.slice(firstSlash + 1)}`
               : `/${p.id}`;
+          } else {
+            href = `/${p.id}`;
+          }
           rows.push({
             id: `pinned/${p.kind}/${p.id}`, depth: 1, expanded: false, hasChildren: false,
             onToggle: () => {},
@@ -151,7 +158,7 @@ export function UnifiedTree({
                 rows.push({
                   id: `${id}/${f.name}`, depth: depth + 1, expanded: false, hasChildren: false,
                   onToggle: () => {},
-                  node: { id: f.id, label: f.name, kind: "file", href: `/${guid}/files/${folder.provider}${folder.materializedPath}${f.name}/view`, newTab: true, size: f.kind === "file" ? f.size : null, modified: f.kind === "file" ? f.modified : undefined },
+                  node: { id: f.id, label: f.name, kind: "file", href: `/${guid}/files/view/${folder.provider}${folder.materializedPath}${f.name}`, newTab: true, size: f.kind === "file" ? f.size : null, modified: f.kind === "file" ? f.modified : undefined },
                 });
               }
             }
@@ -163,7 +170,7 @@ export function UnifiedTree({
             rows.push({
               id: `provider:${provider.provider}/${f.name}`, depth: 2, expanded: false, hasChildren: false,
               onToggle: () => {},
-              node: { id: f.id, label: f.name, kind: "file", href: `/${guid}/files/${provider.provider}/${f.name}/view`, newTab: true, size: f.kind === "file" ? f.size : null },
+              node: { id: f.id, label: f.name, kind: "file", href: `/${guid}/files/view/${provider.provider}/${f.name}`, newTab: true, size: f.kind === "file" ? f.size : null },
             });
           }
         }

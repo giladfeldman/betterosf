@@ -118,11 +118,11 @@ test("file view route renders viewer for a markdown file", async ({ page }) => {
   // Many Labs 2 has a Readme.md or similar — find any .md in osfstorage; fallback to deep listing
   await page.goto(`/${PUBLIC_GUID}/files/osfstorage`);
   // Heuristic: click first .md link if present; otherwise skip
-  const mdLink = page.locator('a[href*=".md/view"]').first();
+  const mdLink = page.locator('a[href*="/files/view/"][href$=".md"]').first();
   const has = await mdLink.count();
   if (has > 0) {
     await mdLink.click();
-    await expect(page).toHaveURL(/\.md\/view$/);
+    await expect(page).toHaveURL(/\/files\/view\/.*\.md$/);
     // Markdown viewer renders an <article>
     await expect(page.locator("article")).toBeVisible({ timeout: 15_000 });
   }
