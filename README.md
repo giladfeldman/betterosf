@@ -80,8 +80,19 @@ After this release, **provision Vercel KV** at https://vercel.com/your-team/bett
 - Per-page-size selector (10/20/50/100/200/All, default 50) with sticky preference per surface.
 - Sort and filter controls on every paginated list. State syncs to URL — share/refresh-safe.
 
+## v0.8.0 (Plan 8: Favorites + Polish) — what's new
+
+- **Pin** any project, file, or registration; **recently viewed** auto-tracked. Both surface on the landing page and your /me dashboard.
+- **Pinned section** in the unified file tree shows your pins as the top root.
+- **Compare two registrations** side-by-side at `/registrations/compare?a=<g1>&b=<g2>` — differences highlighted.
+- **Citation export** in APA / MLA / Chicago / BibTeX / RIS with copy-to-clipboard, on every project page.
+- **Print stylesheet** for archival snapshots — hides nav/footer, expands content, shows URLs after links.
+- **Accessibility polish:** skip-to-content link, reduced-motion + high-contrast media queries, focus-visible rings everywhere.
+- **Perf:** preconnect to `api.osf.io` + `files.osf.io` to speed up first contentful paint.
+
 ## Not yet — possible future work
 
 - Full-text search inside file contents
 - OAuth refresh-token flow (currently relies on OSF's token expiry schedule)
+- Cross-device favorites sync (currently localStorage only)
 - Pool of multiple OSF app tokens for higher anonymous quota

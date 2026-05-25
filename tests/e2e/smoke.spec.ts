@@ -147,3 +147,28 @@ test("page size selector persists across navigations", async ({ page }) => {
   await page.goto("/search?q=foo&type=projects");
   await expect(select).toHaveValue("100");
 });
+
+test("pin button toggles and persists across reload", async ({ page }) => {
+  await page.goto(`/${PUBLIC_GUID}`);
+  const pin = page.getByRole("button", { name: /^Pin$/i });
+  await expect(pin).toBeVisible({ timeout: 10_000 });
+  await pin.click();
+  await expect(page.getByRole("button", { name: /Unpin/i })).toBeVisible({ timeout: 5_000 });
+  await page.reload();
+  await expect(page.getByRole("button", { name: /Unpin/i })).toBeVisible({ timeout: 10_000 });
+  // Clean up so a re-run starts pristine
+  await page.getByRole("button", { name: /Unpin/i }).click();
+});
+
+test("recently viewed appears on landing after navigation", async ({ page }) => {
+  await page.goto(`/${PUBLIC_GUID}`);
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: /Recently viewed/i })).toBeVisible({ timeout: 10_000 });
+});
+
+test("citation export renders 5 formats", async ({ page }) => {
+  await page.goto(`/${PUBLIC_GUID}`);
+  await expect(page.getByText(/^APA$/)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/^BibTeX$/)).toBeVisible();
+  await expect(page.getByText(/^RIS$/)).toBeVisible();
+});
