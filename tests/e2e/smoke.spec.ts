@@ -127,3 +127,23 @@ test("file view route renders viewer for a markdown file", async ({ page }) => {
     await expect(page.locator("article")).toBeVisible({ timeout: 15_000 });
   }
 });
+
+test("search supports OR syntax", async ({ page }) => {
+  await page.goto("/search?q=replication%20OR%20meta-analysis&type=projects");
+  await expect(page.getByText(/Showing/i)).toBeVisible({ timeout: 15_000 });
+});
+
+test("search syntax help popover toggles", async ({ page }) => {
+  await page.goto("/search?q=test");
+  await page.getByRole("button", { name: /search syntax help/i }).click();
+  await expect(page.getByText(/AND is default/i)).toBeVisible();
+});
+
+test("page size selector persists across navigations", async ({ page }) => {
+  await page.goto("/search?q=replication&type=projects");
+  const select = page.getByLabel(/per page/i);
+  await select.selectOption("100");
+  await page.waitForURL(/size=100/);
+  await page.goto("/search?q=foo&type=projects");
+  await expect(select).toHaveValue("100");
+});

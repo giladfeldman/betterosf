@@ -72,6 +72,14 @@ After this release, **provision Vercel KV** at https://vercel.com/your-team/bett
 - **Resizable split pane** on files pages (drag handle, width persisted).
 - **Breadcrumbs always show parent context** — sticky at top of right pane, truncates with `…` for very deep paths, every segment a real anchor.
 
+## v0.7.0 (Plan 7: Search overhaul + list controls) — what's new
+
+- Google-style query syntax: AND (default between tokens), `OR` (uppercase), `"quoted phrases"`, `-exclusions`, parens for grouping.
+- Help popover (`?` icon) next to the search box documenting syntax.
+- Scope-restricted search: `/search?scope=user:me` (your projects) or `?scope=project:<guid>` (within a project's components/linked/registrations).
+- Per-page-size selector (10/20/50/100/200/All, default 50) with sticky preference per surface.
+- Sort and filter controls on every paginated list. State syncs to URL — share/refresh-safe.
+
 ## Not yet — possible future work
 
 - Full-text search inside file contents
