@@ -6,6 +6,8 @@ import { SearchSyntaxHelp } from "@/components/SearchSyntaxHelp";
 import { PageSizeSelector } from "@/components/PageSizeSelector";
 import { SortControl } from "@/components/SortControl";
 import { FilterChips } from "@/components/FilterChips";
+import { parseQuery } from "@/lib/search/parser";
+import { collectPositiveTerms } from "@/lib/search/highlight";
 
 const EXT_GROUPS: Record<string, string[]> = {
   pdf: ["pdf"],
@@ -106,6 +108,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const sort = first(sp.sort) || undefined;
   const ext = first(sp.ext);
 
+  // Positive terms extracted from the parsed query — used to highlight matches
+  // in result rows so users see WHY each result came back.
+  const terms = q ? collectPositiveTerms(parseQuery(q)) : [];
+
   let body: React.ReactNode = null;
   if (!q) {
     body = <p className="text-neutral-600">Type a query above to search OSF.</p>;
@@ -115,7 +121,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     body = (
       <>
         <p className="text-sm text-neutral-600 mb-3">Showing {out.results.length} of {out.total} result{out.total === 1 ? "" : "s"}.</p>
-        <ul>{out.results.map((n) => <ProjectResult key={n.id} node={n} />)}</ul>
+        <ul>{out.results.map((n) => <ProjectResult key={n.id} node={n} terms={terms} />)}</ul>
         {out.results.length === 0 && <p className="text-neutral-500">No projects match.</p>}
         <Pagination q={q} type="projects" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
       </>
@@ -131,16 +137,16 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
         {type === "projects" && (
           <>
             <h2 className="text-lg font-semibold mt-4 mb-2">Components</h2>
-            <ul>{out.components.map((n) => <ProjectResult key={n.id} node={n} />)}</ul>
+            <ul>{out.components.map((n) => <ProjectResult key={n.id} node={n} terms={terms} />)}</ul>
             {out.components.length === 0 && <p className="text-neutral-500">No components match.</p>}
             <h2 className="text-lg font-semibold mt-4 mb-2">Linked projects</h2>
-            <ul>{out.linked.map((n) => <ProjectResult key={n.id} node={n} />)}</ul>
+            <ul>{out.linked.map((n) => <ProjectResult key={n.id} node={n} terms={terms} />)}</ul>
             {out.linked.length === 0 && <p className="text-neutral-500">No linked projects match.</p>}
           </>
         )}
         {type === "registrations" && (
           <>
-            <ul>{out.registrations.map((r) => <RegistrationResult key={r.id} reg={r} />)}</ul>
+            <ul>{out.registrations.map((r) => <RegistrationResult key={r.id} reg={r} terms={terms} />)}</ul>
             {out.registrations.length === 0 && <p className="text-neutral-500">No registrations match.</p>}
           </>
         )}
@@ -151,7 +157,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     body = (
       <>
         <p className="text-sm text-neutral-600 mb-3">Showing {out.results.length} of {out.total} result{out.total === 1 ? "" : "s"}.</p>
-        <ul>{out.results.map((n) => <ProjectResult key={n.id} node={n} />)}</ul>
+        <ul>{out.results.map((n) => <ProjectResult key={n.id} node={n} terms={terms} />)}</ul>
         {out.results.length === 0 && <p className="text-neutral-500">No projects match.</p>}
         <Pagination q={q} type="projects" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
       </>
@@ -164,7 +170,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
         <p className="text-sm text-neutral-600 mb-3">
           Showing {filtered.length}{ext ? ` filtered of ${out.results.length}` : ""} of {out.total} result{out.total === 1 ? "" : "s"}.
         </p>
-        <ul>{filtered.map((f) => <FileResult key={f.id} file={f} />)}</ul>
+        <ul>{filtered.map((f) => <FileResult key={f.id} file={f} terms={terms} />)}</ul>
         {filtered.length === 0 && <p className="text-neutral-500">No files match.</p>}
         <Pagination q={q} type="files" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
       </>
@@ -174,7 +180,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     body = (
       <>
         <p className="text-sm text-neutral-600 mb-3">Showing {out.results.length} of {out.total} result{out.total === 1 ? "" : "s"}.</p>
-        <ul>{out.results.map((r) => <RegistrationResult key={r.id} reg={r} />)}</ul>
+        <ul>{out.results.map((r) => <RegistrationResult key={r.id} reg={r} terms={terms} />)}</ul>
         {out.results.length === 0 && <p className="text-neutral-500">No registrations match.</p>}
         <Pagination q={q} type="registrations" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
       </>
@@ -184,7 +190,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     body = (
       <>
         <p className="text-sm text-neutral-600 mb-3">Showing {out.results.length} of {out.total} result{out.total === 1 ? "" : "s"}.</p>
-        <ul>{out.results.map((u) => <UserResult key={u.id} user={u} />)}</ul>
+        <ul>{out.results.map((u) => <UserResult key={u.id} user={u} terms={terms} />)}</ul>
         {out.results.length === 0 && <p className="text-neutral-500">No users match.</p>}
         <Pagination q={q} type="users" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
       </>
