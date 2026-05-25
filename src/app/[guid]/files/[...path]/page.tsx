@@ -1,8 +1,18 @@
 import { notFound } from "next/navigation";
 import { isValidGuid } from "@/lib/osf/guid";
 import { getProviderRoots, getFolderContents, type FileEntry } from "@/lib/osf/files";
+import { getNode } from "@/lib/osf/nodes";
 import { OsfError } from "@/lib/osf/types";
 import { Breadcrumb } from "@/components/Breadcrumb";
+
+function formatSize(bytes: number | null): string {
+  if (bytes == null) return "";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let n = bytes;
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i += 1; }
+  return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
 
 export default async function DeepFilesPage({
   params,
@@ -19,9 +29,12 @@ export default async function DeepFilesPage({
 
   const [provider, ...folderSegments] = path;
 
-  let providers;
+  let providers, node;
   try {
-    providers = await getProviderRoots(guid);
+    [providers, node] = await Promise.all([
+      getProviderRoots(guid),
+      getNode(guid).catch(() => null),
+    ]);
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") notFound();
     throw e;
@@ -46,8 +59,9 @@ export default async function DeepFilesPage({
       <Breadcrumb
         crumbs={[
           { label: "Home", href: "/" },
-          { label: guid, href: `/${guid}` },
+          { label: node?.title || guid, href: `/${guid}` },
           { label: "Files", href: `/${guid}/files` },
+          { label: provider!, href: `/${guid}/files/${provider}` },
           ...folderSegments.map((seg, i) => ({
             label: seg,
             href: `/${guid}/files/${provider}/${folderSegments.slice(0, i + 1).join("/")}`,
@@ -79,7 +93,7 @@ export default async function DeepFilesPage({
               </a>
             )}
             {entry.kind === "file" && entry.size !== null && (
-              <span className="text-xs text-neutral-500">{entry.size} B</span>
+              <span className="text-xs text-neutral-500">{formatSize(entry.size)}</span>
             )}
           </li>
         ))}

@@ -23,13 +23,25 @@ export function CitationExport({
     setTimeout(() => setCopied(null), 1500);
   };
 
+  // Only show formats that actually have content — empty cells with "Not
+  // available" looked broken in production. OSF sometimes returns 200 with
+  // empty body for MLA/Chicago on projects without contributor metadata.
   const formats: Array<{ label: string; value: string }> = [
     { label: "APA", value: apa },
     { label: "MLA", value: mla },
     { label: "Chicago", value: chicago },
     { label: "BibTeX", value: bibtex },
     { label: "RIS", value: ris },
-  ];
+  ].filter((f) => f.value.trim().length > 0);
+
+  if (formats.length === 0) {
+    return (
+      <section className="mt-6">
+        <h3 className="font-semibold mb-2">Cite this</h3>
+        <p className="text-xs text-neutral-500">No citation metadata available from OSF for this project.</p>
+      </section>
+    );
+  }
 
   return (
     <section className="mt-6">
@@ -43,14 +55,11 @@ export function CitationExport({
                 type="button"
                 onClick={() => copy(f.label, f.value)}
                 className="text-xs border rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                disabled={!f.value}
               >
                 {copied === f.label ? "Copied!" : "Copy"}
               </button>
             </div>
-            <pre className="text-xs whitespace-pre-wrap font-mono">
-              {f.value || <span className="text-neutral-500">Not available.</span>}
-            </pre>
+            <pre className="text-xs whitespace-pre-wrap font-mono">{f.value}</pre>
           </li>
         ))}
       </ul>

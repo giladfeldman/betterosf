@@ -12,8 +12,9 @@ export default function Landing() {
       </div>
       <h2 className="text-xl font-semibold mt-12 mb-2">Examples</h2>
       <ul className="space-y-1 text-blue-600">
-        <li><a className="hover:underline" href="/ezcuj">Many Labs 2 (ezcuj)</a></li>
-        <li><a className="hover:underline" href="/4znzp">4znzp</a></li>
+        <li><a className="hover:underline" href="/8cd4r">Many Labs 2 (8cd4r)</a></li>
+        <li><a className="hover:underline" href="/ezcuj">Reproducibility Project: Psychology (ezcuj)</a></li>
+        <li><a className="hover:underline" href="/3kmr9">Revisiting celebrity contagion (3kmr9)</a></li>
       </ul>
     </div>
   );
