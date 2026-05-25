@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { isValidGuid } from "@/lib/osf/guid";
-import { collectFolderSkeleton } from "@/lib/osf/folder-skeleton";
-import { getNode, getAllChildren, getAllLinkedNodes } from "@/lib/osf/nodes";
+import { collectFullTree } from "@/lib/osf/full-tree";
+import { getNode, getAllLinkedNodes } from "@/lib/osf/nodes";
 import { getNodeRegistrations } from "@/lib/osf/registrations";
 import { OsfError } from "@/lib/osf/types";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -12,12 +12,11 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
   const { guid } = await params;
   if (!isValidGuid(guid)) notFound();
 
-  let node, skeleton, components, linked, registrations;
+  let node, fullTree, linked, registrations;
   try {
-    [node, skeleton, components, linked, registrations] = await Promise.all([
+    [node, fullTree, linked, registrations] = await Promise.all([
       getNode(guid),
-      collectFolderSkeleton(guid),
-      getAllChildren(guid),
+      collectFullTree(guid),
       getAllLinkedNodes(guid),
       getNodeRegistrations(guid),
     ]);
@@ -25,6 +24,19 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
     if (e instanceof OsfError && e.code === "not_found") notFound();
     throw e;
   }
+
+  const components = fullTree.components.map((c) => ({
+    id: c.guid,
+    title: c.title,
+    description: "",
+    category: c.category,
+    public: c.isPublic,
+    tags: [] as string[],
+    dateCreated: "",
+    dateModified: "",
+    osfUrl: `https://osf.io/${c.guid}/`,
+    related: { children: "", linkedNodes: "", registrations: "", files: "", contributors: "" },
+  }));
 
   return (
     <div>
@@ -42,8 +54,9 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
           <UnifiedTree
             guid={guid}
             rootTitle={node.title || guid}
-            skeleton={skeleton}
+            skeleton={fullTree.rootSkeleton}
             components={components}
+            componentTrees={fullTree.components}
             linkedNodes={linked}
             registrations={registrations}
           />

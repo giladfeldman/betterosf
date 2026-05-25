@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
 import { isValidGuid } from "@/lib/osf/guid";
 import { getProviderRoots, getFolderContents, type FileEntry } from "@/lib/osf/files";
-import { getNode, getAllChildren, getAllLinkedNodes } from "@/lib/osf/nodes";
+import { getNode, getAllLinkedNodes } from "@/lib/osf/nodes";
 import { getNodeRegistrations } from "@/lib/osf/registrations";
-import { collectFolderSkeleton } from "@/lib/osf/folder-skeleton";
+import { collectFullTree } from "@/lib/osf/full-tree";
 import { OsfError } from "@/lib/osf/types";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { UnifiedTree } from "@/components/UnifiedTree";
@@ -29,13 +29,12 @@ export default async function FileViewerPage({
   const filename = rest[rest.length - 1] ?? "";
   const folderSegments = rest.slice(0, -1);
 
-  let node, providers, skeleton, components, linked, registrations;
+  let node, providers, fullTree, linked, registrations;
   try {
-    [node, providers, skeleton, components, linked, registrations] = await Promise.all([
+    [node, providers, fullTree, linked, registrations] = await Promise.all([
       getNode(guid),
       getProviderRoots(guid),
-      collectFolderSkeleton(guid),
-      getAllChildren(guid),
+      collectFullTree(guid),
       getAllLinkedNodes(guid),
       getNodeRegistrations(guid),
     ]);
@@ -43,6 +42,19 @@ export default async function FileViewerPage({
     if (e instanceof OsfError && e.code === "not_found") notFound();
     throw e;
   }
+
+  const components = fullTree.components.map((c) => ({
+    id: c.guid,
+    title: c.title,
+    description: "",
+    category: c.category,
+    public: c.isPublic,
+    tags: [] as string[],
+    dateCreated: "",
+    dateModified: "",
+    osfUrl: `https://osf.io/${c.guid}/`,
+    related: { children: "", linkedNodes: "", registrations: "", files: "", contributors: "" },
+  }));
 
   const providerMatch = providers.find((p) => p.provider === provider);
   if (!providerMatch) notFound();
@@ -85,8 +97,9 @@ export default async function FileViewerPage({
           <UnifiedTree
             guid={guid}
             rootTitle={node.title || guid}
-            skeleton={skeleton}
+            skeleton={fullTree.rootSkeleton}
             components={components}
+            componentTrees={fullTree.components}
             linkedNodes={linked}
             registrations={registrations}
           />

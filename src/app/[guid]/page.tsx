@@ -1,31 +1,17 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { isValidGuid } from "@/lib/osf/guid";
-import { getNode, getAllChildren, getAllLinkedNodes } from "@/lib/osf/nodes";
+import { getNode, getAllLinkedNodes } from "@/lib/osf/nodes";
 import { getNodeRegistrations } from "@/lib/osf/registrations";
+import { collectFullTree } from "@/lib/osf/full-tree";
 import { OsfError } from "@/lib/osf/types";
 import { Breadcrumb } from "@/components/Breadcrumb";
-import { FilterChips } from "@/components/FilterChips";
-import { SortControl } from "@/components/SortControl";
 import { PinButton } from "@/components/PinButton";
 import { RecordView } from "@/components/RecordView";
 import { CitationExport } from "@/components/CitationExport";
 import { getCitation, getStyledCitation, toBibTeX, toRIS } from "@/lib/osf/citation";
-
-const COMPONENT_CATEGORIES = [
-  "project",
-  "hypothesis",
-  "data",
-  "analysis",
-  "methods and measures",
-  "software",
-  "instrumentation",
-  "other",
-] as const;
-
-function first(v: string | string[] | undefined, fallback = ""): string {
-  return Array.isArray(v) ? v[0] ?? fallback : v ?? fallback;
-}
+import { SplitPane } from "@/components/SplitPane";
+import { UnifiedTree } from "@/components/UnifiedTree";
 
 export async function generateMetadata({
   params,
@@ -50,24 +36,15 @@ export async function generateMetadata({
   }
 }
 
-export default async function ProjectPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ guid: string }>;
-  searchParams?: Promise<{ compSort?: string | string[]; compCategory?: string | string[] }>;
-}) {
+export default async function ProjectPage({ params }: { params: Promise<{ guid: string }> }) {
   const { guid } = await params;
   if (!isValidGuid(guid)) notFound();
-  const sp = (await searchParams) ?? {};
-  const compSort = first(sp.compSort);
-  const compCategory = first(sp.compCategory);
 
-  let node, children, linked, regs;
+  let node, fullTree, linked, regs;
   try {
-    [node, children, linked, regs] = await Promise.all([
+    [node, fullTree, linked, regs] = await Promise.all([
       getNode(guid),
-      getAllChildren(guid),
+      collectFullTree(guid),
       getAllLinkedNodes(guid),
       getNodeRegistrations(guid),
     ]);
@@ -75,6 +52,21 @@ export default async function ProjectPage({
     if (e instanceof OsfError && e.code === "not_found") notFound();
     throw e;
   }
+
+  // Build NodeView-shaped list from componentTrees so the tree's `components` prop
+  // (used for the leaf-fallback rendering AND the count) matches the recursed set.
+  const components = fullTree.components.map((c) => ({
+    id: c.guid,
+    title: c.title,
+    description: "",
+    category: c.category,
+    public: c.isPublic,
+    tags: [] as string[],
+    dateCreated: "",
+    dateModified: "",
+    osfUrl: `https://osf.io/${c.guid}/`,
+    related: { children: "", linkedNodes: "", registrations: "", files: "", contributors: "" },
+  }));
 
   const citation = await getCitation(guid).catch(() => null);
   const [apa, mla, chicago] = await Promise.all([
@@ -85,33 +77,17 @@ export default async function ProjectPage({
   const bibtex = citation ? toBibTeX(citation, guid) : "";
   const ris = citation ? toRIS(citation, guid) : "";
 
-  // Filter
-  let filteredChildren = children;
-  if (compCategory && compCategory !== "all") {
-    filteredChildren = filteredChildren.filter((c) => (c.category ?? "").toLowerCase() === compCategory.toLowerCase());
-  }
+  const cappedNote =
+    fullTree.totalComponents > fullTree.components.filter((c) => !c.skipped).length
+      ? `Showing ${fullTree.components.filter((c) => !c.skipped).length} of ${fullTree.totalComponents} components with full sub-trees (cap = ${fullTree.components.filter((c) => !c.skipped).length}); the rest appear as collapsed links — click to drill in.`
+      : null;
 
-  // Sort
-  if (compSort) {
-    const desc = compSort.startsWith("-");
-    const key = desc ? compSort.slice(1) : compSort;
-    filteredChildren = [...filteredChildren].sort((a, b) => {
-      let av = "", bv = "";
-      if (key === "title") { av = a.title ?? ""; bv = b.title ?? ""; }
-      else if (key === "date_modified") { av = a.dateModified ?? ""; bv = b.dateModified ?? ""; }
-      else if (key === "date_created") { av = a.dateCreated ?? ""; bv = b.dateCreated ?? ""; }
-      const cmp = av.localeCompare(bv);
-      return desc ? -cmp : cmp;
-    });
-  }
-
-  return (
-    <article className="max-w-5xl">
-      <Breadcrumb crumbs={[{ label: "Home", href: "/" }, { label: node.title || guid, href: `/${guid}` }]} />
+  const overviewRight = (
+    <article className="px-6 py-4 max-w-4xl">
       <header className="mb-6 flex items-start justify-between gap-3">
         <div>
           <h1 className="text-3xl font-semibold">{node.title}</h1>
-          <p className="mt-2 text-neutral-600 whitespace-pre-wrap">{node.description}</p>
+          <p className="mt-2 text-neutral-600 dark:text-neutral-400 whitespace-pre-wrap">{node.description}</p>
           <p className="mt-3 text-sm">
             <a href={`/search?scope=project:${guid}`} className="text-blue-600 hover:underline">Search this project</a>
           </p>
@@ -121,68 +97,40 @@ export default async function ProjectPage({
       <RecordView refEntry={{ id: guid, title: node.title || guid, kind: "project" }} />
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_18rem] gap-8">
-        <section>
-          <h2 className="text-xl font-semibold mb-2">
-            Files <a href={`/${guid}/files`} className="text-sm text-blue-600 hover:underline">(browse all →)</a>
-          </h2>
-
-          <h2 className="text-xl font-semibold mt-8 mb-2">
-            Components ({filteredChildren.length}{filteredChildren.length !== children.length ? ` of ${children.length}` : ""})
-          </h2>
-          {children.length > 0 && (
-            <div className="flex flex-wrap items-center gap-3 mb-3">
-              <SortControl
-                paramName="compSort"
-                options={[
-                  { value: "-date_modified", label: "Modified (newest)" },
-                  { value: "date_modified", label: "Modified (oldest)" },
-                  { value: "-date_created", label: "Created (newest)" },
-                  { value: "title", label: "Title (A–Z)" },
-                ]}
-              />
-              <FilterChips
-                paramName="compCategory"
-                chips={[
-                  { value: "all", label: "All" },
-                  ...COMPONENT_CATEGORIES.map((c) => ({ value: c, label: c.replace(/\b\w/g, (m) => m.toUpperCase()) })),
-                ]}
-              />
+        <section className="space-y-4 text-sm">
+          {cappedNote && (
+            <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded px-3 py-2">
+              {cappedNote}
+            </p>
+          )}
+          {linked.length > 0 && (
+            <div>
+              <h2 className="text-lg font-semibold mb-1">Linked projects ({linked.length})</h2>
+              <ul className="space-y-1">
+                {linked.map((l) => (
+                  <li key={l.id}>
+                    <a href={`/${l.id}`} className="text-blue-600 hover:underline">{l.title || l.id}</a>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
-          <ul className="space-y-1">
-            {filteredChildren.map((c) => (
-              <li key={c.id}>
-                <a href={`/${c.id}`} className="text-blue-600 hover:underline">{c.title || c.id}</a>
-                {c.category && <span className="ml-2 text-xs text-neutral-500">[{c.category}]</span>}
-              </li>
-            ))}
-            {filteredChildren.length === 0 && <li className="text-neutral-500">No components.</li>}
-          </ul>
-
-          <h2 className="text-xl font-semibold mt-8 mb-2">
-            Linked projects ({linked.length})
-          </h2>
-          <ul className="space-y-1">
-            {linked.map((c) => (
-              <li key={c.id}>
-                <a href={`/${c.id}`} className="text-blue-600 hover:underline">{c.title || c.id}</a>
-              </li>
-            ))}
-            {linked.length === 0 && <li className="text-neutral-500">No linked projects.</li>}
-          </ul>
-
-          <h2 className="text-xl font-semibold mt-8 mb-2">
-            Registrations ({regs.length})
-          </h2>
-          <ul className="space-y-1">
-            {regs.map((r) => (
-              <li key={r.id}>
-                <a href={r.osfUrl} className="text-blue-600 hover:underline">{r.title || r.id}</a>
-                <span className="ml-2 text-sm text-neutral-500">{r.dateRegistered.slice(0, 10)}</span>
-              </li>
-            ))}
-            {regs.length === 0 && <li className="text-neutral-500">No registrations.</li>}
-          </ul>
+          {regs.length > 0 && (
+            <div>
+              <h2 className="text-lg font-semibold mb-1">Registrations ({regs.length})</h2>
+              <ul className="space-y-1">
+                {regs.map((r) => (
+                  <li key={r.id}>
+                    <a href={`/registrations/${r.id}`} className="text-blue-600 hover:underline">{r.title || r.id}</a>
+                    <span className="ml-2 text-xs text-neutral-500">{r.dateRegistered.slice(0, 10)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <p className="text-sm text-neutral-500">
+            Everything in this project lives in the tree on the left — providers, every component&apos;s sub-tree, linked projects, registrations. Click a file leaf to open it inline.
+          </p>
         </section>
 
         <aside className="space-y-4 text-sm">
@@ -215,5 +163,27 @@ export default async function ProjectPage({
         </aside>
       </div>
     </article>
+  );
+
+  return (
+    <div>
+      <Breadcrumb crumbs={[{ label: "Home", href: "/" }, { label: node.title || guid, href: `/${guid}` }]} />
+      <SplitPane
+        prefKey="overview"
+        defaultLeftWidth={360}
+        left={
+          <UnifiedTree
+            guid={guid}
+            rootTitle={node.title || guid}
+            skeleton={fullTree.rootSkeleton}
+            components={components}
+            componentTrees={fullTree.components}
+            linkedNodes={linked}
+            registrations={regs}
+          />
+        }
+        right={overviewRight}
+      />
+    </div>
   );
 }
