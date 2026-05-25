@@ -1,7 +1,16 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import { render, screen } from "@testing-library/react";
 import { server } from "../msw/server";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: () => {}, replace: () => {}, prefetch: () => {} }),
+  usePathname: () => "/search",
+  useSearchParams: () => new URLSearchParams(),
+  notFound: () => { throw new Error("not_found"); },
+  redirect: () => { throw new Error("redirect"); },
+}));
+
 import SearchPage from "@/app/search/page";
 
 describe("Search page", () => {

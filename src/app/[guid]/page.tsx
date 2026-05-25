@@ -5,6 +5,23 @@ import { getNode, getAllChildren, getAllLinkedNodes } from "@/lib/osf/nodes";
 import { getNodeRegistrations } from "@/lib/osf/registrations";
 import { OsfError } from "@/lib/osf/types";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { FilterChips } from "@/components/FilterChips";
+import { SortControl } from "@/components/SortControl";
+
+const COMPONENT_CATEGORIES = [
+  "project",
+  "hypothesis",
+  "data",
+  "analysis",
+  "methods and measures",
+  "software",
+  "instrumentation",
+  "other",
+] as const;
+
+function first(v: string | string[] | undefined, fallback = ""): string {
+  return Array.isArray(v) ? v[0] ?? fallback : v ?? fallback;
+}
 
 export async function generateMetadata({
   params,
@@ -29,9 +46,18 @@ export async function generateMetadata({
   }
 }
 
-export default async function ProjectPage({ params }: { params: Promise<{ guid: string }> }) {
+export default async function ProjectPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ guid: string }>;
+  searchParams?: Promise<{ compSort?: string | string[]; compCategory?: string | string[] }>;
+}) {
   const { guid } = await params;
   if (!isValidGuid(guid)) notFound();
+  const sp = (await searchParams) ?? {};
+  const compSort = first(sp.compSort);
+  const compCategory = first(sp.compCategory);
 
   let node, children, linked, regs;
   try {
@@ -44,6 +70,26 @@ export default async function ProjectPage({ params }: { params: Promise<{ guid: 
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") notFound();
     throw e;
+  }
+
+  // Filter
+  let filteredChildren = children;
+  if (compCategory && compCategory !== "all") {
+    filteredChildren = filteredChildren.filter((c) => (c.category ?? "").toLowerCase() === compCategory.toLowerCase());
+  }
+
+  // Sort
+  if (compSort) {
+    const desc = compSort.startsWith("-");
+    const key = desc ? compSort.slice(1) : compSort;
+    filteredChildren = [...filteredChildren].sort((a, b) => {
+      let av = "", bv = "";
+      if (key === "title") { av = a.title ?? ""; bv = b.title ?? ""; }
+      else if (key === "date_modified") { av = a.dateModified ?? ""; bv = b.dateModified ?? ""; }
+      else if (key === "date_created") { av = a.dateCreated ?? ""; bv = b.dateCreated ?? ""; }
+      const cmp = av.localeCompare(bv);
+      return desc ? -cmp : cmp;
+    });
   }
 
   return (
@@ -64,15 +110,36 @@ export default async function ProjectPage({ params }: { params: Promise<{ guid: 
           </h2>
 
           <h2 className="text-xl font-semibold mt-8 mb-2">
-            Components ({children.length})
+            Components ({filteredChildren.length}{filteredChildren.length !== children.length ? ` of ${children.length}` : ""})
           </h2>
+          {children.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3 mb-3">
+              <SortControl
+                paramName="compSort"
+                options={[
+                  { value: "-date_modified", label: "Modified (newest)" },
+                  { value: "date_modified", label: "Modified (oldest)" },
+                  { value: "-date_created", label: "Created (newest)" },
+                  { value: "title", label: "Title (A–Z)" },
+                ]}
+              />
+              <FilterChips
+                paramName="compCategory"
+                chips={[
+                  { value: "all", label: "All" },
+                  ...COMPONENT_CATEGORIES.map((c) => ({ value: c, label: c.replace(/\b\w/g, (m) => m.toUpperCase()) })),
+                ]}
+              />
+            </div>
+          )}
           <ul className="space-y-1">
-            {children.map((c) => (
+            {filteredChildren.map((c) => (
               <li key={c.id}>
                 <a href={`/${c.id}`} className="text-blue-600 hover:underline">{c.title || c.id}</a>
+                {c.category && <span className="ml-2 text-xs text-neutral-500">[{c.category}]</span>}
               </li>
             ))}
-            {children.length === 0 && <li className="text-neutral-500">No components.</li>}
+            {filteredChildren.length === 0 && <li className="text-neutral-500">No components.</li>}
           </ul>
 
           <h2 className="text-xl font-semibold mt-8 mb-2">
