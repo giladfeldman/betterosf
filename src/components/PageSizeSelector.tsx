@@ -12,12 +12,20 @@ function isValidOption(v: number | string): v is SizeOption {
   return (OPTIONS as readonly (number | string)[]).includes(v);
 }
 
-export function PageSizeSelector({ prefKey }: { prefKey: string }) {
+export function PageSizeSelector({
+  prefKey,
+  paramName = "size",
+  pageParamName = "page",
+}: {
+  prefKey: string;
+  paramName?: string;
+  pageParamName?: string;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
 
-  const fromUrl = params.get("size");
+  const fromUrl = params.get(paramName);
   const [size, setSize] = useState<SizeOption>(50);
 
   useEffect(() => {
@@ -34,8 +42,8 @@ export function PageSizeSelector({ prefKey }: { prefKey: string }) {
     setSize(v);
     setPref(`pageSize.${prefKey}`, v);
     const next = new URLSearchParams(params.toString());
-    next.set("size", String(v));
-    next.delete("page");
+    next.set(paramName, String(v));
+    next.delete(pageParamName);
     router.push(`${pathname}?${next.toString()}` as Route);
   };
 

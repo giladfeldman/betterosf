@@ -79,6 +79,18 @@ export function UnifiedTreeNode({
     </span>
   );
 
+  // Folder + provider-root + components-root etc. left-click toggles the expand;
+  // right-click → "Open in new tab" still works because the `<a href>` is real.
+  // File leaves + linked-project leaves + components/registrations let the click
+  // navigate (or open in a new tab for files/linked, where `newTab` is true).
+  const interceptLeftClick =
+    node.kind === "folder" ||
+    node.kind === "provider-root" ||
+    node.kind === "components-root" ||
+    node.kind === "linked-root" ||
+    node.kind === "registrations-root" ||
+    node.kind === "pinned-root";
+
   const content = node.href ? (
     <a
       href={node.href}
@@ -86,14 +98,37 @@ export function UnifiedTreeNode({
       rel={node.newTab ? "noopener" : undefined}
       className="block truncate hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 rounded"
       onClick={(e) => {
-        // Don't intercept anchor — let real navigation happen
         e.stopPropagation();
+        // Toggle expand on left-click for container-ish nodes — only when the user
+        // is left-clicking without modifiers (so Cmd/Ctrl/middle-click still open in
+        // a new tab, and right-click still shows the browser context menu).
+        if (interceptLeftClick && hasChildren && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          onToggle();
+        }
       }}
     >
       {inner}
     </a>
   ) : (
-    <span className="block truncate">{inner}</span>
+    <span
+      role={interceptLeftClick && hasChildren ? "button" : undefined}
+      tabIndex={interceptLeftClick && hasChildren ? 0 : undefined}
+      onClick={interceptLeftClick && hasChildren ? onToggle : undefined}
+      onKeyDown={
+        interceptLeftClick && hasChildren
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onToggle();
+              }
+            }
+          : undefined
+      }
+      className={`block truncate ${interceptLeftClick && hasChildren ? "cursor-pointer hover:underline" : ""}`}
+    >
+      {inner}
+    </span>
   );
 
   return (

@@ -19,7 +19,7 @@ export async function collectFolderSkeleton(
 
   const providers = await getProviderRoots(guid);
 
-  async function walk(listingUrl: string, depth: number): Promise<SkeletonNode[]> {
+  async function walk(listingUrl: string, depth: number, providerName: string): Promise<SkeletonNode[]> {
     if (depth > maxDepth) return [];
     const entries: FileEntry[] = await getFolderContents(listingUrl, guid);
     const subfolders = entries.filter((e) => e.kind === "folder");
@@ -30,9 +30,9 @@ export async function collectFolderSkeleton(
       }
       folderCount += 1;
       if (f.kind !== "folder") continue;
-      const children = f.listingUrl ? await walk(f.listingUrl, depth + 1) : [];
+      const children = f.listingUrl ? await walk(f.listingUrl, depth + 1, providerName) : [];
       result.push({
-        provider: "", // filled in by caller
+        provider: providerName,
         name: f.name,
         materializedPath: f.materializedPath,
         listingUrl: f.listingUrl,
@@ -45,13 +45,13 @@ export async function collectFolderSkeleton(
   const out: SkeletonNode[] = [];
   for (const p of providers) {
     if (!p.listingUrl) continue;
-    const children = await walk(p.listingUrl, 1);
+    const children = await walk(p.listingUrl, 1, p.provider);
     out.push({
       provider: p.provider,
       name: p.name,
       materializedPath: "/",
       listingUrl: p.listingUrl,
-      children: children.map((c) => ({ ...c, provider: p.provider })),
+      children,
     });
   }
 

@@ -388,9 +388,44 @@ export function UnifiedTree({
     overscan: 10,
   });
 
+  // Recursively collect every expandable id from the full skeleton + componentTrees.
+  // This makes "Expand all" actually expand ALL levels in one click instead of one level.
+  const allExpandableIds = useMemo(() => {
+    const ids: string[] = [
+      "pinned-root",
+      "providers-root",
+      "components-root",
+      "linked-root",
+      "registrations-root",
+    ];
+    function walkSkeleton(nodes: SkeletonNode[], parentId: string) {
+      for (const n of nodes) {
+        const id = `${parentId}/${n.name}`;
+        ids.push(id);
+        if (n.children.length) walkSkeleton(n.children, id);
+      }
+    }
+    // Root provider tree
+    for (const p of skeleton) {
+      ids.push(`root/provider:${p.provider}`);
+      walkSkeleton(p.children, `root/provider:${p.provider}`);
+    }
+    // Component sub-trees
+    if (componentTrees) {
+      for (const c of componentTrees) {
+        ids.push(`component/${c.guid}`);
+        for (const p of c.skeleton) {
+          ids.push(`component/${c.guid}/provider:${p.provider}`);
+          walkSkeleton(p.children, `component/${c.guid}/provider:${p.provider}`);
+        }
+      }
+    }
+    return ids;
+  }, [skeleton, componentTrees]);
+
   const expandAll = () => {
     const next: Record<string, boolean> = {};
-    for (const r of flatRows) next[r.id] = true;
+    for (const id of allExpandableIds) next[id] = true;
     setExpanded(next);
   };
   const collapseAll = () => {
