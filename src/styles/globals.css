@@ -9,3 +9,22 @@ html, body { font-family: ui-sans-serif, system-ui, sans-serif; }
   outline-offset: 2px;
   border-radius: 2px;
 }
+
+/* Reduced-motion: turn off transitions for users who request it */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* High-contrast tweaks (Windows/macOS forced-colors mode) */
+@media (prefers-contrast: more) {
+  a, button {
+    outline: 1px solid;
+  }
+}
+@media (forced-colors: active) {
+  a, button { forced-color-adjust: none; }
+}

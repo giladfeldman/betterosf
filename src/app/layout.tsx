@@ -19,6 +19,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="dns-prefetch" href="https://accounts.osf.io" />
       </head>
       <body className="min-h-screen bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:bg-blue-600 focus:text-white focus:px-3 focus:py-1 focus:rounded"
+        >
+          Skip to content
+        </a>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <header className="border-b border-neutral-200 dark:border-neutral-800 px-4 sm:px-6 py-3 flex flex-wrap justify-between items-center gap-2">
             <div className="flex items-center gap-4">
@@ -31,7 +37,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           </header>
           <QuotaBanner />
-          <main className="px-4 sm:px-6 py-8">{children}</main>
+          <main id="main-content" className="px-4 sm:px-6 py-8">{children}</main>
           <footer className="border-t border-neutral-200 dark:border-neutral-800 px-4 sm:px-6 py-4 text-sm text-neutral-500 flex justify-between flex-wrap gap-2">
             <span>
               BetterOSF is an unofficial alternative interface to the{" "}
