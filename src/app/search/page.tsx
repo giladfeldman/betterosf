@@ -3,6 +3,7 @@ import { searchUserNodes } from "@/lib/osf/users";
 import { SearchTypeChips, type SearchType } from "@/components/SearchTypeChips";
 import { ProjectResult, FileResult, RegistrationResult, UserResult } from "@/components/SearchResultRow";
 import { SearchSyntaxHelp } from "@/components/SearchSyntaxHelp";
+import { PageSizeSelector } from "@/components/PageSizeSelector";
 
 export const metadata = { title: "Search — BetterOSF" };
 
@@ -11,6 +12,9 @@ type Params = {
   type?: string | string[];
   page?: string | string[];
   scope?: string | string[];
+  size?: string | string[];
+  sort?: string | string[];
+  ext?: string | string[];
 };
 
 function first(v: string | string[] | undefined, fallback = ""): string {
@@ -26,16 +30,21 @@ function buildHref(base: string, params: Record<string, string | number | undefi
   return `${base}?${sp.toString()}`;
 }
 
-function Pagination({ q, type, page, scope, hasMore }: { q: string; type: SearchType; page: number; scope: string; hasMore: boolean }) {
+function Pagination({
+  q, type, page, scope, size, sort, ext, hasMore,
+}: {
+  q: string; type: SearchType; page: number; scope: string; size: string; sort: string | undefined; ext: string; hasMore: boolean;
+}) {
+  const extra = { size: size || undefined, sort, ext: ext || undefined };
   return (
     <div className="flex justify-between text-sm mt-4">
       {page > 1 ? (
-        <a className="text-blue-600 hover:underline" href={buildHref("/search", { q, type, scope, page: page - 1 })}>
+        <a className="text-blue-600 hover:underline" href={buildHref("/search", { q, type, scope, page: page - 1, ...extra })}>
           ← Previous
         </a>
       ) : <span />}
       {hasMore ? (
-        <a className="text-blue-600 hover:underline" href={buildHref("/search", { q, type, scope, page: page + 1 })}>
+        <a className="text-blue-600 hover:underline" href={buildHref("/search", { q, type, scope, page: page + 1, ...extra })}>
           Next →
         </a>
       ) : <span />}
@@ -69,19 +78,23 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const scope = first(sp.scope);
   const isUserScope = scope.startsWith("user:");
   const isProjectScope = scope.startsWith("project:");
+  const sizeRaw = first(sp.size, "50");
+  const perPage = sizeRaw === "all" ? 500 : Math.max(1, Math.min(500, parseInt(sizeRaw, 10) || 50));
+  const sort = first(sp.sort) || undefined;
+  const ext = first(sp.ext);
 
   let body: React.ReactNode = null;
   if (!q) {
     body = <p className="text-neutral-600">Type a query above to search OSF.</p>;
   } else if (type === "projects" && isUserScope) {
     const userId = scope.slice("user:".length);
-    const out = await searchUserNodes(userId, q, { page });
+    const out = await searchUserNodes(userId, q, { page, perPage, sort });
     body = (
       <>
         <p className="text-sm text-neutral-600 mb-3">Showing {out.results.length} of {out.total} result{out.total === 1 ? "" : "s"}.</p>
         <ul>{out.results.map((n) => <ProjectResult key={n.id} node={n} />)}</ul>
         {out.results.length === 0 && <p className="text-neutral-500">No projects match.</p>}
-        <Pagination q={q} type="projects" page={page} scope={scope} hasMore={out.hasMore} />
+        <Pagination q={q} type="projects" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
       </>
     );
   } else if (isProjectScope && (type === "projects" || type === "registrations")) {
@@ -111,43 +124,43 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       </>
     );
   } else if (type === "projects") {
-    const out = await searchNodes(q, { page });
+    const out = await searchNodes(q, { page, perPage, sort });
     body = (
       <>
         <p className="text-sm text-neutral-600 mb-3">Showing {out.results.length} of {out.total} result{out.total === 1 ? "" : "s"}.</p>
         <ul>{out.results.map((n) => <ProjectResult key={n.id} node={n} />)}</ul>
         {out.results.length === 0 && <p className="text-neutral-500">No projects match.</p>}
-        <Pagination q={q} type="projects" page={page} scope={scope} hasMore={out.hasMore} />
+        <Pagination q={q} type="projects" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
       </>
     );
   } else if (type === "files") {
-    const out = await searchFiles(q, { page });
+    const out = await searchFiles(q, { page, perPage, sort });
     body = (
       <>
         <p className="text-sm text-neutral-600 mb-3">Showing {out.results.length} of {out.total} result{out.total === 1 ? "" : "s"}.</p>
         <ul>{out.results.map((f) => <FileResult key={f.id} file={f} />)}</ul>
         {out.results.length === 0 && <p className="text-neutral-500">No files match.</p>}
-        <Pagination q={q} type="files" page={page} scope={scope} hasMore={out.hasMore} />
+        <Pagination q={q} type="files" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
       </>
     );
   } else if (type === "registrations") {
-    const out = await searchRegistrations(q, { page });
+    const out = await searchRegistrations(q, { page, perPage, sort });
     body = (
       <>
         <p className="text-sm text-neutral-600 mb-3">Showing {out.results.length} of {out.total} result{out.total === 1 ? "" : "s"}.</p>
         <ul>{out.results.map((r) => <RegistrationResult key={r.id} reg={r} />)}</ul>
         {out.results.length === 0 && <p className="text-neutral-500">No registrations match.</p>}
-        <Pagination q={q} type="registrations" page={page} scope={scope} hasMore={out.hasMore} />
+        <Pagination q={q} type="registrations" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
       </>
     );
   } else {
-    const out = await searchUsers(q, { page });
+    const out = await searchUsers(q, { page, perPage, sort });
     body = (
       <>
         <p className="text-sm text-neutral-600 mb-3">Showing {out.results.length} of {out.total} result{out.total === 1 ? "" : "s"}.</p>
         <ul>{out.results.map((u) => <UserResult key={u.id} user={u} />)}</ul>
         {out.results.length === 0 && <p className="text-neutral-500">No users match.</p>}
-        <Pagination q={q} type="users" page={page} scope={scope} hasMore={out.hasMore} />
+        <Pagination q={q} type="users" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
       </>
     );
   }
@@ -173,7 +186,14 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       {q ? <SearchTypeChips q={q} active={type} /> : null}
       <ScopeChip scope={scope} q={q} type={type} />
 
+      {q ? (
+        <div className="flex flex-wrap items-center gap-4 my-3">
+          <PageSizeSelector prefKey="search" />
+        </div>
+      ) : null}
+
       {body}
     </div>
   );
 }
+
