@@ -5,6 +5,28 @@ import { ProjectResult, FileResult, RegistrationResult, UserResult } from "@/com
 import { SearchSyntaxHelp } from "@/components/SearchSyntaxHelp";
 import { PageSizeSelector } from "@/components/PageSizeSelector";
 import { SortControl } from "@/components/SortControl";
+import { FilterChips } from "@/components/FilterChips";
+
+const EXT_GROUPS: Record<string, string[]> = {
+  pdf: ["pdf"],
+  csv: ["csv", "tsv"],
+  docx: ["docx", "doc"],
+  image: ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp"],
+  code: ["js", "ts", "tsx", "jsx", "py", "r", "rmd", "ipynb", "json", "yaml", "yml", "sh", "html", "css"],
+};
+
+function fileExt(name: string): string {
+  const i = name.lastIndexOf(".");
+  if (i < 0) return "";
+  return name.slice(i + 1).toLowerCase();
+}
+
+function matchesExt(name: string, ext: string): boolean {
+  if (!ext || ext === "all") return true;
+  const exts = EXT_GROUPS[ext];
+  if (!exts) return false;
+  return exts.includes(fileExt(name));
+}
 
 export const metadata = { title: "Search — BetterOSF" };
 
@@ -136,11 +158,14 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     );
   } else if (type === "files") {
     const out = await searchFiles(q, { page, perPage, sort });
+    const filtered = ext ? out.results.filter((f) => matchesExt(f.name, ext)) : out.results;
     body = (
       <>
-        <p className="text-sm text-neutral-600 mb-3">Showing {out.results.length} of {out.total} result{out.total === 1 ? "" : "s"}.</p>
-        <ul>{out.results.map((f) => <FileResult key={f.id} file={f} />)}</ul>
-        {out.results.length === 0 && <p className="text-neutral-500">No files match.</p>}
+        <p className="text-sm text-neutral-600 mb-3">
+          Showing {filtered.length}{ext ? ` filtered of ${out.results.length}` : ""} of {out.total} result{out.total === 1 ? "" : "s"}.
+        </p>
+        <ul>{filtered.map((f) => <FileResult key={f.id} file={f} />)}</ul>
+        {filtered.length === 0 && <p className="text-neutral-500">No files match.</p>}
         <Pagination q={q} type="files" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={out.hasMore} />
       </>
     );
@@ -207,6 +232,22 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                     { value: "title", label: "Title (A–Z)" },
                   ]
             }
+          />
+        </div>
+      ) : null}
+
+      {q && type === "files" ? (
+        <div className="mb-3">
+          <FilterChips
+            paramName="ext"
+            chips={[
+              { value: "all", label: "All files" },
+              { value: "pdf", label: "PDF" },
+              { value: "csv", label: "CSV/TSV" },
+              { value: "docx", label: "DOCX" },
+              { value: "image", label: "Images" },
+              { value: "code", label: "Code" },
+            ]}
           />
         </div>
       ) : null}
