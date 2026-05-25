@@ -89,7 +89,6 @@ export default async function FileViewerPage({
             components={components}
             linkedNodes={linked}
             registrations={registrations}
-            pinned={[]}
           />
         }
         right={

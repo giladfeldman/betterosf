@@ -8,6 +8,7 @@ import type { RegistrationView } from "@/lib/osf/registrations";
 import type { FileEntry } from "@/lib/osf/files";
 import { UnifiedTreeNode, type TreeNodeData } from "./UnifiedTreeNode";
 import { getPref, setPref } from "@/lib/prefs";
+import { listPins, type FavoriteRef } from "@/lib/favorites";
 
 type FlatRow = {
   id: string;
@@ -27,7 +28,6 @@ export function UnifiedTree({
   components,
   linkedNodes,
   registrations,
-  pinned,
 }: {
   guid: string;
   rootTitle: string;
@@ -35,8 +35,11 @@ export function UnifiedTree({
   components: NodeView[];
   linkedNodes: NodeView[];
   registrations: RegistrationView[];
-  pinned: { id: string; title: string }[];
 }) {
+  const [pinned, setPinned] = useState<FavoriteRef[]>([]);
+  useEffect(() => {
+    setPinned(listPins());
+  }, []);
   // Expand state — initial: all folder paths expanded; registrations collapsed
   const initialExpanded = useMemo(() => {
     const stored = getPref<Record<string, boolean> | null>(`tree.expand.${guid}`, null);
@@ -92,10 +95,16 @@ export function UnifiedTree({
       });
       if (expanded["pinned-root"]) {
         for (const p of pinned) {
+          const href =
+            p.kind === "registration"
+              ? `/registrations/${p.id}`
+              : p.kind === "file"
+              ? `/${p.id}/view`
+              : `/${p.id}`;
           rows.push({
-            id: `pinned/${p.id}`, depth: 1, expanded: false, hasChildren: false,
+            id: `pinned/${p.kind}/${p.id}`, depth: 1, expanded: false, hasChildren: false,
             onToggle: () => {},
-            node: { id: p.id, label: p.title, kind: "component", href: `/${p.id}` },
+            node: { id: p.id, label: p.title, kind: "component", href },
           });
         }
       }

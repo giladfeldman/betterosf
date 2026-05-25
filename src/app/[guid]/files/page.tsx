@@ -46,7 +46,6 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
             components={components}
             linkedNodes={linked}
             registrations={registrations}
-            pinned={[]}
           />
         }
         right={
