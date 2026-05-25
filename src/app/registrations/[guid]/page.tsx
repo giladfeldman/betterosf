@@ -68,6 +68,25 @@ export default async function RegistrationPage({ params }: { params: Promise<{ g
       </header>
       <RecordView refEntry={{ id: guid, title: reg.title || guid, kind: "registration" }} />
 
+      <form action="/registrations/compare" method="get" className="mb-4 flex flex-wrap gap-2 items-center text-sm">
+        <input type="hidden" name="a" value={guid} />
+        <label className="flex items-center gap-2">
+          Compare with:
+          <input
+            name="b"
+            placeholder="another registration guid"
+            className="border rounded px-2 py-1 font-mono text-xs"
+            required
+          />
+        </label>
+        <button
+          type="submit"
+          className="border rounded px-2 py-1 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Compare
+        </button>
+      </form>
+
       {reg.description && (
         <section className="mb-6">
           <h2 className="text-xl font-semibold mb-2">Description</h2>
