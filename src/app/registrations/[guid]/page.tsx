@@ -3,6 +3,8 @@ import { isValidGuid } from "@/lib/osf/guid";
 import { getRegistration } from "@/lib/osf/registrations";
 import { OsfError } from "@/lib/osf/types";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { PinButton } from "@/components/PinButton";
+import { RecordView } from "@/components/RecordView";
 
 export async function generateMetadata({ params }: { params: Promise<{ guid: string }> }) {
   const { guid } = await params;
@@ -48,19 +50,23 @@ export default async function RegistrationPage({ params }: { params: Promise<{ g
           { label: reg.title || guid, href: `/registrations/${guid}` },
         ]}
       />
-      <header className="mb-6">
-        <h1 className="text-3xl font-semibold">{reg.title}</h1>
-        <p className="text-sm text-neutral-600 mt-1">
-          Registered {reg.dateRegistered.slice(0, 10)} · {reg.public ? "Public" : "Private"} ·{" "}
-          <a href={reg.osfUrl} className="text-blue-600 hover:underline">View on OSF</a>
-        </p>
-        {reg.registeredFromNodeId && (
-          <p className="text-sm mt-1">
-            Registered from project{" "}
-            <a href={`/${reg.registeredFromNodeId}`} className="text-blue-600 hover:underline">{reg.registeredFromNodeId}</a>
+      <header className="mb-6 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-semibold">{reg.title}</h1>
+          <p className="text-sm text-neutral-600 mt-1">
+            Registered {reg.dateRegistered.slice(0, 10)} · {reg.public ? "Public" : "Private"} ·{" "}
+            <a href={reg.osfUrl} className="text-blue-600 hover:underline">View on OSF</a>
           </p>
-        )}
+          {reg.registeredFromNodeId && (
+            <p className="text-sm mt-1">
+              Registered from project{" "}
+              <a href={`/${reg.registeredFromNodeId}`} className="text-blue-600 hover:underline">{reg.registeredFromNodeId}</a>
+            </p>
+          )}
+        </div>
+        <PinButton refEntry={{ id: guid, title: reg.title || guid, kind: "registration" }} />
       </header>
+      <RecordView refEntry={{ id: guid, title: reg.title || guid, kind: "registration" }} />
 
       {reg.description && (
         <section className="mb-6">

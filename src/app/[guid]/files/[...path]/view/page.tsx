@@ -9,6 +9,8 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { UnifiedTree } from "@/components/UnifiedTree";
 import { SplitPane } from "@/components/SplitPane";
 import { ViewerDispatcher } from "@/components/viewers/Dispatcher";
+import { PinButton } from "@/components/PinButton";
+import { RecordView } from "@/components/RecordView";
 
 export default async function FileViewerPage({
   params,
@@ -71,6 +73,11 @@ export default async function FileViewerPage({
           { label: filename, href: `/${guid}/files/${provider}/${rest.join("/")}/view` },
         ]}
       />
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <h1 className="text-lg font-semibold truncate">{filename}</h1>
+        <PinButton refEntry={{ id: `${guid}/${provider}/${rest.join("/")}`, title: filename, kind: "file" }} />
+      </div>
+      <RecordView refEntry={{ id: `${guid}/${provider}/${rest.join("/")}`, title: filename, kind: "file" }} />
       <SplitPane
         prefKey="files"
         defaultLeftWidth={360}

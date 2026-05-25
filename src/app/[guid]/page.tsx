@@ -7,6 +7,8 @@ import { OsfError } from "@/lib/osf/types";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { FilterChips } from "@/components/FilterChips";
 import { SortControl } from "@/components/SortControl";
+import { PinButton } from "@/components/PinButton";
+import { RecordView } from "@/components/RecordView";
 
 const COMPONENT_CATEGORIES = [
   "project",
@@ -95,13 +97,17 @@ export default async function ProjectPage({
   return (
     <article className="max-w-5xl">
       <Breadcrumb crumbs={[{ label: "Home", href: "/" }, { label: node.title || guid, href: `/${guid}` }]} />
-      <header className="mb-6">
-        <h1 className="text-3xl font-semibold">{node.title}</h1>
-        <p className="mt-2 text-neutral-600 whitespace-pre-wrap">{node.description}</p>
-        <p className="mt-3 text-sm">
-          <a href={`/search?scope=project:${guid}`} className="text-blue-600 hover:underline">Search this project</a>
-        </p>
+      <header className="mb-6 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-semibold">{node.title}</h1>
+          <p className="mt-2 text-neutral-600 whitespace-pre-wrap">{node.description}</p>
+          <p className="mt-3 text-sm">
+            <a href={`/search?scope=project:${guid}`} className="text-blue-600 hover:underline">Search this project</a>
+          </p>
+        </div>
+        <PinButton refEntry={{ id: guid, title: node.title || guid, kind: "project" }} />
       </header>
+      <RecordView refEntry={{ id: guid, title: node.title || guid, kind: "project" }} />
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_18rem] gap-8">
         <section>
