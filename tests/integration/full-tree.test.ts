@@ -56,7 +56,51 @@ describe("collectFullTree", () => {
     }
   });
 
-  it("default maxComponentsToRecurse=30 — all 3 components are recursed below the cap", async () => {
+  it("default maxComponentsToRecurse=5 — projects with more components than that mark the excess as skipped (regression: pre-2026-05-25 default of 30 caused /<guid> to time out on Many Labs 2)", async () => {
+    const childGuids = Array.from({ length: 8 }).map((_, i) => `cap${i}`);
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/cap-root/files/", () => HttpResponse.json({ data: [], links: { next: null } })),
+      http.get("https://api.osf.io/v2/nodes/cap-root/children/", () =>
+        HttpResponse.json({
+          data: childGuids.map((g) => childNodeRow(g, `T-${g}`)),
+          links: { next: null },
+        })
+      ),
+      ...childGuids.flatMap((g) => noFilesHandlers(g)),
+    );
+    const tree = await collectFullTree("cap-root");
+    expect(tree.totalComponents).toBe(8);
+    const notSkipped = tree.components.filter((c) => !c.skipped);
+    const skipped = tree.components.filter((c) => c.skipped);
+    expect(notSkipped).toHaveLength(5);
+    expect(skipped).toHaveLength(3);
+  });
+
+  it("per-component skeleton fetch races a timeout — slow components get empty skeleton, don't sink the page (regression: 2026-05-25 multi-component timeout fix)", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/timeout-root/files/", () => HttpResponse.json({ data: [], links: { next: null } })),
+      http.get("https://api.osf.io/v2/nodes/timeout-root/children/", () =>
+        HttpResponse.json({ data: [childNodeRow("slow", "Slow Child")], links: { next: null } })
+      ),
+      // Slow child: handler delays 1s longer than our 100ms timeout below
+      http.get("https://api.osf.io/v2/nodes/slow/files/", async () => {
+        await new Promise((r) => setTimeout(r, 1000));
+        return HttpResponse.json({ data: [], links: { next: null } });
+      }),
+    );
+    const t0 = Date.now();
+    const tree = await collectFullTree("timeout-root", { componentTimeoutMs: 100, rootTimeoutMs: 100 });
+    const elapsed = Date.now() - t0;
+
+    expect(tree.components).toHaveLength(1);
+    const slow = tree.components[0]!;
+    expect(slow.skeleton).toEqual([]); // timed out → empty
+    expect(slow.skipped).toBe(false); // skipped=false; "timeout" is a different concept from cap-skip
+    // total elapsed should be far less than the 1s the slow child wants
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it("redundant — kept for back-compat assertion that 3 components below the cap all recurse", async () => {
     const childGuids = ["a", "b", "c"];
     server.use(
       http.get("https://api.osf.io/v2/nodes/r/files/", () => HttpResponse.json({ data: [], links: { next: null } })),
