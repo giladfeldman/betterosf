@@ -1,5 +1,15 @@
 # Known Issues
 
+## Closed — Next.js 15.5 catch-all routing trap (resolved 2026-05-25)
+
+**Was breaking:** every route returned 504 GATEWAY_TIMEOUT after the v0.6 deploy. Root cause: `src/app/[guid]/files/[...path]/view/page.tsx` put a static segment (`view`) AFTER a catch-all (`[...path]`), which Next.js 15.5 rejects at runtime with `Error: Catch-all must be the last part of the URL.` The error is fatal at module-init for the entire app, so even static routes like `/about` and `/` 504'd.
+
+**Fixed in commit `af28a08`:** moved the viewer route to `src/app/[guid]/files/view/[...path]/page.tsx` (`view` BEFORE catch-all). Updated file-leaf hrefs in `UnifiedTree.tsx` (3 places) and E2E URL pattern. Lesson card at `~/.claude/skills/_shared/lessons/nextjs-catchall-must-be-last-breaks-runtime-not-just-build.md`.
+
+**Lesson:** A "Ready" Vercel deploy with every URL 504'ing means `vercel logs <deploy-url>` is mandatory. Build success ≠ runtime success when Next.js router validation throws at boot.
+
+---
+
 ## OSF OAuth — `invalid_client` despite valid developer-app registration (open as of 2026-05-23)
 
 **Symptom.** OAuth sign-in via `https://betterosf.vercel.app/login` redirects to OSF's `accounts.osf.io/oauth2/authorize?...`, which then returns either:
