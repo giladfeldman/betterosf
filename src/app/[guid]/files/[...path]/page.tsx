@@ -9,8 +9,12 @@ export default async function DeepFilesPage({
 }: {
   params: Promise<{ guid: string; path: string[] }>;
 }) {
-  const { guid, path } = await params;
+  const { guid, path: rawPath } = await params;
   if (!isValidGuid(guid)) notFound();
+  // Drop empty segments — they show up when href ends with `/` (trailing slash
+  // from materializedPath) or when there are accidental `//` in the URL. Without
+  // this filter, the walk below would look for an empty-name folder and 404.
+  const path = rawPath.filter((seg) => seg.length > 0);
   if (path.length === 0) notFound();
 
   const [provider, ...folderSegments] = path;

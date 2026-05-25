@@ -13,7 +13,7 @@ vi.mock("@tanstack/react-virtual", () => ({
 }));
 
 function leaf(provider: string, name: string, path: string, children: SkeletonNode[] = []): SkeletonNode {
-  return { provider, name, materializedPath: path, listingUrl: `https://api.osf.io/x/${name}/`, children };
+  return { provider, name, materializedPath: path, listingUrl: `https://api.osf.io/x/${name}/`, children, fileCount: 0 };
 }
 
 describe("UnifiedTree expand-all / collapse-all", () => {
@@ -64,6 +64,73 @@ describe("UnifiedTree expand-all / collapse-all", () => {
     expect(screen.getByText("a")).toBeInTheDocument();
     expect(screen.getByText("b")).toBeInTheDocument();
     expect(screen.getByText("deeper")).toBeInTheDocument();
+  });
+
+  it("auto-fetches files for every initially-expanded folder (no click-collapse-expand required)", async () => {
+    // Regression test for user-reported bug: initial render shows folders as
+    // expanded (▼) but no files appear inside — users had to click to collapse,
+    // then click again to expand, which finally triggered the per-folder fetch.
+    // The fix: a useEffect in UnifiedTree iterates every expanded folder and
+    // calls fetchFiles, with in-flight + loaded de-dupe.
+    const calls: string[] = [];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      calls.push(u);
+      return new Response(JSON.stringify({ entries: [{ kind: "file", id: `f-${u}`, name: "x.csv", size: 1, modified: "", materializedPath: "/x.csv", downloadUrl: "" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    try {
+      const sk: SkeletonNode[] = [
+        leaf("osfstorage", "osfstorage", "/", [leaf("osfstorage", "sub", "/sub/")]),
+      ];
+      render(
+        <UnifiedTree
+          guid="r1"
+          rootTitle="Root"
+          skeleton={sk}
+          components={[]}
+          linkedNodes={[]}
+          registrations={[]}
+        />
+      );
+
+      // Wait a tick for useEffect to run
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Expect at least one call to /api/files/r1/folder for the auto-expanded sub-folder.
+      // (Provider root + sub-folder = 2 separate fetches.)
+      expect(calls.some((u) => u.includes("/api/files/r1/folder"))).toBe(true);
+      expect(calls.filter((u) => u.includes("/api/files/r1/folder")).length).toBeGreaterThanOrEqual(2);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("renders file-count badge for folders that have files", () => {
+    // Regression test for user-reported bug: folders with files didn't surface
+    // that fact in the tree — users couldn't tell which folders were worth
+    // expanding. The fix: SkeletonNode.fileCount + UnifiedTreeNode "(N)" badge.
+    const sk: SkeletonNode[] = [
+      { provider: "osfstorage", name: "osfstorage", materializedPath: "/", listingUrl: "x", children: [
+        { provider: "osfstorage", name: "data", materializedPath: "/data/", listingUrl: "y", children: [], fileCount: 7 },
+      ], fileCount: 2 },
+    ];
+    render(
+      <UnifiedTree
+        guid="r2"
+        rootTitle="Root"
+        skeleton={sk}
+        components={[]}
+        linkedNodes={[]}
+        registrations={[]}
+      />
+    );
+    expect(screen.getByText("(7)")).toBeInTheDocument();
+    // Provider-root also gets a count
+    expect(screen.getByText("(2)")).toBeInTheDocument();
   });
 
   it("collapseAll clears every expansion so all nested folders disappear", () => {

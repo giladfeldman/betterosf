@@ -15,6 +15,7 @@ export type TreeNodeData = {
   modified?: string;
   provider?: string;   // for color/icon
   guid?: string;       // for components / linked / registrations
+  fileCount?: number;  // # files directly under this folder, shown as "(N)" badge
 };
 
 function kindIcon(kind: TreeNodeKind, provider?: string): ReactNode {
@@ -74,6 +75,11 @@ export function UnifiedTreeNode({
     <span className="inline-flex items-center gap-1 truncate min-w-0">
       {kindIcon(node.kind, node.provider)}
       <span className="truncate">{node.label}</span>
+      {node.fileCount != null && node.fileCount > 0 && (
+        <span className="ml-1 text-xs text-neutral-500 shrink-0" aria-label={`${node.fileCount} file${node.fileCount === 1 ? "" : "s"}`}>
+          ({node.fileCount})
+        </span>
+      )}
       {node.size != null && <span className="ml-2 text-xs text-neutral-500 shrink-0">{formatSize(node.size)}</span>}
       {node.badge && <span className="ml-2 text-[10px] uppercase text-neutral-500 border rounded px-1 shrink-0">{node.badge}</span>}
     </span>

@@ -97,12 +97,18 @@ export function UnifiedTree({
 
   const [loadedFiles, setLoadedFiles] = useState<LoadedFiles>({});
 
+  // In-flight de-dupe — keep a separate set of keys currently being fetched so
+  // mass expand-all doesn't fire the same URL N times.
+  const inFlightRef = useRef<Set<string>>(new Set());
+
   // Fetch files for a folder when expanded. Files are keyed by node guid because
   // the same materializedPath can occur in multiple nodes (root + each component).
   const fetchFiles = useCallback(
     async (nodeGuid: string, provider: string, materializedPath: string, listingUrl: string) => {
       const key = `${nodeGuid}|${provider}:${materializedPath}`;
       if (loadedFiles[key]) return;
+      if (inFlightRef.current.has(key)) return;
+      inFlightRef.current.add(key);
       try {
         const res = await fetch(
           `/api/files/${nodeGuid}/folder?` + new URLSearchParams({ provider, listingUrl })
@@ -113,10 +119,41 @@ export function UnifiedTree({
         setLoadedFiles((prev) => ({ ...prev, [key]: files }));
       } catch {
         // silent
+      } finally {
+        inFlightRef.current.delete(key);
       }
     },
     [loadedFiles]
   );
+
+  // Auto-fetch files for every folder that's currently expanded and visible.
+  // This makes the initial render (where folders default to expanded) actually
+  // show files, instead of requiring users to click-collapse-then-expand.
+  // De-duped via loadedFiles + inFlightRef in fetchFiles.
+  useEffect(() => {
+    function walkProviderSet(nodeGuid: string, providers: SkeletonNode[], basePrefix: string) {
+      for (const p of providers) {
+        const providerId = `${basePrefix}/provider:${p.provider}`;
+        if (!expanded[providerId]) continue;
+        void fetchFiles(nodeGuid, p.provider, "/", p.listingUrl);
+        function walkFolder(folder: SkeletonNode, parentId: string) {
+          const id = `${parentId}/${folder.name}`;
+          if (!expanded[id]) return;
+          void fetchFiles(nodeGuid, folder.provider, folder.materializedPath, folder.listingUrl);
+          for (const sub of folder.children) walkFolder(sub, id);
+        }
+        for (const folder of p.children) walkFolder(folder, providerId);
+      }
+    }
+    if (expanded["providers-root"]) walkProviderSet(guid, skeleton, "root");
+    if (componentTrees) {
+      for (const c of componentTrees) {
+        if (c.skipped) continue;
+        if (!expanded[`component/${c.guid}`]) continue;
+        walkProviderSet(c.guid, c.skeleton, `component/${c.guid}`);
+      }
+    }
+  }, [expanded, skeleton, componentTrees, guid, fetchFiles]);
 
   const flatRows = useMemo<FlatRow[]>(() => {
     const rows: FlatRow[] = [];
@@ -155,6 +192,7 @@ export function UnifiedTree({
             provider: provider.provider,
             href: `/${nodeGuid}/files/${provider.provider}`,
             newTab: false,
+            fileCount: provider.fileCount,
           },
         });
 
@@ -180,6 +218,7 @@ export function UnifiedTree({
               label: folder.name,
               kind: "folder",
               href: `/${nodeGuid}/files/${folder.provider}${folder.materializedPath}`,
+              fileCount: folder.fileCount,
             },
           });
           if (expanded[id]) {
