@@ -87,15 +87,21 @@ export function UnifiedTreeNode({
 
   // Folder + provider-root + components-root etc. left-click toggles the expand;
   // right-click → "Open in new tab" still works because the `<a href>` is real.
-  // File leaves + linked-project leaves + components/registrations let the click
-  // navigate (or open in a new tab for files/linked, where `newTab` is true).
+  // Component + registration leaves ALSO intercept left-click when they have
+  // children — otherwise clicking a registration to expand its sub-tree would
+  // instead navigate away to /registrations/<guid>. The downstream onClick
+  // handler already gates on `hasChildren`, so leaves without children fall
+  // through to navigation as before. Linked-project leaves never expand (they
+  // point at another project), so they're not in this list.
   const interceptLeftClick =
     node.kind === "folder" ||
     node.kind === "provider-root" ||
     node.kind === "components-root" ||
     node.kind === "linked-root" ||
     node.kind === "registrations-root" ||
-    node.kind === "pinned-root";
+    node.kind === "pinned-root" ||
+    node.kind === "component" ||
+    node.kind === "registration";
 
   const content = node.href ? (
     <a

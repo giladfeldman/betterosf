@@ -91,6 +91,65 @@ describe("UnifiedTreeNode: container left-click toggles", () => {
     expect(ev.defaultPrevented).toBe(false);
     expect(onToggle).not.toHaveBeenCalled();
   });
+
+  // Regression: prior to 2026-05-26, clicking a registration row with a
+  // populated sub-tree NAVIGATED to /registrations/<guid> instead of
+  // expanding inline — because `interceptLeftClick` didn't include
+  // "registration" (or "component"). visual-qa caught this when the
+  // registrationTrees feature shipped.
+  it("registration with hasChildren preventsDefault + calls onToggle (sub-tree expand)", () => {
+    const onToggle = vi.fn();
+    render(
+      <UnifiedTreeNode
+        node={baseNode({ kind: "registration", href: "/registrations/abc12", label: "Reg" })}
+        depth={1}
+        expanded={false}
+        hasChildren={true}
+        onToggle={onToggle}
+      />
+    );
+    const link = screen.getByRole("link");
+    const ev = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+    fireEvent(link, ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("registration with NO children navigates as a leaf (no preventDefault)", () => {
+    const onToggle = vi.fn();
+    render(
+      <UnifiedTreeNode
+        node={baseNode({ kind: "registration", href: "/registrations/abc12", label: "Reg" })}
+        depth={1}
+        expanded={false}
+        hasChildren={false}
+        onToggle={onToggle}
+      />
+    );
+    const link = screen.getByRole("link");
+    const ev = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+    fireEvent(link, ev);
+    expect(ev.defaultPrevented).toBe(false);
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it("component with hasChildren preventsDefault + calls onToggle", () => {
+    const onToggle = vi.fn();
+    render(
+      <UnifiedTreeNode
+        node={baseNode({ kind: "component", href: "/abc12", label: "Comp" })}
+        depth={1}
+        expanded={false}
+        hasChildren={true}
+        onToggle={onToggle}
+      />
+    );
+    const link = screen.getByRole("link");
+    const ev = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+    fireEvent(link, ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("UnifiedTreeNode: file leaf attributes", () => {

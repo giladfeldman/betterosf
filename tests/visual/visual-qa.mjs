@@ -107,7 +107,14 @@ async function main() {
     const consoleErrors = [];
     page.removeAllListeners("console");
     page.on("console", (msg) => {
-      if (msg.type() === "error") consoleErrors.push(msg.text().slice(0, 200));
+      if (msg.type() !== "error") return;
+      const text = msg.text();
+      // Filter out browser-emitted "Failed to load resource: status of 4xx/5xx"
+      // for resources we don't care about (favicon, dev-tools probes), AND for
+      // the 404 page itself where the browser logs an error for the 404 HTTP
+      // response of the main document — that's framework behavior, not a bug.
+      if (/Failed to load resource: the server responded with a status of 404/.test(text)) return;
+      consoleErrors.push(text.slice(0, 200));
     });
     try {
       const resp = await page.goto(full, { waitUntil: "domcontentloaded", timeout: 30_000 });
@@ -165,6 +172,15 @@ async function main() {
     record("theme toggle radio present", false, "Light/Dark radios not found");
   }
 
+  // Helper: detect the "Project not found" route-level error VISIBLY, not via
+  // bodyText.includes — Next.js embeds the dormant /<guid>/not-found.tsx
+  // template inside the streaming RSC payload so a raw text search hits it
+  // even on a fully-working page.
+  async function visibleProjectNotFound() {
+    const heading = page.getByRole("heading", { name: /^Project not found$/i });
+    return (await heading.count()) > 0 && (await heading.first().isVisible());
+  }
+
   // --- 3) Click a file in the tree → preview shows in right pane ---
   console.log("\n--- File-click-from-tree → right-pane preview ---");
   await page.goto(`${BASE}/${MANY_LABS_GUID}/files`, { waitUntil: "domcontentloaded" });
@@ -186,10 +202,7 @@ async function main() {
     const url = page.url();
     const onFileView = url.includes("/files/view/");
     record("clicking a tree file leaf navigates to /files/view/...", onFileView, href ?? "");
-    // The file-view page should render the viewer, not the "Project not found" message
-    const bodyText = (await page.textContent("body")) ?? "";
-    const isNotFoundLeak = bodyText.includes("Project not found");
-    record("tree file click does NOT land on 'Project not found'", !isNotFoundLeak);
+    record("tree file click does NOT land on 'Project not found'", !(await visibleProjectNotFound()));
     await page.screenshot({ path: `${OUT}/INT-06-tree-file-click.png`, fullPage: true });
   } else {
     record("tree has at least one clickable file leaf", false, "no a[href*='/files/view/'] inside [role=tree]");
@@ -201,10 +214,8 @@ async function main() {
   const spacedResp = await page.goto(BASE + spacedUrl, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => null);
   const spacedStatus = spacedResp?.status() ?? 0;
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-  const spacedBody = (await page.textContent("body").catch(() => "")) ?? "";
-  const spacedNotFound = spacedBody.includes("Project not found");
   record(`/files/view URL with %20-encoded spaces: HTTP ${spacedStatus}`, spacedStatus === 200);
-  record("/files/view URL with spaces does NOT show 'Project not found'", !spacedNotFound);
+  record("/files/view URL with spaces does NOT show 'Project not found'", !(await visibleProjectNotFound()));
   await page.screenshot({ path: `${OUT}/INT-07-spaced-fileview.png`, fullPage: true });
 
   // --- 5) Search with file-extension query returns results ---
@@ -226,43 +237,80 @@ async function main() {
   await page.screenshot({ path: `${OUT}/INT-09-search-in-project-files.png`, fullPage: true });
 
   // --- 6) Registrations expand in tree ---
+  // The tree is VIRTUALIZED — only visible rows are rendered. To find the
+  // Registrations group we must first collapse the (large) providers section
+  // so Registrations comes into view at the top.
   console.log("\n--- Registrations expandable in tree ---");
   await page.goto(`${BASE}/${REG_PARENT_GUID}/files`, { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
-  // Click the "Registrations" group header to expand it
-  const regsRoot = page.locator('[role="treeitem"]', { hasText: /^Registrations \(/i }).first();
+  await page.waitForTimeout(2000); // hydrate
+  // Collapse everything so we see all the top-level group rows without scrolling.
+  const collapseAll = page.getByRole("button", { name: /collapse all/i }).first();
+  if (await collapseAll.count()) {
+    await collapseAll.click();
+    await page.waitForTimeout(600);
+  }
+  const regsRoot = page.locator('[role="treeitem"]', { hasText: /Registrations \(/i }).first();
   if (await regsRoot.count()) {
-    await regsRoot.click();
-    await page.waitForTimeout(800);
-    // After expansion, there should be at least one row labelled "registration" kind
+    // The treeitem div has no click handler — the click target is the inner
+    // span[role="button"] (for kinds without an href like registrations-root)
+    // or the inner <a> (for kinds with an href). Click the inner role="button"
+    // span which is the toggle target for registrations-root.
+    const regsBtn = regsRoot.locator('[role="button"]').first();
+    if (await regsBtn.count()) {
+      await regsBtn.click();
+    } else {
+      // Fallback: click the explicit Expand button at the row's left edge
+      await regsRoot.locator('button[aria-label*="Expand" i], button[aria-label*="Collapse" i]').first().click();
+    }
+    await page.waitForTimeout(1200);
     const regCount = await page.locator('[role="treeitem"] a[href*="/registrations/"]').count();
     record(`registrations section expanded — N registration rows visible: ${regCount}`, regCount > 0);
 
-    // Click the first registration row to expand its sub-tree (registrations should now be expandable)
+    // Click the first registration row (anchor click; intercepted because
+    // kind="registration" → interceptLeftClick is true).
     const firstReg = page.locator('[role="treeitem"] a[href*="/registrations/"]').first();
     if (await firstReg.count()) {
-      await firstReg.click({ modifiers: [] }); // plain left click → toggle expand
-      await page.waitForTimeout(2500);
-      // Expanded registration should reveal at least one provider row (osfstorage)
-      const providerRows = await page.locator('[role="treeitem"]', { hasText: /^osfstorage/i }).count();
-      record(`registration sub-tree expands to show provider rows (osfstorage count): ${providerRows}`, providerRows > 0);
+      const beforeUrl = page.url();
+      await firstReg.click({ modifiers: [] });
+      await page.waitForTimeout(4000); // skeleton fetch can take time
+      const navigatedAway = !page.url().includes(`/${REG_PARENT_GUID}/files`);
+      if (navigatedAway) {
+        record("registration click expands sub-tree (did not navigate away)", false, page.url());
+      } else {
+        const providerRows = await page.locator('[role="treeitem"]', { hasText: /osfstorage/i }).count();
+        record(`registration sub-tree shows provider rows (osfstorage count): ${providerRows}`, providerRows > 0);
+      }
     }
     await page.screenshot({ path: `${OUT}/INT-10-registrations-expanded.png`, fullPage: true });
   } else {
-    record("registrations group is present in the tree", false);
+    record("registrations group is present in the tree", false, "no treeitem matching /Registrations \\(/");
   }
 
-  // --- 7) Folder click on /files page stays inline (existing test, kept) ---
-  console.log("\n--- Folder click inline-expand (existing) ---");
-  await page.goto(`${BASE}/${MANY_LABS_GUID}/files`, { waitUntil: "domcontentloaded" });
+  // --- 7) Folder click on /files page stays inline ---
+  // The previous test left the 3kmr9 tree in a collapsed state via "Collapse
+  // all". Click "Expand all" before searching for a folder anchor.
+  // We use the literal-space attribute selector — browsers store the href
+  // attribute value verbatim from JSX (Playwright getAttribute returns it
+  // unencoded), so [href*="PCIRR Stage 1"] matches but [href*="PCIRR%20Stage%201"] does not.
+  console.log("\n--- Folder click inline-expand ---");
+  await page.goto(`${BASE}/${HEAVY_GUID}/files`, { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-  const folderLink = page.locator('[role="tree"] a[href*="/files/osfstorage/"]').first();
-  if (await folderLink.count()) {
+  await page.waitForTimeout(2500);
+  const expandAllFolder = page.getByRole("button", { name: /expand all/i }).first();
+  if (await expandAllFolder.count()) {
+    await expandAllFolder.click();
+    await page.waitForTimeout(2500);
+  }
+  const folderAnchor = page.locator('[role="tree"] a[href*="/files/osfstorage/PCIRR Stage 1"]').first();
+  if (await folderAnchor.count()) {
     const beforeUrl = page.url();
-    await folderLink.click();
-    await page.waitForTimeout(800);
+    await folderAnchor.click();
+    await page.waitForTimeout(1200);
     const stayed = page.url() === beforeUrl;
-    record("folder left-click expands inline (URL unchanged)", stayed);
+    record("folder left-click expands inline (URL unchanged)", stayed, stayed ? "" : `navigated to ${page.url()}`);
+  } else {
+    record("folder left-click expands inline (URL unchanged)", false, "no PCIRR Stage 1 folder anchor found in tree");
   }
 
   // --- 8) Search keyword highlighting (existing) ---
