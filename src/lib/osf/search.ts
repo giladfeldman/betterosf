@@ -25,6 +25,12 @@ async function executeMulti<T>(
   idOf: (item: T) => string,
   textOf: (item: T) => string,
   tagSuffix: string,
+  // Endpoint style:
+  //   "filter" → /v2/<resource>/?filter[<field>]=<term>
+  //   "search" → /v2/search/<resource>/?q=<term>  (full-text search)
+  // OSF's /files/?filter[name]= returns 404 for nearly all queries — the
+  // search endpoint is the only thing that actually finds files by name.
+  mode: "filter" | "search" = "filter",
 ): Promise<SearchPage<T>> {
   const ast = parseQuery(query);
   const plan = compileQuery(ast, field);
@@ -39,12 +45,18 @@ async function executeMulti<T>(
 
   const fetchOne = async (req: { filters: FilterPair[] }) => {
     const qs = new URLSearchParams();
-    for (const [k, v] of req.filters) qs.append(`filter[${k}]`, v);
+    if (mode === "search") {
+      const q = req.filters.map(([, v]) => v).join(" ");
+      if (q) qs.set("q", q);
+    } else {
+      for (const [k, v] of req.filters) qs.append(`filter[${k}]`, v);
+    }
     qs.set("page", String(page));
     qs.set("page[size]", String(size));
     if (sort) qs.set("sort", sort);
+    const path = mode === "search" ? `/search/${resource}/` : `/${resource}/`;
     return osfGet<RawCollection<unknown>>(
-      `/${resource}/?${qs.toString()}`,
+      `${path}?${qs.toString()}`,
       { tags: ["search", `search:${tagSuffix}:${query}`], revalidate: 60 }
     );
   };
@@ -108,9 +120,18 @@ export type SearchedFile = {
 type RawSearchedFile = {
   id: string;
   type: string;
-  attributes: { name?: string; kind?: "file" | "folder"; size?: number | null; materialized_path?: string; modified?: string };
+  attributes: {
+    name?: string;
+    kind?: "file" | "folder";
+    size?: number | null;
+    materialized_path?: string;
+    modified?: string;
+    // /search/files/ uses date_modified; /files/?filter[name]= used modified.
+    date_modified?: string | null;
+    guid?: string;
+  };
   links?: { download?: string };
-  relationships?: { node?: { data?: { id?: string } } };
+  relationships?: { node?: { data?: { id?: string } }; target?: { data?: { id?: string } } };
 };
 
 export async function searchFiles(query: string, opts?: { page?: number; perPage?: number; sort?: string }): Promise<SearchPage<SearchedFile>> {
@@ -125,13 +146,19 @@ export async function searchFiles(query: string, opts?: { page?: number; perPage
       kind: r.attributes.kind ?? "file",
       size: r.attributes.size ?? null,
       materializedPath: String(r.attributes.materialized_path ?? ""),
-      modified: String(r.attributes.modified ?? ""),
+      modified: String(r.attributes.modified ?? r.attributes.date_modified ?? ""),
       downloadUrl: r.links?.download ?? "",
-      nodeId: r.relationships?.node?.data?.id ?? null,
+      // /search/files/ exposes the containing node via `target` (or sometimes
+      // via the file's `guid`); /files/?filter[]= used `node`. Try all.
+      nodeId:
+        r.relationships?.node?.data?.id ??
+        r.relationships?.target?.data?.id ??
+        null,
     })),
     (item) => item.id,
     (item) => item.name,
     "files",
+    "search",
   );
 }
 
@@ -200,15 +227,12 @@ export async function searchUsers(query: string, opts?: { page?: number; perPage
 // Scoped search within a project: post-filters children/linked/registrations of a root node.
 import { getAllChildren, getAllLinkedNodes } from "@/lib/osf/nodes";
 import { getNodeRegistrations } from "@/lib/osf/registrations";
+import { fetchAllProjectEntries } from "@/lib/osf/files-recursive";
 
-export async function searchInProjectScope(rootGuid: string, query: string): Promise<{
-  components: NodeView[];
-  linked: NodeView[];
-  registrations: { id: string; title: string; dateRegistered: string; osfUrl: string }[];
-}> {
+function buildIncludeFn(query: string, field: string): (text: string) => boolean {
   const ast = parseQuery(query);
-  const plan = compileQuery(ast, "title");
-  const include = (text: string) => {
+  const plan = compileQuery(ast, field);
+  return (text: string) => {
     const t = text.toLowerCase();
     if (plan.exclusions.some((e) => t.includes(e.toLowerCase()))) return false;
     if (plan.requests.length === 0 || plan.requests[0]?.filters.length === 0) return true;
@@ -217,11 +241,19 @@ export async function searchInProjectScope(rootGuid: string, query: string): Pro
       req.filters.every(([, val]) => t.includes(val.toLowerCase()))
     );
   };
+}
+
+export async function searchInProjectScope(rootGuid: string, query: string): Promise<{
+  components: NodeView[];
+  linked: NodeView[];
+  registrations: { id: string; title: string; dateRegistered: string; osfUrl: string }[];
+}> {
+  const include = buildIncludeFn(query, "title");
 
   const [children, linked, registrations] = await Promise.all([
-    getAllChildren(rootGuid),
-    getAllLinkedNodes(rootGuid),
-    getNodeRegistrations(rootGuid),
+    getAllChildren(rootGuid).catch((): NodeView[] => []),
+    getAllLinkedNodes(rootGuid).catch((): NodeView[] => []),
+    getNodeRegistrations(rootGuid).catch((): { id: string; title: string; dateRegistered: string; public: boolean; osfUrl: string }[] => []),
   ]);
 
   return {
@@ -231,4 +263,33 @@ export async function searchInProjectScope(rootGuid: string, query: string): Pro
       id: r.id, title: r.title, dateRegistered: r.dateRegistered, osfUrl: r.osfUrl,
     })),
   };
+}
+
+/**
+ * Search files within a project's storage by walking every folder under every
+ * provider and filtering by name. Bounded by `fetchAllProjectEntries`'s
+ * maxEntries cap (5000 by default).
+ *
+ * Returns a SearchedFile-shaped array so the existing FileResult component can
+ * render the results unchanged.
+ */
+export async function searchFilesInProjectScope(
+  rootGuid: string,
+  query: string,
+  opts?: { maxEntries?: number }
+): Promise<SearchedFile[]> {
+  const include = buildIncludeFn(query, "name");
+  const all = await fetchAllProjectEntries(rootGuid, { maxEntries: opts?.maxEntries ?? 5000 }).catch(() => []);
+  return all
+    .filter((e) => e.kind === "file" && include(e.name))
+    .map((e) => ({
+      id: `${rootGuid}:${e.provider}:${e.materializedPath}`,
+      name: e.name,
+      kind: "file" as const,
+      size: null,
+      materializedPath: e.materializedPath,
+      modified: "",
+      downloadUrl: e.downloadUrl ?? "",
+      nodeId: rootGuid,
+    }));
 }

@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* Tailwind v4 dropped automatic config-file reads; without this directive
+   the `dark:` variant defaults to a `prefers-color-scheme: dark` media
+   query and ignores the explicit class toggled by next-themes. The :where()
+   selector keeps specificity at 0 and matches the .dark element itself OR
+   any descendant. Pair: tailwind.config.ts `darkMode: "class"`. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root { color-scheme: light dark; }
 html, body { font-family: ui-sans-serif, system-ui, sans-serif; }
 .font-mono-files { font-family: ui-monospace, "SF Mono", Menlo, monospace; word-break: break-word; }

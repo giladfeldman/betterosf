@@ -1,4 +1,4 @@
-import { searchNodes, searchFiles, searchRegistrations, searchUsers, searchInProjectScope, type SearchPage as SearchPageResult } from "@/lib/osf/search";
+import { searchNodes, searchFiles, searchRegistrations, searchUsers, searchInProjectScope, searchFilesInProjectScope, type SearchPage as SearchPageResult } from "@/lib/osf/search";
 import { searchUserNodes } from "@/lib/osf/users";
 import { SearchTypeChips, type SearchType } from "@/components/SearchTypeChips";
 import { ProjectResult, FileResult, RegistrationResult, UserResult } from "@/components/SearchResultRow";
@@ -157,6 +157,19 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
         <Pagination q={q} type="projects" page={page} scope={scope} size={sizeRaw} sort={sort} ext={ext} hasMore={result.data.hasMore} />
       </>
     ) : <SearchError reason={result.reason} />;
+  } else if (isProjectScope && type === "files") {
+    const guid = scope.slice("project:".length);
+    const matched = await searchFilesInProjectScope(guid, q);
+    const filtered = ext ? matched.filter((f) => matchesExt(f.name, ext)) : matched;
+    body = (
+      <>
+        <p className="text-sm text-neutral-600 mb-3">
+          {filtered.length}{ext ? ` filtered of ${matched.length}` : ""} file{filtered.length === 1 ? "" : "s"} match in this project (walked up to 5,000 entries).
+        </p>
+        <ul>{filtered.map((f) => <FileResult key={f.id} file={f} terms={terms} />)}</ul>
+        {filtered.length === 0 && <p className="text-neutral-500">No files match.</p>}
+      </>
+    );
   } else if (isProjectScope && (type === "projects" || type === "registrations")) {
     const guid = scope.slice("project:".length);
     const out = await searchInProjectScope(guid, q);

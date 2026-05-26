@@ -1,6 +1,7 @@
 import "server-only";
 import { collectFolderSkeleton, type SkeletonNode } from "./folder-skeleton";
 import { getAllChildren } from "./nodes";
+import { getNodeRegistrations, type RegistrationView } from "./registrations";
 import type { NodeView } from "./parse";
 
 export type ComponentTree = {
@@ -13,11 +14,23 @@ export type ComponentTree = {
   skipped: boolean;
 };
 
+export type RegistrationTree = {
+  guid: string;
+  title: string;
+  dateRegistered: string;
+  isPublic: boolean;
+  skeleton: SkeletonNode[];
+  skipped: boolean;
+};
+
 export type FullProjectTree = {
   rootSkeleton: SkeletonNode[];
   components: ComponentTree[];
   /** Total component count from OSF (may exceed components.length when capped). */
   totalComponents: number;
+  /** Folder skeletons for each registration of this project. */
+  registrationTrees: RegistrationTree[];
+  totalRegistrations: number;
 };
 
 /**
@@ -49,26 +62,34 @@ async function raceTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T
  */
 export async function collectFullTree(
   rootGuid: string,
-  opts: { maxComponentsToRecurse?: number; componentTimeoutMs?: number; rootTimeoutMs?: number } = {}
+  opts: {
+    maxComponentsToRecurse?: number;
+    maxRegistrationsToRecurse?: number;
+    componentTimeoutMs?: number;
+    rootTimeoutMs?: number;
+  } = {}
 ): Promise<FullProjectTree> {
   const maxComp = opts.maxComponentsToRecurse ?? 5;
+  const maxReg = opts.maxRegistrationsToRecurse ?? 3;
   const componentTimeoutMs = opts.componentTimeoutMs ?? 8_000;
   const rootTimeoutMs = opts.rootTimeoutMs ?? 15_000;
 
-  // Parallel: root skeleton + direct children list, each with timeout
-  const [rootSkeleton, children] = await Promise.all([
+  // Parallel: root skeleton + direct children list + registrations list,
+  // each with timeout / fail-soft.
+  const [rootSkeleton, children, registrations] = await Promise.all([
     raceTimeout(collectFolderSkeleton(rootGuid), rootTimeoutMs, [] as SkeletonNode[]).catch((): SkeletonNode[] => []),
     getAllChildren(rootGuid).catch((): NodeView[] => []),
+    getNodeRegistrations(rootGuid).catch((): RegistrationView[] => []),
   ]);
 
   // For the first N components, fetch each one's skeleton in parallel — each
   // racing its own timeout so one slow component can't sink the whole page.
-  const limit = Math.min(children.length, maxComp);
-  const recursed = children.slice(0, limit);
-  const skipped = children.slice(limit);
+  const compLimit = Math.min(children.length, maxComp);
+  const compRecursed = children.slice(0, compLimit);
+  const compSkipped = children.slice(compLimit);
 
   const recursedTrees: ComponentTree[] = await Promise.all(
-    recursed.map(async (c) => ({
+    compRecursed.map(async (c) => ({
       guid: c.id,
       title: c.title || c.id,
       category: c.category,
@@ -82,7 +103,7 @@ export async function collectFullTree(
     }))
   );
 
-  const skippedTrees: ComponentTree[] = skipped.map((c) => ({
+  const skippedTrees: ComponentTree[] = compSkipped.map((c) => ({
     guid: c.id,
     title: c.title || c.id,
     category: c.category,
@@ -91,9 +112,41 @@ export async function collectFullTree(
     skipped: true,
   }));
 
+  // Same pattern for registrations — capped + timeout + fail-soft. Registrations
+  // live under /v2/registrations/<guid>/files/ so we pass kind:"registration".
+  const regLimit = Math.min(registrations.length, maxReg);
+  const regRecursed = registrations.slice(0, regLimit);
+  const regSkipped = registrations.slice(regLimit);
+
+  const recursedRegs: RegistrationTree[] = await Promise.all(
+    regRecursed.map(async (r) => ({
+      guid: r.id,
+      title: r.title || r.id,
+      dateRegistered: r.dateRegistered,
+      isPublic: r.public,
+      skeleton: await raceTimeout(
+        collectFolderSkeleton(r.id, { kind: "registration" }),
+        componentTimeoutMs,
+        [] as SkeletonNode[]
+      ).catch((): SkeletonNode[] => []),
+      skipped: false,
+    }))
+  );
+
+  const skippedRegs: RegistrationTree[] = regSkipped.map((r) => ({
+    guid: r.id,
+    title: r.title || r.id,
+    dateRegistered: r.dateRegistered,
+    isPublic: r.public,
+    skeleton: [],
+    skipped: true,
+  }));
+
   return {
     rootSkeleton,
     components: [...recursedTrees, ...skippedTrees],
     totalComponents: children.length,
+    registrationTrees: [...recursedRegs, ...skippedRegs],
+    totalRegistrations: registrations.length,
   };
 }

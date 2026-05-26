@@ -72,7 +72,7 @@ export function UnifiedTreeNode({
   selected?: boolean;
 }) {
   const inner = (
-    <span className="inline-flex items-center gap-1 truncate min-w-0">
+    <span className="inline-flex items-center gap-1 truncate min-w-0" title={node.label}>
       {kindIcon(node.kind, node.provider)}
       <span className="truncate">{node.label}</span>
       {node.fileCount != null && node.fileCount > 0 && (

@@ -64,15 +64,40 @@ function parseEntry(raw: RawEntry): FileEntry {
   };
 }
 
-export async function getProviderRoots(guid: string): Promise<ProviderRoot[]> {
-  const raw = await osfGet<CollectionResponse>(`/nodes/${guid}/files/?page[size]=100`, {
-    tags: [`node:${guid}`, `files:${guid}`],
+export type FilesKind = "node" | "registration";
+
+export async function getProviderRoots(guid: string, opts: { kind?: FilesKind } = {}): Promise<ProviderRoot[]> {
+  const resource = opts.kind === "registration" ? "registrations" : "nodes";
+  const tagKey = opts.kind === "registration" ? `registration:${guid}` : `node:${guid}`;
+  const raw = await osfGet<CollectionResponse>(`/${resource}/${guid}/files/?page[size]=100`, {
+    tags: [tagKey, `files:${guid}`],
   });
   return raw.data.map((r) => ({
     provider: String(r.attributes.provider ?? r.attributes.name ?? r.id),
     name: String(r.attributes.name ?? r.id),
     listingUrl: r.relationships?.files?.links?.related?.href ?? "",
   }));
+}
+
+/**
+ * Resolve a guid that could be either a node or a registration. Tries the node
+ * endpoint first (the common case) and falls back to the registration endpoint
+ * on a 404. Lets the file-view route serve registration files via the same
+ * `/<guid>/files/view/<path>` URL pattern as node files.
+ */
+export async function getProviderRootsAuto(guid: string): Promise<{ roots: ProviderRoot[]; kind: FilesKind }> {
+  try {
+    const roots = await getProviderRoots(guid, { kind: "node" });
+    return { roots, kind: "node" };
+  } catch (e) {
+    // Lazy import to avoid circular deps via client.ts.
+    const { OsfError } = await import("./types");
+    if (e instanceof OsfError && e.code === "not_found") {
+      const roots = await getProviderRoots(guid, { kind: "registration" });
+      return { roots, kind: "registration" };
+    }
+    throw e;
+  }
 }
 
 export async function getFolderContents(listingUrl: string, guidForCacheTag: string): Promise<FileEntry[]> {

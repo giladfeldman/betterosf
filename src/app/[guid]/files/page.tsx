@@ -1,29 +1,35 @@
 import { notFound } from "next/navigation";
 import { isValidGuid } from "@/lib/osf/guid";
-import { collectFullTree } from "@/lib/osf/full-tree";
+import { collectFullTree, type FullProjectTree } from "@/lib/osf/full-tree";
 import { getNode, getAllLinkedNodes } from "@/lib/osf/nodes";
-import { getNodeRegistrations } from "@/lib/osf/registrations";
+import { getNodeRegistrations, type RegistrationView } from "@/lib/osf/registrations";
 import { OsfError } from "@/lib/osf/types";
+import type { NodeView } from "@/lib/osf/parse";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { UnifiedTree } from "@/components/UnifiedTree";
 import { SplitPane } from "@/components/SplitPane";
+
+const EMPTY_TREE: FullProjectTree = { rootSkeleton: [], components: [], totalComponents: 0, registrationTrees: [], totalRegistrations: 0 };
 
 export default async function FilesPage({ params }: { params: Promise<{ guid: string }> }) {
   const { guid } = await params;
   if (!isValidGuid(guid)) notFound();
 
-  let node, fullTree, linked, registrations;
+  // Critical: project must exist. Side data (tree, linked, regs) may fail
+  // gracefully so a restricted-side-endpoint doesn't make the whole page 404.
+  let node;
   try {
-    [node, fullTree, linked, registrations] = await Promise.all([
-      getNode(guid),
-      collectFullTree(guid),
-      getAllLinkedNodes(guid),
-      getNodeRegistrations(guid),
-    ]);
+    node = await getNode(guid);
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") notFound();
     throw e;
   }
+
+  const [fullTree, linked, registrations]: [FullProjectTree, NodeView[], RegistrationView[]] = await Promise.all([
+    collectFullTree(guid).catch((): FullProjectTree => EMPTY_TREE),
+    getAllLinkedNodes(guid).catch((): NodeView[] => []),
+    getNodeRegistrations(guid).catch((): RegistrationView[] => []),
+  ]);
 
   const components = fullTree.components.map((c) => ({
     id: c.guid,
@@ -49,7 +55,7 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
       />
       <SplitPane
         prefKey="files"
-        defaultLeftWidth={360}
+        defaultLeftWidth={420}
         left={
           <UnifiedTree
             guid={guid}
@@ -59,6 +65,7 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
             componentTrees={fullTree.components}
             linkedNodes={linked}
             registrations={registrations}
+            registrationTrees={fullTree.registrationTrees}
           />
         }
         right={

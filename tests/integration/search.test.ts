@@ -41,18 +41,22 @@ describe("searchNodes", () => {
 });
 
 describe("searchFiles", () => {
-  it("filters by name and returns file entries with download URLs", async () => {
+  it("uses /v2/search/files/?q= (filter[name]= was 404'ing for nearly all queries)", async () => {
+    // Regression: OSF's /v2/files/?filter[name]= returns 404 for almost every
+    // query (including common ones like "raw" or ".qsf"), so we use the
+    // dedicated /v2/search/files/?q= endpoint instead. If this test starts
+    // hitting /v2/files/ again, we've reintroduced the bug.
     server.use(
-      http.get("https://api.osf.io/v2/files/", ({ request }) => {
+      http.get("https://api.osf.io/v2/search/files/", ({ request }) => {
         const url = new URL(request.url);
-        expect(url.searchParams.get("filter[name]")).toBe("raw.csv");
+        expect(url.searchParams.get("q")).toBe("raw.csv");
         return HttpResponse.json({
           data: [
             {
               id: "f1", type: "files",
-              attributes: { name: "raw.csv", kind: "file", size: 1024, materialized_path: "/data/raw.csv", modified: "2024-01-01" },
+              attributes: { name: "raw.csv", kind: "file", size: 1024, materialized_path: "/data/raw.csv", date_modified: "2024-01-01" },
               links: { download: "https://files.osf.io/v1/resources/p1/providers/osfstorage/f1" },
-              relationships: { node: { data: { id: "p1", type: "nodes" } } },
+              relationships: { target: { data: { id: "p1", type: "nodes" } } },
             },
           ],
           links: { next: null },
@@ -65,6 +69,30 @@ describe("searchFiles", () => {
     expect(out.results[0]?.name).toBe("raw.csv");
     expect(out.results[0]?.nodeId).toBe("p1");
     expect(out.results[0]?.downloadUrl).toContain("files.osf.io");
+  });
+
+  it("handles dotted/extension-style queries like .qsf without 404ing", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/search/files/", ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get("q")).toBe(".qsf");
+        return HttpResponse.json({
+          data: [
+            {
+              id: "q1", type: "files",
+              attributes: { name: "Study1.qsf", kind: "file", size: 2048, materialized_path: "/Study1.qsf", date_modified: "2025-06-01" },
+              links: { download: "https://files.osf.io/v1/resources/abc/providers/osfstorage/q1" },
+              relationships: { target: { data: { id: "abc", type: "nodes" } } },
+            },
+          ],
+          links: { next: null },
+          meta: { total: 1 },
+        });
+      })
+    );
+    const out = await searchFiles(".qsf");
+    expect(out.results).toHaveLength(1);
+    expect(out.results[0]?.name).toBe("Study1.qsf");
   });
 });
 

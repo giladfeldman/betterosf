@@ -94,18 +94,30 @@ export default async function ProjectPage({
   if (!isValidGuid(guid)) notFound();
   const sp = (await searchParams) ?? {};
 
-  let node, fullTree, linked, regs;
+  // Critical: project must exist. Side data (tree, linked, regs) may fail
+  // gracefully so a restricted side endpoint doesn't 404 the whole overview.
+  let node;
   try {
-    [node, fullTree, linked, regs] = await Promise.all([
-      getNode(guid),
-      collectFullTree(guid),
-      getAllLinkedNodes(guid),
-      getNodeRegistrations(guid),
-    ]);
+    node = await getNode(guid);
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") notFound();
     throw e;
   }
+  const [fullTree, linked, regs]: [
+    Awaited<ReturnType<typeof collectFullTree>>,
+    NodeView[],
+    RegistrationView[]
+  ] = await Promise.all([
+    collectFullTree(guid).catch(() => ({
+      rootSkeleton: [],
+      components: [],
+      totalComponents: 0,
+      registrationTrees: [],
+      totalRegistrations: 0,
+    })),
+    getAllLinkedNodes(guid).catch((): NodeView[] => []),
+    getNodeRegistrations(guid).catch((): RegistrationView[] => []),
+  ]);
 
   // Build NodeView-shaped components for the tree + the components list section
   const components: NodeView[] = fullTree.components.map((c) => ({
@@ -325,6 +337,7 @@ export default async function ProjectPage({
             componentTrees={fullTree.components}
             linkedNodes={linked}
             registrations={regs}
+            registrationTrees={fullTree.registrationTrees}
           />
         }
         right={overviewRight}

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { SkeletonNode } from "@/lib/osf/folder-skeleton";
-import type { ComponentTree } from "@/lib/osf/full-tree";
+import type { ComponentTree, RegistrationTree } from "@/lib/osf/full-tree";
 import type { NodeView } from "@/lib/osf/parse";
 import type { RegistrationView } from "@/lib/osf/registrations";
 import type { FileEntry } from "@/lib/osf/files";
@@ -30,6 +30,7 @@ export function UnifiedTree({
   componentTrees,
   linkedNodes,
   registrations,
+  registrationTrees,
 }: {
   guid: string;
   rootTitle: string;
@@ -39,6 +40,10 @@ export function UnifiedTree({
   componentTrees?: ComponentTree[];
   linkedNodes: NodeView[];
   registrations: RegistrationView[];
+  /** When provided, each registration is rendered as an expandable sub-tree
+   *  with its own provider+folder hierarchy (and its files load on expand).
+   *  Falls back to flat leaf-link rendering when absent. */
+  registrationTrees?: RegistrationTree[];
 }) {
   const [pinned, setPinned] = useState<FavoriteRef[]>([]);
   useEffect(() => {
@@ -153,7 +158,14 @@ export function UnifiedTree({
         walkProviderSet(c.guid, c.skeleton, `component/${c.guid}`);
       }
     }
-  }, [expanded, skeleton, componentTrees, guid, fetchFiles]);
+    if (registrationTrees) {
+      for (const r of registrationTrees) {
+        if (r.skipped) continue;
+        if (!expanded[`registration/${r.guid}`]) continue;
+        walkProviderSet(r.guid, r.skeleton, `registration/${r.guid}`);
+      }
+    }
+  }, [expanded, skeleton, componentTrees, registrationTrees, guid, fetchFiles]);
 
   const flatRows = useMemo<FlatRow[]>(() => {
     const rows: FlatRow[] = [];
@@ -234,8 +246,12 @@ export function UnifiedTree({
                   id: f.id,
                   label: f.name,
                   kind: "file",
+                  // Same tab: /files/view/<path> renders the SplitPane shell so
+                  // the tree on the left stays mounted and the right pane swaps
+                  // to the viewer. Right-click → "Open in new tab" still works
+                  // because the href is a real anchor.
                   href: `/${nodeGuid}/files/view/${folder.provider}${folder.materializedPath}${f.name}`,
-                  newTab: true,
+                  newTab: false,
                   size: f.kind === "file" ? f.size : null,
                   modified: f.kind === "file" ? f.modified : undefined,
                 },
@@ -261,7 +277,7 @@ export function UnifiedTree({
               label: f.name,
               kind: "file",
               href: `/${nodeGuid}/files/view/${provider.provider}/${f.name}`,
-              newTab: true,
+              newTab: false,
               size: f.kind === "file" ? f.size : null,
             },
           });
@@ -403,21 +419,51 @@ export function UnifiedTree({
         node: { id: "registrations-root", label: `Registrations (${registrations.length})`, kind: "registrations-root" },
       });
       if (expanded["registrations-root"]) {
-        for (const r of registrations) {
-          rows.push({
-            id: `registration/${r.id}`,
-            depth: 1,
-            expanded: false,
-            hasChildren: false,
-            onToggle: () => {},
-            node: { id: r.id, label: r.title || r.id, kind: "registration", href: `/registrations/${r.id}`, badge: r.public ? undefined : "private" },
-          });
+        if (registrationTrees && registrationTrees.length > 0) {
+          // Registrations as expandable sub-trees. Each registration row is
+          // a folder-style container; expanding it reveals its provider/folder
+          // hierarchy via emitNodeSubtree (kind-agnostic since the API route
+          // `/api/files/<guid>/folder?listingUrl=…` works for both nodes and
+          // registrations as long as the listingUrl starts with v2/).
+          for (const r of registrationTrees) {
+            const regId = `registration/${r.guid}`;
+            const regHasContent = r.skeleton.length > 0;
+            rows.push({
+              id: regId,
+              depth: 1,
+              expanded: !!expanded[regId],
+              hasChildren: regHasContent,
+              onToggle: toggle(regId),
+              node: {
+                id: r.guid,
+                label: r.title || r.guid,
+                kind: "registration",
+                href: `/registrations/${r.guid}`,
+                badge: r.skipped ? "skipped" : r.isPublic ? undefined : "private",
+              },
+            });
+            if (expanded[regId] && !r.skipped) {
+              emitNodeSubtree(r.guid, r.skeleton, regId, 2);
+            }
+          }
+        } else {
+          // Fallback: leaf links (used when caller didn't provide registrationTrees)
+          for (const r of registrations) {
+            rows.push({
+              id: `registration/${r.id}`,
+              depth: 1,
+              expanded: false,
+              hasChildren: false,
+              onToggle: () => {},
+              node: { id: r.id, label: r.title || r.id, kind: "registration", href: `/registrations/${r.id}`, badge: r.public ? undefined : "private" },
+            });
+          }
         }
       }
     }
 
     return rows;
-  }, [expanded, loadedFiles, skeleton, components, componentTrees, linkedNodes, registrations, pinned, rootTitle, guid, fetchFiles, setExpanded]);
+  }, [expanded, loadedFiles, skeleton, components, componentTrees, linkedNodes, registrations, registrationTrees, pinned, rootTitle, guid, fetchFiles, setExpanded]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -459,8 +505,18 @@ export function UnifiedTree({
         }
       }
     }
+    // Registration sub-trees
+    if (registrationTrees) {
+      for (const r of registrationTrees) {
+        ids.push(`registration/${r.guid}`);
+        for (const p of r.skeleton) {
+          ids.push(`registration/${r.guid}/provider:${p.provider}`);
+          walkSkeleton(p.children, `registration/${r.guid}/provider:${p.provider}`);
+        }
+      }
+    }
     return ids;
-  }, [skeleton, componentTrees]);
+  }, [skeleton, componentTrees, registrationTrees]);
 
   const expandAll = () => {
     const next: Record<string, boolean> = {};

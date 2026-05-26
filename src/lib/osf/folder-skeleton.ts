@@ -1,5 +1,5 @@
 import "server-only";
-import { getProviderRoots, getFolderContents, type FileEntry } from "./files";
+import { getProviderRoots, getFolderContents, type FileEntry, type FilesKind } from "./files";
 
 export type SkeletonNode = {
   provider: string;
@@ -14,13 +14,13 @@ export type SkeletonNode = {
 
 export async function collectFolderSkeleton(
   guid: string,
-  opts: { maxFolders?: number; maxDepth?: number } = {}
+  opts: { maxFolders?: number; maxDepth?: number; kind?: FilesKind } = {}
 ): Promise<SkeletonNode[]> {
   const maxFolders = opts.maxFolders ?? 500;
   const maxDepth = opts.maxDepth ?? 8;
   let folderCount = 0;
 
-  const providers = await getProviderRoots(guid);
+  const providers = await getProviderRoots(guid, { kind: opts.kind });
 
   async function walk(
     listingUrl: string,
