@@ -1,6 +1,6 @@
 import "server-only";
 import { collectFolderSkeleton, type SkeletonNode } from "./folder-skeleton";
-import { getAllChildren } from "./nodes";
+import { getAllChildren, getAllLinkedNodes } from "./nodes";
 import { getNodeRegistrations, type RegistrationView } from "./registrations";
 import type { NodeView } from "./parse";
 
@@ -23,6 +23,15 @@ export type RegistrationTree = {
   skipped: boolean;
 };
 
+export type LinkedTree = {
+  guid: string;
+  title: string;
+  category: string;
+  isPublic: boolean;
+  skeleton: SkeletonNode[];
+  skipped: boolean;
+};
+
 export type FullProjectTree = {
   rootSkeleton: SkeletonNode[];
   components: ComponentTree[];
@@ -31,6 +40,9 @@ export type FullProjectTree = {
   /** Folder skeletons for each registration of this project. */
   registrationTrees: RegistrationTree[];
   totalRegistrations: number;
+  /** Folder skeletons for each linked project of this project. */
+  linkedTrees: LinkedTree[];
+  totalLinked: number;
 };
 
 /**
@@ -65,21 +77,23 @@ export async function collectFullTree(
   opts: {
     maxComponentsToRecurse?: number;
     maxRegistrationsToRecurse?: number;
+    maxLinkedToRecurse?: number;
     componentTimeoutMs?: number;
     rootTimeoutMs?: number;
   } = {}
 ): Promise<FullProjectTree> {
   const maxComp = opts.maxComponentsToRecurse ?? 5;
   const maxReg = opts.maxRegistrationsToRecurse ?? 3;
+  const maxLinked = opts.maxLinkedToRecurse ?? 3;
   const componentTimeoutMs = opts.componentTimeoutMs ?? 8_000;
   const rootTimeoutMs = opts.rootTimeoutMs ?? 15_000;
 
-  // Parallel: root skeleton + direct children list + registrations list,
-  // each with timeout / fail-soft.
-  const [rootSkeleton, children, registrations] = await Promise.all([
+  // Parallel: root skeleton + direct children list + registrations + linked.
+  const [rootSkeleton, children, registrations, linkedNodes] = await Promise.all([
     raceTimeout(collectFolderSkeleton(rootGuid), rootTimeoutMs, [] as SkeletonNode[]).catch((): SkeletonNode[] => []),
     getAllChildren(rootGuid).catch((): NodeView[] => []),
     getNodeRegistrations(rootGuid).catch((): RegistrationView[] => []),
+    getAllLinkedNodes(rootGuid).catch((): NodeView[] => []),
   ]);
 
   // For the first N components, fetch each one's skeleton in parallel — each
@@ -142,11 +156,42 @@ export async function collectFullTree(
     skipped: true,
   }));
 
+  // Same pattern for linked projects — capped + timeout + fail-soft.
+  const linkedLimit = Math.min(linkedNodes.length, maxLinked);
+  const linkedRecursed = linkedNodes.slice(0, linkedLimit);
+  const linkedSkipped = linkedNodes.slice(linkedLimit);
+
+  const recursedLinked: LinkedTree[] = await Promise.all(
+    linkedRecursed.map(async (l) => ({
+      guid: l.id,
+      title: l.title || l.id,
+      category: l.category,
+      isPublic: l.public,
+      skeleton: await raceTimeout(
+        collectFolderSkeleton(l.id),
+        componentTimeoutMs,
+        [] as SkeletonNode[]
+      ).catch((): SkeletonNode[] => []),
+      skipped: false,
+    }))
+  );
+
+  const skippedLinked: LinkedTree[] = linkedSkipped.map((l) => ({
+    guid: l.id,
+    title: l.title || l.id,
+    category: l.category,
+    isPublic: l.public,
+    skeleton: [],
+    skipped: true,
+  }));
+
   return {
     rootSkeleton,
     components: [...recursedTrees, ...skippedTrees],
     totalComponents: children.length,
     registrationTrees: [...recursedRegs, ...skippedRegs],
     totalRegistrations: registrations.length,
+    linkedTrees: [...recursedLinked, ...skippedLinked],
+    totalLinked: linkedNodes.length,
   };
 }

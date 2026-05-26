@@ -250,6 +250,89 @@ async function main() {
     record(`spaced URL ${probe.slice(-60)}: HTTP ${status} no FileMissing no ProjectNotFound`, status === 200 && !fm && !pnf, fm ? "FileMissing visible" : pnf ? "ProjectNotFound visible" : "");
   }
 
+  // --- 4c) PER-VIEWER content load (the gap that let DOCX/PDF/HTML viewers
+  //     break on production while the rest of QA stayed green). For each
+  //     viewer kind we load a known fixture and assert:
+  //       1. No visible error banner (any of "Failed to load X", "NetworkError",
+  //          "Setting up fake worker", "fetch resource").
+  //       2. At least one viewer-specific success indicator is rendered
+  //          (canvas/iframe/img/table/pre, depending on the kind).
+  //     Each probe waits up to 12s for the viewer's async load.
+  console.log("\n--- Per-viewer content load ---");
+  // Visible "viewer error" detector — any of the error texts our viewers emit.
+  async function visibleViewerError() {
+    const ERRORS = [
+      "Failed to load DOCX",
+      "Failed to load PDF",
+      "Failed to load XLSX",
+      "Failed to load CSV",
+      "Failed to load JSON",
+      "Failed to load notebook",
+      "Failed to load markdown",
+      "Failed to load code",
+      "NetworkError when attempting to fetch resource",
+      "Setting up fake worker failed",
+      "error loading dynamically imported module",
+    ];
+    for (const txt of ERRORS) {
+      const loc = page.getByText(txt, { exact: false });
+      if ((await loc.count()) > 0 && (await loc.first().isVisible())) return txt;
+    }
+    return null;
+  }
+
+  const VIEWER_PROBES = [
+    {
+      kind: "pdf",
+      url: `/${HEAVY_GUID}/files/view/osfstorage/PCIRR%20Stage%201/Materials/Newman_et_al_2011_RE_Studies_12.pdf`,
+      // react-pdf-viewer renders a canvas inside .rpv-core__inner-page.
+      success: 'canvas, [class*="rpv-core"], [class*="rpv-default-layout"]',
+    },
+    {
+      kind: "docx",
+      url: `/${HEAVY_GUID}/files/view/osfstorage/PCIRR%20Stage%201/Materials/Newman_et_al_2011_RE_Studies_12.docx`,
+      // docx-preview renders into .docx-render
+      success: ".docx-render, article",
+    },
+    {
+      kind: "html",
+      url: `/${HEAVY_GUID}/files/view/osfstorage/PCIRR%20Stage%201/Simulated%20data%20and%20planned%20analysis%20code/Newman-etal-2011-Effect-sizes-power-analysis-combined-v4-G.html`,
+      success: 'iframe[title="HTML preview"]',
+    },
+    {
+      kind: "image",
+      url: `/${HEAVY_GUID}/files/view/osfstorage/PCIRR%20Stage%201/Simulated%20data%20and%20planned%20analysis%20code/Figures/S1-2-way-mixed-ANOVA-historical.jpg`,
+      success: "img",
+    },
+    {
+      kind: "code/qsf",
+      url: `/${HEAVY_GUID}/files/view/osfstorage/PCIRR%20Stage%201/Materials/Newman_et_al_2011_RE_Studies_12.qsf`,
+      success: "pre, code",
+    },
+  ];
+  for (const probe of VIEWER_PROBES) {
+    await page.goto(BASE + probe.url, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    // Give the client-side viewer a chance to fetch + render. We poll for
+    // either a success-element OR a known error text — whichever lands first.
+    let success = false;
+    let errText = null;
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      errText = await visibleViewerError();
+      if (errText) break;
+      const succ = await page.locator(probe.success).first().count();
+      if (succ > 0 && (await page.locator(probe.success).first().isVisible())) {
+        success = true;
+        break;
+      }
+      await page.waitForTimeout(500);
+    }
+    const ok = success && !errText;
+    record(`viewer:${probe.kind} loads (no error banner, success el present)`, ok, errText ?? (success ? "" : "no success element rendered before 15s deadline"));
+    await page.screenshot({ path: `${OUT}/INT-viewer-${probe.kind.replace(/[^a-z0-9]/g, "_")}.png`, fullPage: true });
+  }
+
   // --- 5) Search with file-extension query returns results ---
   console.log("\n--- Search edge cases ---");
   await page.goto(`${BASE}/search?q=.qsf&type=files`, { waitUntil: "domcontentloaded", timeout: 30_000 });

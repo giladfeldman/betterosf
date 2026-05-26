@@ -11,7 +11,7 @@ import { UnifiedTree } from "@/components/UnifiedTree";
 import { SplitPane } from "@/components/SplitPane";
 import { FileMissing } from "@/components/FileMissing";
 
-const EMPTY_TREE: FullProjectTree = { rootSkeleton: [], components: [], totalComponents: 0, registrationTrees: [], totalRegistrations: 0 };
+const EMPTY_TREE: FullProjectTree = { rootSkeleton: [], components: [], totalComponents: 0, registrationTrees: [], totalRegistrations: 0, linkedTrees: [], totalLinked: 0 };
 
 function safeDecode(s: string): string {
   try {
@@ -136,6 +136,7 @@ export default async function DeepFilesPage({
             linkedNodes={linked}
             registrations={registrations}
             registrationTrees={fullTree.registrationTrees}
+            linkedTrees={fullTree.linkedTrees}
           />
         }
         right={

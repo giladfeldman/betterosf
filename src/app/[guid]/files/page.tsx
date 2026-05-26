@@ -9,7 +9,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { UnifiedTree } from "@/components/UnifiedTree";
 import { SplitPane } from "@/components/SplitPane";
 
-const EMPTY_TREE: FullProjectTree = { rootSkeleton: [], components: [], totalComponents: 0, registrationTrees: [], totalRegistrations: 0 };
+const EMPTY_TREE: FullProjectTree = { rootSkeleton: [], components: [], totalComponents: 0, registrationTrees: [], totalRegistrations: 0, linkedTrees: [], totalLinked: 0 };
 
 export default async function FilesPage({ params }: { params: Promise<{ guid: string }> }) {
   const { guid } = await params;
@@ -66,6 +66,7 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
             linkedNodes={linked}
             registrations={registrations}
             registrationTrees={fullTree.registrationTrees}
+            linkedTrees={fullTree.linkedTrees}
           />
         }
         right={

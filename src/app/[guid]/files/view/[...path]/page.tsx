@@ -14,7 +14,7 @@ import { PinButton } from "@/components/PinButton";
 import { RecordView } from "@/components/RecordView";
 import { FileMissing } from "@/components/FileMissing";
 
-const EMPTY_TREE: FullProjectTree = { rootSkeleton: [], components: [], totalComponents: 0, registrationTrees: [], totalRegistrations: 0 };
+const EMPTY_TREE: FullProjectTree = { rootSkeleton: [], components: [], totalComponents: 0, registrationTrees: [], totalRegistrations: 0, linkedTrees: [], totalLinked: 0 };
 
 function safeDecode(s: string): string {
   try {
@@ -169,13 +169,20 @@ export default async function FileViewerPage({
             linkedNodes={linked}
             registrations={registrations}
             registrationTrees={fullTree.registrationTrees}
+            linkedTrees={fullTree.linkedTrees}
           />
         }
         right={
           walk.kind === "ok" ? (
             <ViewerDispatcher
               filename={filename}
-              url={walk.file.downloadUrl}
+              // Same-origin proxy URL. OSF download endpoints set
+              // Access-Control-Allow-Origin: https://osf.io which blocks
+              // client-side fetch() from our origin, AND
+              // X-Frame-Options: SAMEORIGIN which blocks iframe rendering.
+              // The proxy is at /api/files/<guid>/download and streams the
+              // file through our origin so all client viewers work.
+              url={`/api/files/${guid}/download?u=${encodeURIComponent(walk.file.downloadUrl)}`}
               sizeBytes={walk.file.size}
               forceOpen={force === "1"}
             />

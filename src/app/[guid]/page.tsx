@@ -114,6 +114,8 @@ export default async function ProjectPage({
       totalComponents: 0,
       registrationTrees: [],
       totalRegistrations: 0,
+      linkedTrees: [],
+      totalLinked: 0,
     })),
     getAllLinkedNodes(guid).catch((): NodeView[] => []),
     getNodeRegistrations(guid).catch((): RegistrationView[] => []),
@@ -338,6 +340,7 @@ export default async function ProjectPage({
             linkedNodes={linked}
             registrations={regs}
             registrationTrees={fullTree.registrationTrees}
+            linkedTrees={fullTree.linkedTrees}
           />
         }
         right={overviewRight}

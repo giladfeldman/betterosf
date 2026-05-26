@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { SkeletonNode } from "@/lib/osf/folder-skeleton";
-import type { ComponentTree, RegistrationTree } from "@/lib/osf/full-tree";
+import type { ComponentTree, RegistrationTree, LinkedTree } from "@/lib/osf/full-tree";
 import type { NodeView } from "@/lib/osf/parse";
 import type { RegistrationView } from "@/lib/osf/registrations";
 import type { FileEntry } from "@/lib/osf/files";
@@ -31,6 +31,7 @@ export function UnifiedTree({
   linkedNodes,
   registrations,
   registrationTrees,
+  linkedTrees,
 }: {
   guid: string;
   rootTitle: string;
@@ -44,6 +45,9 @@ export function UnifiedTree({
    *  with its own provider+folder hierarchy (and its files load on expand).
    *  Falls back to flat leaf-link rendering when absent. */
   registrationTrees?: RegistrationTree[];
+  /** When provided, each linked project is rendered as an expandable sub-tree
+   *  (parallel to registrationTrees). Falls back to flat leaf-link rendering. */
+  linkedTrees?: LinkedTree[];
 }) {
   const [pinned, setPinned] = useState<FavoriteRef[]>([]);
   useEffect(() => {
@@ -165,7 +169,14 @@ export function UnifiedTree({
         walkProviderSet(r.guid, r.skeleton, `registration/${r.guid}`);
       }
     }
-  }, [expanded, skeleton, componentTrees, registrationTrees, guid, fetchFiles]);
+    if (linkedTrees) {
+      for (const l of linkedTrees) {
+        if (l.skipped) continue;
+        if (!expanded[`linked/${l.guid}`]) continue;
+        walkProviderSet(l.guid, l.skeleton, `linked/${l.guid}`);
+      }
+    }
+  }, [expanded, skeleton, componentTrees, registrationTrees, linkedTrees, guid, fetchFiles]);
 
   const flatRows = useMemo<FlatRow[]>(() => {
     const rows: FlatRow[] = [];
@@ -193,9 +204,23 @@ export function UnifiedTree({
           expanded: !!expanded[providerId],
           hasChildren: provider.children.length > 0,
           onToggle: () => {
-            const next = { ...expanded, [providerId]: !expanded[providerId] };
+            const next: Record<string, boolean> = { ...expanded, [providerId]: !expanded[providerId] };
+            // Cascade-expand: when opening a provider-root (especially the
+            // osfstorage placeholder), auto-expand every descendant folder so
+            // the user doesn't have to click through each level. Symmetric on
+            // collapse: clear all descendant entries.
+            const cascadeOpen = !expanded[providerId];
+            function walk(nodes: SkeletonNode[], parentId: string) {
+              for (const n of nodes) {
+                const id = `${parentId}/${n.name}`;
+                if (cascadeOpen) next[id] = true;
+                else delete next[id];
+                if (n.children.length) walk(n.children, id);
+              }
+            }
+            walk(provider.children, providerId);
             setExpanded(next);
-            if (!expanded[providerId]) fetchFiles(nodeGuid, provider.provider, "/", provider.listingUrl);
+            if (cascadeOpen) fetchFiles(nodeGuid, provider.provider, "/", provider.listingUrl);
           },
           node: {
             id: providerId,
@@ -384,7 +409,8 @@ export function UnifiedTree({
       }
     }
 
-    // Linked projects
+    // Linked projects (expandable sub-trees when linkedTrees provided —
+    // symmetric to components/registrations).
     if (linkedNodes.length > 0) {
       rows.push({
         id: "linked-root",
@@ -395,15 +421,43 @@ export function UnifiedTree({
         node: { id: "linked-root", label: `Linked projects (${linkedNodes.length})`, kind: "linked-root" },
       });
       if (expanded["linked-root"]) {
-        for (const l of linkedNodes) {
-          rows.push({
-            id: `linked/${l.id}`,
-            depth: 1,
-            expanded: false,
-            hasChildren: false,
-            onToggle: () => {},
-            node: { id: l.id, label: l.title || l.id, kind: "linked", href: `/${l.id}`, newTab: true },
-          });
+        if (linkedTrees && linkedTrees.length > 0) {
+          for (const l of linkedTrees) {
+            const linkedId = `linked/${l.guid}`;
+            const linkedHasContent = l.skeleton.length > 0;
+            rows.push({
+              id: linkedId,
+              depth: 1,
+              expanded: !!expanded[linkedId],
+              hasChildren: linkedHasContent,
+              onToggle: toggle(linkedId),
+              node: {
+                id: l.guid,
+                label: l.title,
+                kind: "linked",
+                href: `/${l.guid}`,
+                // Keep same-tab so clicking expands; if the user wants the
+                // linked project in a new tab, right-click → open-in-new-tab.
+                newTab: false,
+                badge: l.skipped ? "skipped" : l.isPublic ? undefined : "private",
+              },
+            });
+            if (expanded[linkedId] && !l.skipped) {
+              emitNodeSubtree(l.guid, l.skeleton, linkedId, 2);
+            }
+          }
+        } else {
+          // Fallback: leaf links (used when caller didn't provide linkedTrees)
+          for (const l of linkedNodes) {
+            rows.push({
+              id: `linked/${l.id}`,
+              depth: 1,
+              expanded: false,
+              hasChildren: false,
+              onToggle: () => {},
+              node: { id: l.id, label: l.title || l.id, kind: "linked", href: `/${l.id}`, newTab: true },
+            });
+          }
         }
       }
     }
@@ -463,7 +517,7 @@ export function UnifiedTree({
     }
 
     return rows;
-  }, [expanded, loadedFiles, skeleton, components, componentTrees, linkedNodes, registrations, registrationTrees, pinned, rootTitle, guid, fetchFiles, setExpanded]);
+  }, [expanded, loadedFiles, skeleton, components, componentTrees, linkedNodes, linkedTrees, registrations, registrationTrees, pinned, rootTitle, guid, fetchFiles, setExpanded]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -515,8 +569,18 @@ export function UnifiedTree({
         }
       }
     }
+    // Linked-project sub-trees
+    if (linkedTrees) {
+      for (const l of linkedTrees) {
+        ids.push(`linked/${l.guid}`);
+        for (const p of l.skeleton) {
+          ids.push(`linked/${l.guid}/provider:${p.provider}`);
+          walkSkeleton(p.children, `linked/${l.guid}/provider:${p.provider}`);
+        }
+      }
+    }
     return ids;
-  }, [skeleton, componentTrees, registrationTrees]);
+  }, [skeleton, componentTrees, registrationTrees, linkedTrees]);
 
   const expandAll = () => {
     const next: Record<string, boolean> = {};

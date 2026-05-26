@@ -18,6 +18,9 @@ const EXT_TO_VIEWER: Record<string, ViewerId> = {
   rs: "code", go: "code", java: "code", kt: "code", swift: "code",
   rb: "code", php: "code", sh: "code", bash: "code", zsh: "code",
   sql: "code", yaml: "code", yml: "code", toml: "code", xml: "code",
+  // Qualtrics survey file is XML-flavoured — viewable as code rather than
+  // forcing a download. Researchers commonly want to peek at the structure.
+  qsf: "code",
   html: "html", htm: "html",
   png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", bmp: "image", ico: "image",
   svg: "svg",
