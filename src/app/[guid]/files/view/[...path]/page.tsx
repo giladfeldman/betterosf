@@ -16,6 +16,14 @@ import { FileMissing } from "@/components/FileMissing";
 
 const EMPTY_TREE: FullProjectTree = { rootSkeleton: [], components: [], totalComponents: 0, registrationTrees: [], totalRegistrations: 0 };
 
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
 export default async function FileViewerPage({
   params,
   searchParams,
@@ -23,9 +31,18 @@ export default async function FileViewerPage({
   params: Promise<{ guid: string; path: string[] }>;
   searchParams: Promise<{ force?: string }>;
 }) {
-  const { guid, path } = await params;
+  const { guid, path: rawPath } = await params;
   const { force } = await searchParams;
   if (!isValidGuid(guid)) notFound();
+  if (rawPath.length < 2) notFound();
+
+  // Next.js 15 catch-all segments arrive URL-ENCODED (e.g. "PCIRR%20Stage%201"
+  // for a folder literally named "PCIRR Stage 1"). The OSF API returns names
+  // DECODED, so we must decode each segment before string-matching against
+  // entries from /v2/.../files/. This was the silent root cause of
+  // "Folder not found" on every path-with-space — a regression the QA suite
+  // didn't catch because it tested only flat root-level files.
+  const path = rawPath.map((seg) => safeDecode(seg)).filter((s) => s.length > 0);
   if (path.length < 2) notFound();
 
   const [provider, ...rest] = path;

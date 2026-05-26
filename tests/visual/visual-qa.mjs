@@ -181,6 +181,17 @@ async function main() {
     return (await heading.count()) > 0 && (await heading.first().isVisible());
   }
 
+  // Helper: detect any FileMissing render (sub-page error rendered inline by
+  // the new FileMissing component when the walk fails). Covers the four
+  // reasons: "Storage provider not found" | "Folder not found" |
+  // "File not found" | "OSF didn't return this file". This was the gap that
+  // let the URL-decoding bug through: visibleProjectNotFound() only caught
+  // the route-level error, missing the inline ones.
+  async function visibleFileMissing() {
+    const heading = page.getByRole("heading", { name: /^(Storage provider not found|Folder not found|File not found|OSF didn't return this file)$/i });
+    return (await heading.count()) > 0 && (await heading.first().isVisible());
+  }
+
   // --- 3) Click a file in the tree → preview shows in right pane ---
   console.log("\n--- File-click-from-tree → right-pane preview ---");
   await page.goto(`${BASE}/${MANY_LABS_GUID}/files`, { waitUntil: "domcontentloaded" });
@@ -203,12 +214,15 @@ async function main() {
     const onFileView = url.includes("/files/view/");
     record("clicking a tree file leaf navigates to /files/view/...", onFileView, href ?? "");
     record("tree file click does NOT land on 'Project not found'", !(await visibleProjectNotFound()));
+    record("tree file click does NOT land on FileMissing (Folder/File not found)", !(await visibleFileMissing()));
     await page.screenshot({ path: `${OUT}/INT-06-tree-file-click.png`, fullPage: true });
   } else {
     record("tree has at least one clickable file leaf", false, "no a[href*='/files/view/'] inside [role=tree]");
   }
 
-  // --- 4) File-view URL with SPACES in path resolves (not "Project not found") ---
+  // --- 4) File-view URL with SPACES in path resolves (regression: Next.js 15
+  //     catch-all segments arrive URL-encoded but OSF returns decoded names —
+  //     the walk must decodeURIComponent each segment or every deep URL fails).
   console.log("\n--- File-view URL with spaces in path ---");
   const spacedUrl = `/${HEAVY_GUID}/files/view/osfstorage/PCIRR%20Stage%202/PCIRR%20S2%20submission/PCIRR-S2-Newman-etal-2011-replication-cover-letter.docx`;
   const spacedResp = await page.goto(BASE + spacedUrl, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => null);
@@ -216,7 +230,25 @@ async function main() {
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   record(`/files/view URL with %20-encoded spaces: HTTP ${spacedStatus}`, spacedStatus === 200);
   record("/files/view URL with spaces does NOT show 'Project not found'", !(await visibleProjectNotFound()));
+  record("/files/view URL with spaces does NOT show FileMissing (Folder/File not found)", !(await visibleFileMissing()));
   await page.screenshot({ path: `${OUT}/INT-07-spaced-fileview.png`, fullPage: true });
+
+  // --- 4b) Additional URL-with-spaces probe at different depths (the original
+  //     bug only manifested at depth ≥ 2; surface coverage gaps fast).
+  console.log("\n--- Additional spaced-URL probes ---");
+  const spacedProbes = [
+    `/${HEAVY_GUID}/files/view/osfstorage/PCIRR%20Stage%201/Materials/Newman_et_al_2011_RE_Studies_12.pdf`,
+    `/${HEAVY_GUID}/files/view/osfstorage/PCIRR%20Stage%201/Snapshot/PCIRR-S1-Newmanetal2011-rep-ext-snapshot-v4-G.docx`,
+    `/${HEAVY_GUID}/files/osfstorage/PCIRR%20Stage%201/Materials`,
+  ];
+  for (const probe of spacedProbes) {
+    const resp = await page.goto(BASE + probe, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => null);
+    const status = resp?.status() ?? 0;
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    const fm = await visibleFileMissing();
+    const pnf = await visibleProjectNotFound();
+    record(`spaced URL ${probe.slice(-60)}: HTTP ${status} no FileMissing no ProjectNotFound`, status === 200 && !fm && !pnf, fm ? "FileMissing visible" : pnf ? "ProjectNotFound visible" : "");
+  }
 
   // --- 5) Search with file-extension query returns results ---
   console.log("\n--- Search edge cases ---");

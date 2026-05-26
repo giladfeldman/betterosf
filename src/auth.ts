@@ -20,6 +20,10 @@ declare module "next-auth/jwt" {
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  // Auth.js v5 requires this for non-Vercel hosts (localhost, custom domains).
+  // Production on Vercel sets AUTH_URL via VERCEL_URL automatically; locally
+  // we need to opt in explicitly or every auth() call throws UntrustedHost.
+  trustHost: true,
   providers: [
     osfProvider({
       clientId: process.env.AUTH_OSF_ID ?? "",

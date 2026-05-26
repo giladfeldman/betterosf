@@ -13,6 +13,14 @@ import { FileMissing } from "@/components/FileMissing";
 
 const EMPTY_TREE: FullProjectTree = { rootSkeleton: [], components: [], totalComponents: 0, registrationTrees: [], totalRegistrations: 0 };
 
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
 function formatSize(bytes: number | null): string {
   if (bytes == null) return "";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -29,10 +37,12 @@ export default async function DeepFilesPage({
 }) {
   const { guid, path: rawPath } = await params;
   if (!isValidGuid(guid)) notFound();
-  // Drop empty segments — they show up when href ends with `/` (trailing slash
-  // from materializedPath) or when there are accidental `//` in the URL. Without
-  // this filter, the walk below would look for an empty-name folder and 404.
-  const path = rawPath.filter((seg) => seg.length > 0);
+  // Drop empty segments (trailing slash from materializedPath) AND
+  // URL-decode each segment — Next.js 15 catch-all segments arrive encoded
+  // (e.g. "PCIRR%20Stage%201"), but the OSF API returns names decoded, so
+  // we must decode before comparing against `e.name` in getFolderContents
+  // results. Same root cause as the file-view route's "Folder not found".
+  const path = rawPath.map((seg) => safeDecode(seg)).filter((seg) => seg.length > 0);
   if (path.length === 0) notFound();
 
   const [provider, ...folderSegments] = path;
