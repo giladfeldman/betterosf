@@ -31,6 +31,22 @@ const ALLOWED_HOSTS = new Set([
   "api.osf.io",
 ]);
 
+const CONTENT_TYPES_BY_EXT: Record<string, string> = {
+  html: "text/html; charset=utf-8",
+  htm: "text/html; charset=utf-8",
+  svg: "image/svg+xml; charset=utf-8",
+  txt: "text/plain; charset=utf-8",
+  md: "text/markdown; charset=utf-8",
+  csv: "text/csv; charset=utf-8",
+  json: "application/json; charset=utf-8",
+  pdf: "application/pdf",
+};
+
+function contentTypeForName(name: string): string | null {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  return CONTENT_TYPES_BY_EXT[ext] ?? null;
+}
+
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ guid: string }> }
@@ -40,6 +56,7 @@ export async function GET(
 
   const url = new URL(req.url);
   const downloadUrl = url.searchParams.get("u");
+  const filename = url.searchParams.get("name") ?? "";
   if (!downloadUrl) return new Response("Missing u (download URL)", { status: 400 });
 
   // SSRF guard — only allow OSF-owned hosts.
@@ -56,7 +73,7 @@ export async function GET(
   // The downloadUrl from OSF returns a 302 to files.osf.io. Follow redirects.
   let token = "";
   try { token = await selectToken(); } catch { /* anonymous */ }
-  const upstream = await fetch(target.toString(), {
+  let upstream = await fetch(target.toString(), {
     headers: token
       ? { Authorization: `Bearer ${token}`, Accept: "application/octet-stream, */*" }
       : { Accept: "application/octet-stream, */*" },
@@ -65,6 +82,17 @@ export async function GET(
     // so the response is immutable for a given OSF file revision.
     next: { revalidate: 86400, tags: [`download:${guid}`] },
   });
+
+  // Public OSF files can be fetched without a bearer token. If the app-owned
+  // token is expired/revoked, retry anonymously so public viewers do not render
+  // as blank iframes or failed downloads.
+  if (token && (upstream.status === 401 || upstream.status === 403)) {
+    upstream = await fetch(target.toString(), {
+      headers: { Accept: "application/octet-stream, */*" },
+      redirect: "follow",
+      next: { revalidate: 86400, tags: [`download:${guid}`] },
+    });
+  }
 
   if (!upstream.ok || !upstream.body) {
     return new Response(`OSF upstream returned ${upstream.status}`, { status: upstream.status });
@@ -77,7 +105,14 @@ export async function GET(
   //   - keep the upstream content-type so viewers know how to render
   const headers = new Headers();
   const ct = upstream.headers.get("content-type");
-  if (ct) headers.set("content-type", ct);
+  const inferredContentType = contentTypeForName(filename);
+  if (ct && ct !== "application/octet-stream") {
+    headers.set("content-type", ct);
+  } else if (inferredContentType) {
+    headers.set("content-type", inferredContentType);
+  } else if (ct) {
+    headers.set("content-type", ct);
+  }
   const cl = upstream.headers.get("content-length");
   if (cl) headers.set("content-length", cl);
   // Force inline display — viewers embed the response in iframe/img/object.

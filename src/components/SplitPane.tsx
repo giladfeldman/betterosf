@@ -19,6 +19,7 @@ export function SplitPane({
   right: React.ReactNode;
 }) {
   const [width, setWidth] = useState<number>(defaultLeftWidth);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const draggingRef = useRef(false);
 
   useEffect(() => {
@@ -56,7 +57,16 @@ export function SplitPane({
 
   return (
     <div className="flex w-full flex-col md:h-[calc(100vh-8rem)] md:flex-row" style={vars}>
-      <aside className="max-h-[45vh] w-full overflow-y-auto border-b border-neutral-200 dark:border-neutral-800 md:max-h-none md:w-[var(--left-width)] md:flex-shrink-0 md:border-b-0 md:border-r">
+      <button
+        type="button"
+        aria-expanded={mobileNavOpen}
+        onClick={() => setMobileNavOpen((open) => !open)}
+        className="mb-3 inline-flex w-fit items-center gap-2 rounded border border-neutral-300 px-3 py-2 text-sm font-medium dark:border-neutral-700 md:hidden"
+      >
+        <span aria-hidden="true">{mobileNavOpen ? "▼" : "▶"}</span>
+        {mobileNavOpen ? "Hide navigator" : "Show navigator"}
+      </button>
+      <aside className={`${mobileNavOpen ? "block" : "hidden"} max-h-[45vh] w-full overflow-y-auto border-b border-neutral-200 dark:border-neutral-800 md:block md:max-h-none md:w-[var(--left-width)] md:flex-shrink-0 md:border-b-0 md:border-r`}>
         {left}
       </aside>
       <div

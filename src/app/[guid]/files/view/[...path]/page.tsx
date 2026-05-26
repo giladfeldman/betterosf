@@ -182,7 +182,7 @@ export default async function FileViewerPage({
               // X-Frame-Options: SAMEORIGIN which blocks iframe rendering.
               // The proxy is at /api/files/<guid>/download and streams the
               // file through our origin so all client viewers work.
-              url={`/api/files/${guid}/download?u=${encodeURIComponent(walk.file.downloadUrl)}`}
+              url={`/api/files/${guid}/download?u=${encodeURIComponent(walk.file.downloadUrl)}&name=${encodeURIComponent(filename)}`}
               sizeBytes={walk.file.size}
               forceOpen={force === "1"}
             />
