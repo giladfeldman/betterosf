@@ -1,9 +1,10 @@
 "use client";
 
 export default function ProjectError({ error, reset }: { error: Error; reset: () => void }) {
-  const msg = error.message.includes("forbidden")
+  const lowerMessage = error.message.toLowerCase();
+  const msg = lowerMessage.includes("forbidden") || lowerMessage.includes("authentication required")
     ? "This project is private. Sign-in support is coming in a later release."
-    : error.message.includes("rate_limited")
+    : lowerMessage.includes("rate_limited")
     ? "BetterOSF is over capacity for today. Try again later."
     : "Something broke loading this project.";
   return (

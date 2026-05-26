@@ -31,6 +31,22 @@ describe("osfGet", () => {
     await expect(osfGet("/nodes/p/")).rejects.toMatchObject({ code: "forbidden" });
   });
 
+  it("falls back to an anonymous request when OSF rejects the bearer token on a public endpoint", async () => {
+    const seenAuthHeaders: (string | null)[] = [];
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/public/", ({ request }) => {
+        const authHeader = request.headers.get("authorization");
+        seenAuthHeaders.push(authHeader);
+        if (authHeader) return new HttpResponse(null, { status: 401 });
+        return HttpResponse.json({ data: { id: "public", type: "nodes", attributes: {} } });
+      })
+    );
+
+    const result = await osfGet("/nodes/public/");
+    expect((result as { data: { id: string } }).data.id).toBe("public");
+    expect(seenAuthHeaders).toEqual(["Bearer test-token", null]);
+  });
+
   it("maps 429 to rate_limited", async () => {
     server.use(http.get("https://api.osf.io/v2/nodes/x/", () => new HttpResponse(null, { status: 429 })));
     await expect(osfGet("/nodes/x/")).rejects.toMatchObject({ code: "rate_limited" });

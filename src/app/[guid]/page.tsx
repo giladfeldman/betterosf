@@ -175,10 +175,10 @@ export default async function ProjectPage({
   const basePath = `/${guid}`;
 
   const overviewRight = (
-    <article className="px-6 py-4 max-w-4xl">
-      <header className="mb-6 flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-semibold">{node.title}</h1>
+    <article className="max-w-4xl px-4 py-4 sm:px-6">
+      <header className="mb-6 flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold sm:text-3xl">{node.title}</h1>
           <p className="mt-2 text-neutral-600 dark:text-neutral-400 whitespace-pre-wrap">{node.description}</p>
           <p className="mt-3 text-sm">
             <a href={`/search?scope=project:${guid}`} className="text-blue-600 hover:underline">Search this project</a>

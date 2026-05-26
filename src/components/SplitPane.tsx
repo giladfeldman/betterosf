@@ -50,9 +50,13 @@ export function SplitPane({
     document.body.style.cursor = "col-resize";
   };
 
+  const vars = {
+    "--left-width": `${width}px`,
+  } as React.CSSProperties;
+
   return (
-    <div className="flex w-full" style={{ height: "calc(100vh - 8rem)" }}>
-      <aside className="overflow-y-auto border-r border-neutral-200 dark:border-neutral-800" style={{ width, flexShrink: 0 }}>
+    <div className="flex w-full flex-col md:h-[calc(100vh-8rem)] md:flex-row" style={vars}>
+      <aside className="max-h-[45vh] w-full overflow-y-auto border-b border-neutral-200 dark:border-neutral-800 md:max-h-none md:w-[var(--left-width)] md:flex-shrink-0 md:border-b-0 md:border-r">
         {left}
       </aside>
       <div
@@ -65,9 +69,9 @@ export function SplitPane({
           if (e.key === "ArrowLeft") setWidth((w) => Math.max(minLeft, w - 20));
           if (e.key === "ArrowRight") setWidth((w) => Math.min(maxLeft, w + 20));
         }}
-        className="w-1 cursor-col-resize bg-transparent hover:bg-blue-500 focus-visible:bg-blue-500 transition-colors"
+        className="hidden w-1 cursor-col-resize bg-transparent transition-colors hover:bg-blue-500 focus-visible:bg-blue-500 md:block"
       />
-      <main className="flex-1 overflow-y-auto">{right}</main>
+      <main className="min-w-0 flex-1 overflow-visible md:overflow-y-auto">{right}</main>
     </div>
   );
 }

@@ -13,6 +13,10 @@ async function authHeaders(): Promise<HeadersInit> {
   };
 }
 
+const ANON_HEADERS: HeadersInit = {
+  Accept: "application/vnd.api+json",
+};
+
 function mapError(status: number, body: string): OsfError {
   if (status === 404) return new OsfError(404, "not_found", "OSF resource not found");
   if (status === 403) return new OsfError(403, "forbidden", "Access to this OSF resource is forbidden");
@@ -48,10 +52,23 @@ export async function osfGetUrl<T = unknown>(
     void incrementDaily(`app:osf:calls:${today}`);
   }
 
-  const res = await fetch(url, {
+  const next = { revalidate: init?.revalidate ?? 300, tags: init?.tags };
+  let res = await fetch(url, {
     headers: await authHeaders(),
-    next: { revalidate: init?.revalidate ?? 300, tags: init?.tags },
+    next,
   });
+
+  // OSF public endpoints do not require a bearer token. If the app-owned PAT is
+  // expired or revoked, anonymous public browsing should still work instead of
+  // throwing a route-level 401.
+  if (res.status === 401 || res.status === 403) {
+    const anonymousRes = await fetch(url, {
+      headers: ANON_HEADERS,
+      next,
+    });
+    if (anonymousRes.ok) res = anonymousRes;
+  }
+
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw mapError(res.status, body);
