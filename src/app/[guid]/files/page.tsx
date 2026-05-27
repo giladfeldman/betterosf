@@ -26,7 +26,13 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
   }
 
   const [fullTree, linked, registrations]: [FullProjectTree, NodeView[], RegistrationView[]] = await Promise.all([
-    collectFullTree(guid).catch((): FullProjectTree => EMPTY_TREE),
+    collectFullTree(guid, {
+      maxComponentsToRecurse: 3,
+      maxRegistrationsToRecurse: 1,
+      maxLinkedToRecurse: 1,
+      componentTimeoutMs: 5_000,
+      rootTimeoutMs: 10_000,
+    }).catch((): FullProjectTree => EMPTY_TREE),
     getAllLinkedNodes(guid).catch((): NodeView[] => []),
     getNodeRegistrations(guid).catch((): RegistrationView[] => []),
   ]);

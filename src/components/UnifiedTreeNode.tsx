@@ -4,6 +4,23 @@ import type { ReactNode } from "react";
 
 export type TreeNodeKind = "pinned-root" | "provider-root" | "components-root" | "linked-root" | "registrations-root" | "folder" | "file" | "component" | "linked" | "registration";
 
+export type TreeSelectionPayload =
+  | {
+      kind: "file";
+      guid: string;
+      provider: string;
+      path: string;
+      name: string;
+      downloadUrl: string;
+    }
+  | {
+      kind: "folder";
+      guid: string;
+      provider: string;
+      path: string;
+      name: string;
+    };
+
 export type TreeNodeData = {
   id: string;
   label: string;
@@ -16,6 +33,9 @@ export type TreeNodeData = {
   provider?: string;   // for color/icon
   guid?: string;       // for components / linked / registrations
   fileCount?: number;  // # files directly under this folder, shown as "(N)" badge
+  downloadHref?: string;
+  selection?: TreeSelectionPayload;
+  loading?: boolean;
 };
 
 function kindIcon(kind: TreeNodeKind, provider?: string): ReactNode {
@@ -56,6 +76,17 @@ function formatSize(bytes: number | null | undefined): string {
   return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
+export function middleTruncateFilename(name: string, max = 48): string {
+  if (name.length <= max) return name;
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 && dot < name.length - 1 ? name.slice(dot) : "";
+  const stem = ext ? name.slice(0, dot) : name;
+  const room = Math.max(12, max - ext.length - 3);
+  const head = Math.ceil(room * 0.58);
+  const tail = Math.max(4, room - head);
+  return `${stem.slice(0, head)}...${stem.slice(-tail)}${ext}`;
+}
+
 export function UnifiedTreeNode({
   node,
   depth,
@@ -63,6 +94,8 @@ export function UnifiedTreeNode({
   hasChildren,
   onToggle,
   selected,
+  selectMode = false,
+  onSelect,
 }: {
   node: TreeNodeData;
   depth: number;
@@ -70,11 +103,19 @@ export function UnifiedTreeNode({
   hasChildren: boolean;
   onToggle: () => void;
   selected?: boolean;
+  selectMode?: boolean;
+  onSelect?: (payload: TreeSelectionPayload, checked: boolean) => void;
 }) {
+  const displayLabel = node.kind === "file" ? middleTruncateFilename(node.label) : node.label;
+  const tooltip = [
+    node.label,
+    node.size != null ? formatSize(node.size) : "",
+    node.modified ? `Modified ${node.modified.slice(0, 10)}` : "",
+  ].filter(Boolean).join(" - ");
   const inner = (
-    <span className="inline-flex items-center gap-1 truncate min-w-0" title={node.label}>
+    <span className="inline-flex items-center gap-1 truncate min-w-0" title={tooltip}>
       {kindIcon(node.kind, node.provider)}
-      <span className="truncate">{node.label}</span>
+      <span className="truncate">{displayLabel}</span>
       {node.fileCount != null && node.fileCount > 0 && (
         <span className="ml-1 text-xs text-neutral-500 shrink-0" aria-label={`${node.fileCount} file${node.fileCount === 1 ? "" : "s"}`}>
           ({node.fileCount})
@@ -82,6 +123,7 @@ export function UnifiedTreeNode({
       )}
       {node.size != null && <span className="ml-2 text-xs text-neutral-500 shrink-0">{formatSize(node.size)}</span>}
       {node.badge && <span className="ml-2 text-[10px] uppercase text-neutral-500 border rounded px-1 shrink-0">{node.badge}</span>}
+      {node.loading && <span className="ml-2 text-xs text-neutral-500 shrink-0">loading...</span>}
     </span>
   );
 
@@ -147,9 +189,19 @@ export function UnifiedTreeNode({
       role="treeitem"
       aria-expanded={hasChildren ? expanded : undefined}
       aria-selected={selected}
-      className={`flex items-center gap-1 py-0.5 px-1 text-sm font-mono-files hover:bg-neutral-100 dark:hover:bg-neutral-800 ${selected ? "bg-blue-50 dark:bg-blue-900/30" : ""}`}
+      className={`group flex items-center gap-1 py-0.5 px-1 text-sm font-mono-files hover:bg-neutral-100 dark:hover:bg-neutral-800 ${selected ? "bg-blue-50 dark:bg-blue-900/30" : ""}`}
       style={{ paddingLeft: `${depth * 0.75}rem` }}
     >
+      {selectMode && node.selection && (
+        <input
+          type="checkbox"
+          aria-label={`Select ${node.label}`}
+          checked={!!selected}
+          onChange={(e) => onSelect?.(node.selection!, e.currentTarget.checked)}
+          onClick={(e) => e.stopPropagation()}
+          className="h-3.5 w-3.5 shrink-0"
+        />
+      )}
       <button
         type="button"
         onClick={onToggle}
@@ -159,6 +211,17 @@ export function UnifiedTreeNode({
         {expanded ? "▼" : "▶"}
       </button>
       {content}
+      {node.downloadHref && (
+        <a
+          href={node.downloadHref}
+          aria-label={`Download ${node.label} as ZIP`}
+          title={`Download ${node.label} as ZIP`}
+          onClick={(e) => e.stopPropagation()}
+          className="ml-auto hidden shrink-0 rounded border border-neutral-300 px-1.5 text-[11px] hover:bg-white focus:inline-block focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 group-hover:inline-block dark:border-neutral-700 dark:hover:bg-neutral-900"
+        >
+          ZIP
+        </a>
+      )}
     </div>
   );
 }

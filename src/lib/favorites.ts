@@ -1,6 +1,6 @@
 import { getPref, setPref } from "./prefs";
 
-export type FavoriteKind = "project" | "component" | "file" | "registration";
+export type FavoriteKind = "project" | "component" | "file" | "folder" | "registration";
 
 export type FavoriteRef = {
   id: string;

@@ -38,12 +38,51 @@ describe("collectFolderSkeleton", () => {
       ),
     );
 
-    const skeleton = await collectFolderSkeleton("p");
+    const skeleton = await collectFolderSkeleton("p", { maxDepth: 8 });
     expect(skeleton).toHaveLength(1);
     expect(skeleton[0]?.name).toBe("osfstorage");
     expect(skeleton[0]?.children).toHaveLength(1); // 'sub' folder, NOT 'data.csv' file
     expect(skeleton[0]?.children?.[0]?.name).toBe("sub");
     expect(skeleton[0]?.children?.[0]?.children?.[0]?.name).toBe("deeper");
+  });
+
+  it("defaults to a shallow first-folder pass for fast initial project render", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/shallow/files/", () =>
+        HttpResponse.json({
+          data: [{
+            id: "osfstorage", type: "files",
+            attributes: { name: "osfstorage", provider: "osfstorage", kind: "folder", path: "/" },
+            relationships: { files: { links: { related: { href: "https://api.osf.io/v2/nodes/shallow/files/osfstorage/" } } } },
+          }],
+          links: { next: null },
+        })
+      ),
+      http.get("https://api.osf.io/v2/nodes/shallow/files/osfstorage/", () =>
+        HttpResponse.json({
+          data: [{
+            id: "fold", type: "files",
+            attributes: { name: "sub", kind: "folder", materialized_path: "/sub/" },
+            relationships: { files: { links: { related: { href: "https://api.osf.io/v2/nodes/shallow/files/osfstorage/fold/" } } } },
+          }],
+          links: { next: null },
+        })
+      ),
+      http.get("https://api.osf.io/v2/nodes/shallow/files/osfstorage/fold/", () =>
+        HttpResponse.json({
+          data: [{
+            id: "deeper", type: "files",
+            attributes: { name: "deeper", kind: "folder", materialized_path: "/sub/deeper/" },
+            relationships: { files: { links: { related: { href: "https://api.osf.io/v2/nodes/shallow/files/osfstorage/fold/deeper/" } } } },
+          }],
+          links: { next: null },
+        })
+      ),
+    );
+
+    const skeleton = await collectFolderSkeleton("shallow");
+    expect(skeleton[0]?.children?.[0]?.name).toBe("sub");
+    expect(skeleton[0]?.children?.[0]?.children).toEqual([]);
   });
 
   it("respects maxFolders cap", async () => {

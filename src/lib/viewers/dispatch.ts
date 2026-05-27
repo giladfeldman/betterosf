@@ -1,5 +1,5 @@
 export type ViewerId =
-  | "pdf" | "docx" | "xlsx" | "csv"
+  | "pdf" | "docx" | "pptx" | "xlsx" | "csv"
   | "markdown" | "code" | "json"
   | "image" | "svg" | "html"
   | "video" | "audio"
@@ -8,6 +8,7 @@ export type ViewerId =
 const EXT_TO_VIEWER: Record<string, ViewerId> = {
   pdf: "pdf",
   docx: "docx",
+  pptx: "pptx",
   xlsx: "xlsx", xls: "xlsx",
   csv: "csv", tsv: "csv",
   md: "markdown", markdown: "markdown",
@@ -30,7 +31,7 @@ const EXT_TO_VIEWER: Record<string, ViewerId> = {
 };
 
 const SIZE_CAPS_MB: Partial<Record<ViewerId, number>> = {
-  pdf: 50, docx: 25, xlsx: 15, csv: 100, json: 10,
+  pdf: 50, docx: 25, pptx: 50, xlsx: 15, csv: 100, json: 10,
   image: 25, svg: 5, notebook: 20,
 };
 

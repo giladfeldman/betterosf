@@ -29,6 +29,14 @@ describe("ViewerDispatcher routing", () => {
     expect(container.querySelector('[data-url="https://example/d.pdf"]')).toBeTruthy();
   });
 
+  it("routes a small PPTX to the pptx viewer", () => {
+    const { container } = render(
+      <ViewerDispatcher filename="slides.pptx" url="https://example/slides.pptx" sizeBytes={1024} />
+    );
+    expect(container.querySelector('[data-viewer="stub"]')).toBeTruthy();
+    expect(container.querySelector('[data-url="https://example/slides.pptx"]')).toBeTruthy();
+  });
+
   it("oversize PDF (>50MB) without force=1 falls back to DownloadFallback", () => {
     render(
       <ViewerDispatcher

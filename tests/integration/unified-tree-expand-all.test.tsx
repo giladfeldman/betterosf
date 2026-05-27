@@ -1,5 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
+import { server } from "../msw/server";
 import { UnifiedTree } from "@/components/UnifiedTree";
 import type { SkeletonNode } from "@/lib/osf/folder-skeleton";
 import type { ComponentTree } from "@/lib/osf/full-tree";
@@ -11,6 +13,14 @@ vi.mock("@tanstack/react-virtual", () => ({
       Array.from({ length: opts.count }).map((_, i) => ({ index: i, start: i * 28, size: 28, key: i })),
   }),
 }));
+
+beforeEach(() => {
+  server.use(
+    http.get("*/api/files/:guid/folder", () =>
+      HttpResponse.json({ entries: [] })
+    )
+  );
+});
 
 function leaf(provider: string, name: string, path: string, children: SkeletonNode[] = []): SkeletonNode {
   return { provider, name, materializedPath: path, listingUrl: `https://api.osf.io/x/${name}/`, children, fileCount: 0 };
@@ -109,6 +119,41 @@ describe("UnifiedTree expand-all / collapse-all", () => {
     }
   });
 
+  it("keeps lazily fetched subfolders visible when the server skeleton is shallow", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      const entries = u.includes("listingUrl=child")
+        ? [{ kind: "folder", id: "deep", name: "deep", materializedPath: "/child/deep/", listingUrl: "deep-url" }]
+        : [];
+      return new Response(JSON.stringify({ entries }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    try {
+      const sk: SkeletonNode[] = [
+        leaf("osfstorage", "osfstorage", "/", [
+          { provider: "osfstorage", name: "child", materializedPath: "/child/", listingUrl: "child-url", children: [], fileCount: 0 },
+        ]),
+      ];
+      render(
+        <UnifiedTree
+          guid="lazy"
+          rootTitle="Root"
+          skeleton={sk}
+          components={[]}
+          linkedNodes={[]}
+          registrations={[]}
+        />
+      );
+
+      await screen.findByText("deep");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it("renders file-count badge for folders that have files", () => {
     // Regression test for user-reported bug: folders with files didn't surface
     // that fact in the tree — users couldn't tell which folders were worth
@@ -131,6 +176,49 @@ describe("UnifiedTree expand-all / collapse-all", () => {
     expect(screen.getByText("(7)")).toBeInTheDocument();
     // Provider-root also gets a count
     expect(screen.getByText("(2)")).toBeInTheDocument();
+  });
+
+  it("folder ZIP action does not toggle the row", () => {
+    const sk: SkeletonNode[] = [
+      leaf("osfstorage", "osfstorage", "/", [leaf("osfstorage", "sub", "/sub/")]),
+    ];
+    render(
+      <UnifiedTree
+        guid="root"
+        rootTitle="Root"
+        skeleton={sk}
+        components={[]}
+        linkedNodes={[]}
+        registrations={[]}
+      />
+    );
+    expect(screen.getByText("sub")).toBeInTheDocument();
+    const link = screen.getByLabelText(/Download osfstorage as ZIP/i);
+    link.addEventListener("click", (e) => e.preventDefault());
+    fireEvent.click(link);
+    expect(screen.getByText("sub")).toBeInTheDocument();
+  });
+
+  it("select mode exposes checkboxes for folders", () => {
+    const sk: SkeletonNode[] = [
+      leaf("osfstorage", "osfstorage", "/", [leaf("osfstorage", "sub", "/sub/")]),
+    ];
+    render(
+      <UnifiedTree
+        guid="root"
+        rootTitle="Root"
+        skeleton={sk}
+        components={[]}
+        linkedNodes={[]}
+        registrations={[]}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
+    const checkbox = screen.getByLabelText("Select sub");
+    fireEvent.click(checkbox);
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.getByText("0 selected")).toBeInTheDocument();
   });
 
   it("collapseAll clears every expansion so all nested folders disappear", () => {

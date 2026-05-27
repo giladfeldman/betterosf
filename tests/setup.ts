@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { afterAll, afterEach, beforeAll } from "vitest";
 import { cleanup } from "@testing-library/react";
 import { server } from "./msw/server";
+import { _resetOsfClientForTests } from "@/lib/osf/client";
 
 // Set env vars BEFORE any test imports env.ts (which caches the parsed env on first call).
 // Setting them in a per-test beforeEach is too late — the first test wins forever.
@@ -11,6 +12,7 @@ process.env.NEXT_PUBLIC_BASE_URL = "http://localhost:3000";
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   server.resetHandlers();
+  _resetOsfClientForTests();
   cleanup();
 });
 afterAll(() => server.close());

@@ -5,8 +5,9 @@ export type ZipFetchResult =
   | { status: "ok"; body: ReadableStream<Uint8Array> }
   | { status: "error"; code: number; message: string };
 
-export async function fetchProviderZip(guid: string, provider: string): Promise<ZipFetchResult> {
-  const url = `https://files.osf.io/v1/resources/${guid}/providers/${provider}/?zip=`;
+export async function fetchProviderZip(guid: string, provider: string, folderPath = "/"): Promise<ZipFetchResult> {
+  const normalized = folderPath === "/" ? "" : folderPath.replace(/^\/+|\/+$/g, "").split("/").map(encodeURIComponent).join("/") + "/";
+  const url = `https://files.osf.io/v1/resources/${guid}/providers/${provider}/${normalized}?zip=`;
   try {
     const token = await selectToken();
     const res = await fetch(url, {

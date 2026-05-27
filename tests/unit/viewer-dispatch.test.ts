@@ -6,6 +6,7 @@ describe("viewerForFilename", () => {
     // Documents
     ["doc.pdf", "pdf"],
     ["report.docx", "docx"],
+    ["slides.pptx", "pptx"],
     ["data.xlsx", "xlsx"],
     ["legacy.xls", "xlsx"],
     ["data.csv", "csv"],
@@ -92,6 +93,7 @@ describe("sizeCapMB", () => {
   it("returns documented caps for capped viewers", () => {
     expect(sizeCapMB("pdf")).toBe(50);
     expect(sizeCapMB("docx")).toBe(25);
+    expect(sizeCapMB("pptx")).toBe(50);
     expect(sizeCapMB("xlsx")).toBe(15);
     expect(sizeCapMB("csv")).toBe(100);
     expect(sizeCapMB("json")).toBe(10);
@@ -110,7 +112,7 @@ describe("exceedsSizeCap", () => {
   const MB = 1024 * 1024;
 
   it("returns false when bytes is null (size unknown)", () => {
-    for (const v of ["pdf", "docx", "xlsx", "csv", "json", "image", "svg", "notebook", "unknown"] as ViewerId[]) {
+    for (const v of ["pdf", "docx", "pptx", "xlsx", "csv", "json", "image", "svg", "notebook", "unknown"] as ViewerId[]) {
       expect(exceedsSizeCap(v, null)).toBe(false);
     }
   });
@@ -123,7 +125,7 @@ describe("exceedsSizeCap", () => {
 
   it("each format-specific cap is enforced correctly", () => {
     const cases: Array<[ViewerId, number]> = [
-      ["pdf", 50], ["docx", 25], ["xlsx", 15], ["csv", 100],
+      ["pdf", 50], ["docx", 25], ["pptx", 50], ["xlsx", 15], ["csv", 100],
       ["json", 10], ["image", 25], ["svg", 5], ["notebook", 20],
     ];
     for (const [v, capMB] of cases) {

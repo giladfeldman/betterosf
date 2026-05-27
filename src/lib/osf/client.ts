@@ -3,19 +3,60 @@ import { selectToken } from "./tokens";
 import { OsfError } from "./types";
 import { incrementDaily } from "@/lib/limits";
 import { auth } from "@/auth";
+import { env } from "@/lib/env";
 
 const OSF_API_BASE = "https://api.osf.io/v2";
-
-async function authHeaders(): Promise<HeadersInit> {
-  return {
-    Authorization: `Bearer ${await selectToken()}`,
-    Accept: "application/vnd.api+json",
-  };
-}
 
 const ANON_HEADERS: HeadersInit = {
   Accept: "application/vnd.api+json",
 };
+
+function bearerHeaders(token: string): HeadersInit {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.api+json",
+  };
+}
+
+type CacheEntry = {
+  expiresAt: number;
+  value: unknown;
+};
+
+const responseCache = new Map<string, CacheEntry>();
+const inFlight = new Map<string, Promise<unknown>>();
+let appTokenCooldownUntil = 0;
+
+function retryAfterMs(res: Response): number {
+  const raw = res.headers.get("retry-after");
+  if (!raw) return 60_000;
+  const seconds = Number.parseInt(raw, 10);
+  if (!Number.isNaN(seconds)) return Math.max(1_000, seconds * 1000);
+  const date = Date.parse(raw);
+  if (!Number.isNaN(date)) return Math.max(1_000, date - Date.now());
+  return 60_000;
+}
+
+function cacheKey(url: string): string {
+  return `GET ${url}`;
+}
+
+function readCache<T>(key: string): T | null {
+  const hit = responseCache.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    responseCache.delete(key);
+    return null;
+  }
+  return hit.value as T;
+}
+
+function writeCache(key: string, value: unknown, revalidateSeconds: number): void {
+  responseCache.set(key, {
+    value,
+    expiresAt: Date.now() + Math.max(1, revalidateSeconds) * 1000,
+  });
+}
 
 function mapError(status: number, body: string): OsfError {
   if (status === 404) return new OsfError(404, "not_found", "OSF resource not found");
@@ -38,40 +79,101 @@ export async function osfGetUrl<T = unknown>(
   url: string,
   init?: { revalidate?: number; tags?: string[] }
 ): Promise<T> {
-  // Track app-token quota usage when no user session.
-  // Per-user OAuth requests consume the USER'S quota, not ours.
+  const revalidate = init?.revalidate ?? 300;
+  const next = { revalidate, tags: init?.tags };
+
+  // Public/anonymous browsing should not spend the app token's shared
+  // authenticated quota unless OSF's much smaller anonymous bucket is already
+  // rate-limited. OSF documents 100/hour unauthenticated vs 10,000/day
+  // authenticated; caching before either path is the real quota saver.
+  let userToken: string | null = null;
   try {
     const session = await auth();
-    if (!session?.accessToken) {
-      const today = new Date().toISOString().slice(0, 10);
-      void incrementDaily(`app:osf:calls:${today}`);
-    }
+    userToken = session?.accessToken ?? null;
   } catch {
-    // auth() may throw in non-request contexts; count as anonymous
+    userToken = null;
+  }
+
+  const key = cacheKey(url);
+  if (!userToken) {
+    const cached = readCache<T>(key);
+    if (cached) return cached;
+
+    const existing = inFlight.get(key);
+    if (existing) return existing as Promise<T>;
+  }
+
+  async function fetchJson(
+    headers: HeadersInit,
+    opts: { sharedCache: boolean }
+  ): Promise<{ ok: true; value: T } | { ok: false; res: Response; body: string }> {
+    const res = await fetch(url, {
+      headers,
+      ...(opts.sharedCache ? { next } : { cache: "no-store" as const }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return { ok: false, res, body };
+    }
+    return { ok: true, value: (await res.json()) as T };
+  }
+
+  const work = (async (): Promise<T> => {
+    if (userToken) {
+      const result = await fetchJson(bearerHeaders(userToken), { sharedCache: false });
+      if (!result.ok) throw mapError(result.res.status, result.body);
+      return result.value;
+    }
+
+    const anonymous = await fetchJson(ANON_HEADERS, { sharedCache: true });
+    if (anonymous.ok) {
+      writeCache(key, anonymous.value, revalidate);
+      return anonymous.value;
+    }
+
+    if (anonymous.res.status !== 429) {
+      throw mapError(anonymous.res.status, anonymous.body);
+    }
+
+    if (Date.now() < appTokenCooldownUntil) {
+      throw mapError(anonymous.res.status, anonymous.body);
+    }
+
+    const token = await selectToken().catch(() => env().OSF_APP_TOKEN);
+    const appToken = await fetchJson(bearerHeaders(token), { sharedCache: true });
     const today = new Date().toISOString().slice(0, 10);
     void incrementDaily(`app:osf:calls:${today}`);
+
+    if (appToken.ok) {
+      writeCache(key, appToken.value, revalidate);
+      return appToken.value;
+    }
+
+    if (appToken.res.status === 429) {
+      appTokenCooldownUntil = Date.now() + retryAfterMs(appToken.res);
+    }
+    throw mapError(appToken.res.status, appToken.body);
+  })();
+
+  if (!userToken) {
+    inFlight.set(key, work);
+    work.finally(() => inFlight.delete(key)).catch(() => {});
   }
 
-  const next = { revalidate: init?.revalidate ?? 300, tags: init?.tags };
-  let res = await fetch(url, {
-    headers: await authHeaders(),
-    next,
-  });
-
-  // OSF public endpoints do not require a bearer token. If the app-owned PAT is
-  // expired or revoked, anonymous public browsing should still work instead of
-  // throwing a route-level 401.
-  if (res.status === 401 || res.status === 403) {
-    const anonymousRes = await fetch(url, {
-      headers: ANON_HEADERS,
-      next,
-    });
-    if (anonymousRes.ok) res = anonymousRes;
-  }
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw mapError(res.status, body);
-  }
-  return (await res.json()) as T;
+  return work;
 }
+
+export function _resetOsfClientForTests(): void {
+  responseCache.clear();
+  inFlight.clear();
+  appTokenCooldownUntil = 0;
+}
+
+/*
+  Historical note: this client used to send the app-owned PAT first for every
+  anonymous public request and only retry anonymously on 401/403/429. That made
+  all public users share one authenticated 10,000/day OSF bucket and also risked
+  exposing app-token-readable private resources. Anonymous-first plus cache-first
+  is the safer public browsing posture; signed-in users still use their own OAuth
+  token for private content.
+*/

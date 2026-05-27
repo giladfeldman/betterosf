@@ -48,6 +48,7 @@ const OUT = "./screenshots";
 const HEAVY_GUID = "3kmr9";          // PCIRR project with folders that contain SPACES — regression fixture
 const MANY_LABS_GUID = "8cd4r";      // Many Labs 2 — components + registrations + folders + sizable
 const REG_PARENT_GUID = "3kmr9";     // 3kmr9 has registration ujyh9 — used for registration-expand test
+const PPTX_GUID = "qyzha";           // Public project with a small OSF Storage PPTX fixture
 
 const checks = [];
 function record(name, ok, detail = "") {
@@ -295,6 +296,11 @@ async function main() {
       success: ".docx-render, article",
     },
     {
+      kind: "pptx",
+      url: `/${PPTX_GUID}/files/view/osfstorage/Stimuli/Experiment%202/Experiment2_TrainingSlides.pptx`,
+      success: "text=/PPTX preview/i",
+    },
+    {
       kind: "html",
       url: `/${HEAVY_GUID}/files/view/osfstorage/PCIRR%20Stage%201/Simulated%20data%20and%20planned%20analysis%20code/Newman-etal-2011-Effect-sizes-power-analysis-combined-v4-G.html`,
       success: 'iframe[title="HTML preview"]',
@@ -427,6 +433,24 @@ async function main() {
   } else {
     record("folder left-click expands inline (URL unchanged)", false, "no PCIRR Stage 1 folder anchor found in tree");
   }
+
+  const selectButton = page.getByRole("button", { name: /^Select$/ }).first();
+  if (await selectButton.count()) {
+    await selectButton.click();
+    await page.waitForTimeout(500);
+    const checkboxes = await page.locator('[role="tree"] input[type="checkbox"]').count();
+    record(`navigator select mode exposes checkboxes: ${checkboxes}`, checkboxes > 0);
+    const zipActions = await page.locator('[role="tree"] a[aria-label*="Download"][href*="/api/zip/"]').count();
+    record(`navigator exposes folder ZIP actions: ${zipActions}`, zipActions > 0);
+  } else {
+    record("navigator select mode button present", false);
+  }
+
+  await page.goto(`${BASE}/${MANY_LABS_GUID}/files`, { waitUntil: "domcontentloaded" });
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  await page.waitForTimeout(2500);
+  const longFilenameTooltip = await page.locator('[role="tree"] [title*="ML2 Polynomial Tests of Order Effects.txt"]').count();
+  record("navigator long filenames expose full title tooltip", longFilenameTooltip > 0);
 
   // --- 8) Search keyword highlighting (existing) ---
   console.log("\n--- Search highlighting (existing) ---");

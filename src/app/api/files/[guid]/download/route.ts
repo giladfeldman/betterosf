@@ -40,6 +40,7 @@ const CONTENT_TYPES_BY_EXT: Record<string, string> = {
   csv: "text/csv; charset=utf-8",
   json: "application/json; charset=utf-8",
   pdf: "application/pdf",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 };
 
 function contentTypeForName(name: string): string | null {
@@ -86,7 +87,7 @@ export async function GET(
   // Public OSF files can be fetched without a bearer token. If the app-owned
   // token is expired/revoked, retry anonymously so public viewers do not render
   // as blank iframes or failed downloads.
-  if (token && (upstream.status === 401 || upstream.status === 403)) {
+  if (token && (upstream.status === 401 || upstream.status === 403 || upstream.status === 429)) {
     upstream = await fetch(target.toString(), {
       headers: { Accept: "application/octet-stream, */*" },
       redirect: "follow",

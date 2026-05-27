@@ -1,5 +1,4 @@
 import { env } from "@/lib/env";
-import { auth } from "@/auth";
 
 /**
  * Returns the OSF API token to use for this request.
@@ -8,6 +7,7 @@ import { auth } from "@/auth";
  */
 export async function selectToken(): Promise<string> {
   try {
+    const { auth } = await import("@/auth");
     const session = await auth();
     if (session?.accessToken) return session.accessToken;
   } catch {

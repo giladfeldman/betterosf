@@ -35,4 +35,17 @@ describe("fetchProviderZip", () => {
     const result = await fetchProviderZip("x", "github");
     expect(result).toMatchObject({ status: "error" });
   });
+
+  it("encodes folder paths when requesting a folder zip", async () => {
+    server.use(
+      http.get("https://files.osf.io/v1/resources/abc/providers/osfstorage/Folder%20One/Sub%20Folder/", () =>
+        new HttpResponse(new Uint8Array([0x50, 0x4b]), {
+          status: 200,
+          headers: { "Content-Type": "application/zip" },
+        })
+      )
+    );
+    const result = await fetchProviderZip("abc", "osfstorage", "/Folder One/Sub Folder/");
+    expect(result.status).toBe("ok");
+  });
 });

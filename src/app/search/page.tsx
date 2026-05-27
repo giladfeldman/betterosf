@@ -44,6 +44,7 @@ const EXT_GROUPS: Record<string, string[]> = {
   pdf: ["pdf"],
   csv: ["csv", "tsv"],
   docx: ["docx", "doc"],
+  pptx: ["pptx", "ppt"],
   image: ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp"],
   code: ["js", "ts", "tsx", "jsx", "py", "r", "rmd", "ipynb", "json", "yaml", "yml", "sh", "html", "css"],
 };
@@ -299,6 +300,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               { value: "pdf", label: "PDF" },
               { value: "csv", label: "CSV/TSV" },
               { value: "docx", label: "DOCX" },
+              { value: "pptx", label: "PPTX" },
               { value: "image", label: "Images" },
               { value: "code", label: "Code" },
             ]}

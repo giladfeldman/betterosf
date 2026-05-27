@@ -6,6 +6,14 @@ const ALLOWED_PROVIDERS = new Set([
   "figshare", "onedrive", "owncloud", "gitlab", "bitbucket",
 ]);
 
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ guid: string; provider: string; path?: string[] }> }
@@ -19,7 +27,8 @@ export async function GET(
     return new Response("Unknown provider", { status: 400 });
   }
 
-  const folderPath = path && path.length > 0 ? path.map(encodeURIComponent).join("/") + "/" : "";
+  const cleanPath = (path ?? []).map(safeDecode).filter((seg) => seg.length > 0);
+  const folderPath = cleanPath.length > 0 ? cleanPath.map(encodeURIComponent).join("/") + "/" : "";
   const wbUrl = `https://files.osf.io/v1/resources/${guid}/providers/${provider}/${folderPath}?zip=`;
 
   const upstream = await fetch(wbUrl, {
@@ -32,7 +41,7 @@ export async function GET(
     return new Response(`Upstream returned ${upstream.status}`, { status: upstream.status });
   }
 
-  const filename = path && path.length > 0 ? `${path[path.length - 1]}.zip` : `${guid}-${provider}.zip`;
+  const filename = cleanPath.length > 0 ? `${cleanPath[cleanPath.length - 1]}.zip` : `${guid}-${provider}.zip`;
 
   return new Response(upstream.body, {
     status: 200,

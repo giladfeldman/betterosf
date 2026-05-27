@@ -6,6 +6,7 @@ import { DownloadFallback } from "./DownloadFallback";
 
 const Pdf = dynamic(() => import("./PdfViewer").then((m) => m.PdfViewer), { ssr: false, loading: () => <div className="p-4">Loading PDF viewer…</div> });
 const Docx = dynamic(() => import("./DocxViewer").then((m) => m.DocxViewer), { ssr: false });
+const Pptx = dynamic(() => import("./PptxViewer").then((m) => m.PptxViewer), { ssr: false });
 const Xlsx = dynamic(() => import("./XlsxViewer").then((m) => m.XlsxViewer), { ssr: false });
 const Csv = dynamic(() => import("./CsvViewer").then((m) => m.CsvViewer), { ssr: false });
 const Markdown = dynamic(() => import("./MarkdownViewer").then((m) => m.MarkdownViewer), { ssr: false });
@@ -46,6 +47,7 @@ export function ViewerDispatcher({
   switch (viewer) {
     case "pdf": return <Pdf url={url} />;
     case "docx": return <Docx url={url} />;
+    case "pptx": return <Pptx url={url} filename={filename} />;
     case "xlsx": return <Xlsx url={url} />;
     case "csv": return <Csv url={url} />;
     case "markdown": return <Markdown url={url} />;

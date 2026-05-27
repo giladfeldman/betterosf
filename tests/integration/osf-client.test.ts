@@ -6,10 +6,10 @@ import { OsfError } from "@/lib/osf/types";
 import { getCurrentUser, getMyProjects } from "@/lib/osf/users";
 
 describe("osfGet", () => {
-  it("attaches bearer token and returns parsed JSON", async () => {
+  it("uses anonymous requests first for public browsing", async () => {
     server.use(
       http.get("https://api.osf.io/v2/nodes/abc/", ({ request }) => {
-        expect(request.headers.get("authorization")).toBe("Bearer test-token");
+        expect(request.headers.get("authorization")).toBeNull();
         return HttpResponse.json({ data: { id: "abc", type: "nodes", attributes: {} } });
       })
     );
@@ -31,25 +31,52 @@ describe("osfGet", () => {
     await expect(osfGet("/nodes/p/")).rejects.toMatchObject({ code: "forbidden" });
   });
 
-  it("falls back to an anonymous request when OSF rejects the bearer token on a public endpoint", async () => {
+  it("does not fall back to the app token for anonymous 401/403 responses", async () => {
     const seenAuthHeaders: (string | null)[] = [];
     server.use(
       http.get("https://api.osf.io/v2/nodes/public/", ({ request }) => {
         const authHeader = request.headers.get("authorization");
         seenAuthHeaders.push(authHeader);
-        if (authHeader) return new HttpResponse(null, { status: 401 });
-        return HttpResponse.json({ data: { id: "public", type: "nodes", attributes: {} } });
+        return new HttpResponse(null, { status: 401 });
       })
     );
 
-    const result = await osfGet("/nodes/public/");
-    expect((result as { data: { id: string } }).data.id).toBe("public");
-    expect(seenAuthHeaders).toEqual(["Bearer test-token", null]);
+    await expect(osfGet("/nodes/public/")).rejects.toMatchObject({ code: "forbidden" });
+    expect(seenAuthHeaders).toEqual([null]);
+  });
+
+  it("falls back to the app token only when anonymous public browsing is rate-limited", async () => {
+    const seenAuthHeaders: (string | null)[] = [];
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/public-rate/", ({ request }) => {
+        const authHeader = request.headers.get("authorization");
+        seenAuthHeaders.push(authHeader);
+        if (!authHeader) return new HttpResponse(null, { status: 429, headers: { "Retry-After": "30" } });
+        return HttpResponse.json({ data: { id: "public-rate", type: "nodes", attributes: {} } });
+      })
+    );
+
+    const result = await osfGet("/nodes/public-rate/");
+    expect((result as { data: { id: string } }).data.id).toBe("public-rate");
+    expect(seenAuthHeaders).toEqual([null, "Bearer test-token"]);
   });
 
   it("maps 429 to rate_limited", async () => {
     server.use(http.get("https://api.osf.io/v2/nodes/x/", () => new HttpResponse(null, { status: 429 })));
     await expect(osfGet("/nodes/x/")).rejects.toMatchObject({ code: "rate_limited" });
+  });
+
+  it("caches anonymous public responses for the revalidate window", async () => {
+    let calls = 0;
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/cache/", () => {
+        calls += 1;
+        return HttpResponse.json({ data: { id: "cache", type: "nodes", attributes: {} } });
+      })
+    );
+    await osfGet("/nodes/cache/", { revalidate: 60 });
+    await osfGet("/nodes/cache/", { revalidate: 60 });
+    expect(calls).toBe(1);
   });
 
   it("maps 5xx to upstream", async () => {

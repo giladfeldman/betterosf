@@ -7,7 +7,7 @@ import type { ComponentTree, RegistrationTree, LinkedTree } from "@/lib/osf/full
 import type { NodeView } from "@/lib/osf/parse";
 import type { RegistrationView } from "@/lib/osf/registrations";
 import type { FileEntry } from "@/lib/osf/files";
-import { UnifiedTreeNode, type TreeNodeData } from "./UnifiedTreeNode";
+import { UnifiedTreeNode, type TreeNodeData, type TreeSelectionPayload } from "./UnifiedTreeNode";
 import { getPref, setPref } from "@/lib/prefs";
 import { listPins, type FavoriteRef } from "@/lib/favorites";
 
@@ -20,7 +20,43 @@ type FlatRow = {
   onToggle: () => void;
 };
 
-type LoadedFiles = Record<string, FileEntry[]>; // keyed by `${nodeGuid}|${provider}:${materializedPath}`
+type LoadedEntries = Record<string, FileEntry[]>; // keyed by `${nodeGuid}|${provider}:${materializedPath}`
+
+const PREFETCH_LIMIT = 12;
+
+function zipHref(nodeGuid: string, provider: string, materializedPath: string): string {
+  const path = materializedPath === "/" ? "" : materializedPath.replace(/^\/+|\/+$/g, "");
+  return `/api/zip/${nodeGuid}/${provider}${path ? `/${path}` : ""}`;
+}
+
+function selectionKey(payload: TreeSelectionPayload): string {
+  return `${payload.kind}:${payload.guid}:${payload.provider}:${payload.path}`;
+}
+
+function folderKey(nodeGuid: string, provider: string, materializedPath: string): string {
+  return `${nodeGuid}|${provider}:${materializedPath}`;
+}
+
+function fileHref(nodeGuid: string, provider: string, materializedPath: string, name: string): string {
+  const folderPath = materializedPath.endsWith("/") ? materializedPath : `${materializedPath}/`;
+  return `/${nodeGuid}/files/view/${provider}${folderPath}${name}`;
+}
+
+function fileSelectionPath(materializedPath: string, name: string): string {
+  const folderPath = materializedPath.endsWith("/") ? materializedPath : `${materializedPath}/`;
+  return `${folderPath}${name}`;
+}
+
+function skeletonFromFolder(entry: Extract<FileEntry, { kind: "folder" }>, provider: string): SkeletonNode {
+  return {
+    provider,
+    name: entry.name,
+    materializedPath: entry.materializedPath,
+    listingUrl: entry.listingUrl,
+    children: [],
+    fileCount: 0,
+  };
+}
 
 export function UnifiedTree({
   guid,
@@ -104,7 +140,11 @@ export function UnifiedTree({
     [guid]
   );
 
-  const [loadedFiles, setLoadedFiles] = useState<LoadedFiles>({});
+  const [loadedEntries, setLoadedEntries] = useState<LoadedEntries>({});
+  const [loadingKeys, setLoadingKeys] = useState<Record<string, boolean>>({});
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Record<string, TreeSelectionPayload>>({});
+  const [downloadingSelection, setDownloadingSelection] = useState(false);
 
   // In-flight de-dupe — keep a separate set of keys currently being fetched so
   // mass expand-all doesn't fire the same URL N times.
@@ -115,40 +155,46 @@ export function UnifiedTree({
   const fetchFiles = useCallback(
     async (nodeGuid: string, provider: string, materializedPath: string, listingUrl: string) => {
       const key = `${nodeGuid}|${provider}:${materializedPath}`;
-      if (loadedFiles[key]) return;
+      if (loadedEntries[key]) return;
       if (inFlightRef.current.has(key)) return;
       inFlightRef.current.add(key);
+      setLoadingKeys((prev) => ({ ...prev, [key]: true }));
       try {
         const res = await fetch(
           `/api/files/${nodeGuid}/folder?` + new URLSearchParams({ provider, listingUrl })
         );
         if (!res.ok) return;
         const data: { entries: FileEntry[] } = await res.json();
-        const files = data.entries.filter((e) => e.kind === "file");
-        setLoadedFiles((prev) => ({ ...prev, [key]: files }));
+        setLoadedEntries((prev) => ({ ...prev, [key]: data.entries }));
       } catch {
         // silent
       } finally {
         inFlightRef.current.delete(key);
+        setLoadingKeys((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
       }
     },
-    [loadedFiles]
+    [loadedEntries]
   );
 
   // Auto-fetch files for every folder that's currently expanded and visible.
   // This makes the initial render (where folders default to expanded) actually
   // show files, instead of requiring users to click-collapse-then-expand.
-  // De-duped via loadedFiles + inFlightRef in fetchFiles.
+  // De-duped via loadedEntries + inFlightRef in fetchFiles.
   useEffect(() => {
+    const targets: Array<{ nodeGuid: string; provider: string; materializedPath: string; listingUrl: string }> = [];
     function walkProviderSet(nodeGuid: string, providers: SkeletonNode[], basePrefix: string) {
       for (const p of providers) {
         const providerId = `${basePrefix}/provider:${p.provider}`;
         if (!expanded[providerId]) continue;
-        void fetchFiles(nodeGuid, p.provider, "/", p.listingUrl);
+        targets.push({ nodeGuid, provider: p.provider, materializedPath: "/", listingUrl: p.listingUrl });
         function walkFolder(folder: SkeletonNode, parentId: string) {
           const id = `${parentId}/${folder.name}`;
           if (!expanded[id]) return;
-          void fetchFiles(nodeGuid, folder.provider, folder.materializedPath, folder.listingUrl);
+          targets.push({ nodeGuid, provider: folder.provider, materializedPath: folder.materializedPath, listingUrl: folder.listingUrl });
           for (const sub of folder.children) walkFolder(sub, id);
         }
         for (const folder of p.children) walkFolder(folder, providerId);
@@ -176,7 +222,47 @@ export function UnifiedTree({
         walkProviderSet(l.guid, l.skeleton, `linked/${l.guid}`);
       }
     }
+    for (const t of targets.slice(0, PREFETCH_LIMIT)) {
+      void fetchFiles(t.nodeGuid, t.provider, t.materializedPath, t.listingUrl);
+    }
   }, [expanded, skeleton, componentTrees, registrationTrees, linkedTrees, guid, fetchFiles]);
+
+  const toggleSelected = useCallback((payload: TreeSelectionPayload, checked: boolean) => {
+    const key = selectionKey(payload);
+    setSelected((prev) => {
+      const next = { ...prev };
+      if (checked) next[key] = payload;
+      else delete next[key];
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelected({}), []);
+
+  const downloadSelection = useCallback(async () => {
+    const items = Object.values(selected);
+    if (items.length === 0) return;
+    setDownloadingSelection(true);
+    try {
+      const res = await fetch(`/api/zip/${guid}/selection`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `betterosf-selection-${guid}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objectUrl);
+    } finally {
+      setDownloadingSelection(false);
+    }
+  }, [guid, selected]);
 
   const flatRows = useMemo<FlatRow[]>(() => {
     const rows: FlatRow[] = [];
@@ -202,7 +288,7 @@ export function UnifiedTree({
           id: providerId,
           depth: baseDepth,
           expanded: !!expanded[providerId],
-          hasChildren: provider.children.length > 0,
+          hasChildren: true,
           onToggle: () => {
             const next: Record<string, boolean> = { ...expanded, [providerId]: !expanded[providerId] };
             // Cascade-expand: when opening a provider-root (especially the
@@ -230,6 +316,15 @@ export function UnifiedTree({
             href: `/${nodeGuid}/files/${provider.provider}`,
             newTab: false,
             fileCount: provider.fileCount,
+            downloadHref: zipHref(nodeGuid, provider.provider, "/"),
+            selection: {
+              kind: "folder",
+              guid: nodeGuid,
+              provider: provider.provider,
+              path: "/",
+              name: provider.name,
+            },
+            loading: !!loadingKeys[`${nodeGuid}|${provider.provider}:/`],
           },
         });
 
@@ -237,9 +332,15 @@ export function UnifiedTree({
 
         const emitFolder = (folder: SkeletonNode, depth: number, parentId: string) => {
           const id = `${parentId}/${folder.name}`;
-          const fileKey = `${nodeGuid}|${folder.provider}:${folder.materializedPath}`;
-          const childFiles = loadedFiles[fileKey] ?? [];
-          const hasKids = folder.children.length > 0 || childFiles.length > 0;
+          const fileKey = folderKey(nodeGuid, folder.provider, folder.materializedPath);
+          const childEntries = loadedEntries[fileKey];
+          const childFiles = (childEntries ?? []).filter((e) => e.kind === "file");
+          const loadedChildFolders = (childEntries ?? []).filter((e) => e.kind === "folder");
+          const staticFolderPaths = new Set(folder.children.map((child) => child.materializedPath));
+          const dynamicFolders = loadedChildFolders
+            .filter((child) => !staticFolderPaths.has(child.materializedPath))
+            .map((child) => skeletonFromFolder(child, folder.provider));
+          const hasKids = folder.children.length > 0 || childEntries === undefined || childEntries.length > 0;
           rows.push({
             id,
             depth,
@@ -256,11 +357,22 @@ export function UnifiedTree({
               kind: "folder",
               href: `/${nodeGuid}/files/${folder.provider}${folder.materializedPath}`,
               fileCount: folder.fileCount,
+              downloadHref: zipHref(nodeGuid, folder.provider, folder.materializedPath),
+              selection: {
+                kind: "folder",
+                guid: nodeGuid,
+                provider: folder.provider,
+                path: folder.materializedPath,
+                name: folder.name,
+              },
+              loading: !!loadingKeys[fileKey],
             },
           });
           if (expanded[id]) {
             for (const sub of folder.children) emitFolder(sub, depth + 1, id);
+            for (const sub of dynamicFolders) emitFolder(sub, depth + 1, id);
             for (const f of childFiles) {
+              if (f.kind !== "file") continue;
               rows.push({
                 id: `${id}/${f.name}`,
                 depth: depth + 1,
@@ -275,10 +387,18 @@ export function UnifiedTree({
                   // the tree on the left stays mounted and the right pane swaps
                   // to the viewer. Right-click → "Open in new tab" still works
                   // because the href is a real anchor.
-                  href: `/${nodeGuid}/files/view/${folder.provider}${folder.materializedPath}${f.name}`,
+                  href: fileHref(nodeGuid, folder.provider, folder.materializedPath, f.name),
                   newTab: false,
-                  size: f.kind === "file" ? f.size : null,
-                  modified: f.kind === "file" ? f.modified : undefined,
+                  size: f.size,
+                  modified: f.modified,
+                  selection: {
+                    kind: "file",
+                    guid: nodeGuid,
+                    provider: folder.provider,
+                    path: fileSelectionPath(folder.materializedPath, f.name),
+                    name: f.name,
+                    downloadUrl: f.downloadUrl,
+                  },
                 },
               });
             }
@@ -287,10 +407,18 @@ export function UnifiedTree({
 
         for (const folder of provider.children) emitFolder(folder, baseDepth + 1, providerId);
 
-        // Top-level files at provider root (loaded once user expands the provider)
-        const rootFileKey = `${nodeGuid}|${provider.provider}:/`;
-        const rootFiles = loadedFiles[rootFileKey] ?? [];
+        // Top-level folders/files at provider root (loaded once user expands the provider)
+        const rootFileKey = folderKey(nodeGuid, provider.provider, "/");
+        const rootEntries = loadedEntries[rootFileKey] ?? [];
+        const rootFolders = rootEntries.filter((e) => e.kind === "folder");
+        const staticRootFolderPaths = new Set(provider.children.map((child) => child.materializedPath));
+        for (const folder of rootFolders) {
+          if (staticRootFolderPaths.has(folder.materializedPath)) continue;
+          emitFolder(skeletonFromFolder(folder, provider.provider), baseDepth + 1, providerId);
+        }
+        const rootFiles = rootEntries.filter((e) => e.kind === "file");
         for (const f of rootFiles) {
+          if (f.kind !== "file") continue;
           rows.push({
             id: `${providerId}/${f.name}`,
             depth: baseDepth + 1,
@@ -301,9 +429,17 @@ export function UnifiedTree({
               id: f.id,
               label: f.name,
               kind: "file",
-              href: `/${nodeGuid}/files/view/${provider.provider}/${f.name}`,
+              href: fileHref(nodeGuid, provider.provider, "/", f.name),
               newTab: false,
-              size: f.kind === "file" ? f.size : null,
+              size: f.size,
+              selection: {
+                kind: "file",
+                guid: nodeGuid,
+                provider: provider.provider,
+                  path: fileSelectionPath("/", f.name),
+                name: f.name,
+                downloadUrl: f.downloadUrl,
+              },
             },
           });
         }
@@ -517,7 +653,7 @@ export function UnifiedTree({
     }
 
     return rows;
-  }, [expanded, loadedFiles, skeleton, components, componentTrees, linkedNodes, linkedTrees, registrations, registrationTrees, pinned, rootTitle, guid, fetchFiles, setExpanded]);
+  }, [expanded, loadedEntries, loadingKeys, skeleton, components, componentTrees, linkedNodes, linkedTrees, registrations, registrationTrees, pinned, rootTitle, guid, fetchFiles, setExpanded]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -590,12 +726,39 @@ export function UnifiedTree({
   const collapseAll = () => {
     setExpanded({});
   };
+  const selectedCount = Object.keys(selected).length;
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center gap-2 px-2 py-1 border-b border-neutral-200 dark:border-neutral-800 text-xs">
+      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-white px-2 py-1 text-xs dark:border-neutral-800 dark:bg-neutral-950">
         <button type="button" onClick={expandAll} className="hover:underline">Expand all</button>
         <button type="button" onClick={collapseAll} className="hover:underline">Collapse all</button>
+        <button
+          type="button"
+          onClick={() => {
+            setSelectMode((on) => !on);
+            if (selectMode) clearSelection();
+          }}
+          className={`rounded border px-2 py-0.5 ${selectMode ? "border-blue-500 bg-blue-50 dark:bg-blue-950" : "border-neutral-300 dark:border-neutral-700"}`}
+        >
+          {selectMode ? "Done" : "Select"}
+        </button>
+        {selectMode && (
+          <>
+            <span className="text-neutral-500">{selectedCount} selected</span>
+            <button type="button" onClick={clearSelection} disabled={selectedCount === 0} className="hover:underline disabled:text-neutral-500 disabled:no-underline">
+              Clear
+            </button>
+            <button
+              type="button"
+              onClick={downloadSelection}
+              disabled={selectedCount === 0 || downloadingSelection}
+              className="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 disabled:text-neutral-500 dark:border-neutral-700 dark:hover:bg-neutral-900"
+            >
+              {downloadingSelection ? "Preparing..." : "Download selected"}
+            </button>
+          </>
+        )}
       </div>
       <div ref={parentRef} role="tree" className="flex-1 overflow-auto">
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
@@ -613,6 +776,9 @@ export function UnifiedTree({
                   expanded={row.expanded}
                   hasChildren={row.hasChildren}
                   onToggle={row.onToggle}
+                  selectMode={selectMode}
+                  selected={row.node.selection ? !!selected[selectionKey(row.node.selection)] : false}
+                  onSelect={toggleSelected}
                 />
               </div>
             );

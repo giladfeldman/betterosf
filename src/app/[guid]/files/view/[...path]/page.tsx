@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { isValidGuid } from "@/lib/osf/guid";
-import { getProviderRootsAuto, getFolderContents, type FileEntry } from "@/lib/osf/files";
+import { getProviderRootsAuto, getFolderContents, type FileEntry, type ProviderRoot } from "@/lib/osf/files";
 import { getNode, getAllLinkedNodes } from "@/lib/osf/nodes";
 import { getNodeRegistrations, getRegistration, type RegistrationView } from "@/lib/osf/registrations";
 import { collectFullTree, type FullProjectTree } from "@/lib/osf/full-tree";
@@ -22,6 +22,11 @@ function safeDecode(s: string): string {
   } catch {
     return s;
   }
+}
+
+function directWaterbutlerFileUrl(guid: string, provider: string, segments: string[]): string {
+  const encoded = segments.map((seg) => encodeURIComponent(seg)).join("/");
+  return `https://files.osf.io/v1/resources/${guid}/providers/${provider}/${encoded}`;
 }
 
 export default async function FileViewerPage({
@@ -53,7 +58,7 @@ export default async function FileViewerPage({
   // Critical-path data: resolve the guid's kind (node or registration) and
   // its provider list. A 404 here on both kinds means the resource doesn't
   // exist — bail to the route-level not-found.
-  let providers;
+  let providers: ProviderRoot[] = [];
   let resourceKind: "node" | "registration";
   try {
     const r = await getProviderRootsAuto(guid);
@@ -61,7 +66,11 @@ export default async function FileViewerPage({
     resourceKind = r.kind;
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") notFound();
-    throw e;
+    if (e instanceof OsfError && (e.code === "rate_limited" || e.code === "upstream")) {
+      resourceKind = "node";
+    } else {
+      throw e;
+    }
   }
 
   // Project title (kind-appropriate fetch).
@@ -76,7 +85,13 @@ export default async function FileViewerPage({
     titlePromise,
     resourceKind === "registration"
       ? Promise.resolve<FullProjectTree>(EMPTY_TREE)
-      : collectFullTree(guid).catch((): FullProjectTree => EMPTY_TREE),
+      : collectFullTree(guid, {
+          maxComponentsToRecurse: 3,
+          maxRegistrationsToRecurse: 1,
+          maxLinkedToRecurse: 1,
+          componentTimeoutMs: 5_000,
+          rootTimeoutMs: 10_000,
+        }).catch((): FullProjectTree => EMPTY_TREE),
     resourceKind === "registration"
       ? Promise.resolve<NodeView[]>([])
       : getAllLinkedNodes(guid).catch((): NodeView[] => []),
@@ -111,7 +126,23 @@ export default async function FileViewerPage({
     | { kind: "fail"; reason: "wrong-provider" | "missing-folder" | "missing-file" | "upstream-error" };
 
   async function walkToFile(): Promise<WalkResult> {
-    if (!providerMatch) return { kind: "fail", reason: "wrong-provider" };
+    if (!providerMatch) {
+      if (providers.length === 0 && provider && rest.length > 0) {
+        return {
+          kind: "ok",
+          file: {
+            kind: "file",
+            id: `${guid}/${provider}/${rest.join("/")}`,
+            name: filename,
+            size: null,
+            modified: "",
+            materializedPath: `/${rest.join("/")}`,
+            downloadUrl: directWaterbutlerFileUrl(guid, provider, rest),
+          },
+        };
+      }
+      return { kind: "fail", reason: "wrong-provider" };
+    }
     try {
       let listingUrl = providerMatch.listingUrl;
       let entries: FileEntry[] = await getFolderContents(listingUrl, guid);

@@ -3,11 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { getPref, setPref } from "@/lib/prefs";
 
+function responsiveMaxLeft(fallback: number): number {
+  if (typeof window === "undefined") return fallback;
+  return Math.max(360, Math.min(900, Math.floor(window.innerWidth * 0.55)));
+}
+
 export function SplitPane({
   prefKey,
   defaultLeftWidth = 320,
   minLeft = 200,
-  maxLeft = 600,
+  maxLeft = 900,
   left,
   right,
 }: {
@@ -21,22 +26,45 @@ export function SplitPane({
   const [width, setWidth] = useState<number>(defaultLeftWidth);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const draggingRef = useRef(false);
+  const widthRef = useRef(defaultLeftWidth);
+  const maxLeftRef = useRef(maxLeft);
 
   useEffect(() => {
-    setWidth(getPref(`splitPane.${prefKey}`, defaultLeftWidth));
-  }, [prefKey, defaultLeftWidth]);
+    const max = responsiveMaxLeft(maxLeft);
+    maxLeftRef.current = max;
+    const saved = getPref(`splitPane.${prefKey}`, defaultLeftWidth);
+    const next = Math.min(max, Math.max(minLeft, saved));
+    widthRef.current = next;
+    setWidth(next);
+  }, [prefKey, defaultLeftWidth, minLeft, maxLeft]);
+
+  useEffect(() => {
+    const onResize = () => {
+      const max = responsiveMaxLeft(maxLeft);
+      maxLeftRef.current = max;
+      setWidth((current) => {
+        const next = Math.min(max, Math.max(minLeft, current));
+        widthRef.current = next;
+        return next;
+      });
+    };
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [minLeft, maxLeft]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!draggingRef.current) return;
-      const next = Math.min(maxLeft, Math.max(minLeft, e.clientX));
+      const next = Math.min(maxLeftRef.current, Math.max(minLeft, e.clientX));
+      widthRef.current = next;
       setWidth(next);
     };
     const onUp = () => {
       if (!draggingRef.current) return;
       draggingRef.current = false;
       document.body.style.cursor = "";
-      setPref(`splitPane.${prefKey}`, width);
+      setPref(`splitPane.${prefKey}`, widthRef.current);
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -44,7 +72,7 @@ export function SplitPane({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [width, prefKey, minLeft, maxLeft]);
+  }, [prefKey, minLeft]);
 
   const onDown = () => {
     draggingRef.current = true;
@@ -76,8 +104,18 @@ export function SplitPane({
         tabIndex={0}
         onMouseDown={onDown}
         onKeyDown={(e) => {
-          if (e.key === "ArrowLeft") setWidth((w) => Math.max(minLeft, w - 20));
-          if (e.key === "ArrowRight") setWidth((w) => Math.min(maxLeft, w + 20));
+          if (e.key === "ArrowLeft") setWidth((w) => {
+            const next = Math.max(minLeft, w - 20);
+            widthRef.current = next;
+            setPref(`splitPane.${prefKey}`, next);
+            return next;
+          });
+          if (e.key === "ArrowRight") setWidth((w) => {
+            const next = Math.min(maxLeftRef.current, w + 20);
+            widthRef.current = next;
+            setPref(`splitPane.${prefKey}`, next);
+            return next;
+          });
         }}
         className="hidden w-1 cursor-col-resize bg-transparent transition-colors hover:bg-blue-500 focus-visible:bg-blue-500 md:block"
       />

@@ -17,7 +17,7 @@ export async function collectFolderSkeleton(
   opts: { maxFolders?: number; maxDepth?: number; kind?: FilesKind } = {}
 ): Promise<SkeletonNode[]> {
   const maxFolders = opts.maxFolders ?? 500;
-  const maxDepth = opts.maxDepth ?? 8;
+  const maxDepth = opts.maxDepth ?? 1;
   let folderCount = 0;
 
   const providers = await getProviderRoots(guid, { kind: opts.kind });

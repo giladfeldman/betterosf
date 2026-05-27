@@ -60,6 +60,33 @@ function sortRegistrations(items: RegistrationView[], sort: string): Registratio
   return sorted;
 }
 
+function tabUrl(basePath: string, searchParams: Record<string, string | string[] | undefined>, view: string): string {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(searchParams)) {
+    if (v === undefined || k === "view") continue;
+    if (Array.isArray(v)) {
+      for (const item of v) qs.append(k, item);
+    } else {
+      qs.set(k, v);
+    }
+  }
+  if (view !== "overview") qs.set("view", view);
+  const q = qs.toString();
+  return q ? `${basePath}?${q}` : basePath;
+}
+
+function countFolders(nodes: { children: unknown[] }[]): number {
+  let count = 0;
+  function walk(items: { children: unknown[] }[]) {
+    for (const item of items) {
+      count += 1;
+      walk(item.children as { children: unknown[] }[]);
+    }
+  }
+  walk(nodes);
+  return count;
+}
+
 export async function generateMetadata({
   params,
 }: {
@@ -108,7 +135,13 @@ export default async function ProjectPage({
     NodeView[],
     RegistrationView[]
   ] = await Promise.all([
-    collectFullTree(guid).catch(() => ({
+    collectFullTree(guid, {
+      maxComponentsToRecurse: 3,
+      maxRegistrationsToRecurse: 1,
+      maxLinkedToRecurse: 1,
+      componentTimeoutMs: 5_000,
+      rootTimeoutMs: 10_000,
+    }).catch(() => ({
       rootSkeleton: [],
       components: [],
       totalComponents: 0,
@@ -173,6 +206,17 @@ export default async function ProjectPage({
       : null;
 
   const basePath = `/${guid}`;
+  const activeView = first(sp.view, "overview");
+  const rootProviders = fullTree.rootSkeleton.map((p) => p.provider);
+  const rootFolderCount = countFolders(fullTree.rootSkeleton.flatMap((p) => p.children));
+  const rootFileCount = fullTree.rootSkeleton.reduce((sum, p) => sum + p.fileCount, 0);
+  const viewTabs = [
+    { id: "overview", label: "Overview" },
+    { id: "files", label: "Files" },
+    { id: "components", label: "Components" },
+    { id: "linked", label: "Linked" },
+    { id: "registrations", label: "Registrations" },
+  ];
 
   const overviewRight = (
     <article className="max-w-4xl px-4 py-4 sm:px-6">
@@ -190,13 +234,82 @@ export default async function ProjectPage({
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_18rem] gap-8">
         <section className="text-sm">
+          <nav aria-label="Project sections" className="mb-5 flex flex-wrap gap-2">
+            {viewTabs.map((tab) => (
+              <a
+                key={tab.id}
+                href={tabUrl(basePath, sp, tab.id)}
+                className={`rounded border px-3 py-1.5 ${activeView === tab.id ? "border-blue-500 bg-blue-600 text-white" : "border-neutral-300 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900"}`}
+              >
+                {tab.label}
+              </a>
+            ))}
+          </nav>
+
           {cappedNote && (
             <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded px-3 py-2 mb-4">
               {cappedNote}
             </p>
           )}
 
-          {components.length > 0 && (
+          {activeView === "overview" && (
+            <div className="space-y-6">
+              <section>
+                <h2 className="mb-3 text-lg font-semibold">At a glance</h2>
+                <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className="border-b border-neutral-200 pb-2 dark:border-neutral-800">
+                    <dt className="text-xs text-neutral-500">Files at provider roots</dt>
+                    <dd className="text-xl font-semibold">{rootFileCount}</dd>
+                  </div>
+                  <div className="border-b border-neutral-200 pb-2 dark:border-neutral-800">
+                    <dt className="text-xs text-neutral-500">Folders indexed</dt>
+                    <dd className="text-xl font-semibold">{rootFolderCount}</dd>
+                  </div>
+                  <div className="border-b border-neutral-200 pb-2 dark:border-neutral-800">
+                    <dt className="text-xs text-neutral-500">Components</dt>
+                    <dd className="text-xl font-semibold">{components.length}</dd>
+                  </div>
+                  <div className="border-b border-neutral-200 pb-2 dark:border-neutral-800">
+                    <dt className="text-xs text-neutral-500">Registrations</dt>
+                    <dd className="text-xl font-semibold">{regs.length}</dd>
+                  </div>
+                </dl>
+              </section>
+              <section>
+                <h2 className="mb-2 text-lg font-semibold">Find files quickly</h2>
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    ["PDF", "pdf"],
+                    ["DOCX", "docx"],
+                    ["PPTX", "pptx"],
+                    ["CSV", "csv"],
+                    ["Code", "r OR py OR js"],
+                    ["Media", "mp4 OR mp3"],
+                  ] as Array<[string, string]>).map(([label, q]) => (
+                    <a key={label} href={`/search?q=${encodeURIComponent(q)}&scope=project:${guid}&type=files`} className="rounded border border-neutral-300 px-3 py-1 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900">
+                      {label}
+                    </a>
+                  ))}
+                </div>
+              </section>
+              <section>
+                <h2 className="mb-2 text-lg font-semibold">Storage</h2>
+                <p className="text-neutral-600 dark:text-neutral-400">
+                  {rootProviders.length > 0 ? rootProviders.join(", ") : "No public storage providers found."}
+                </p>
+              </section>
+            </div>
+          )}
+
+          {activeView === "files" && (
+            <section>
+              <h2 className="mb-2 text-lg font-semibold">Files</h2>
+              <p className="mb-3 text-neutral-600 dark:text-neutral-400">Browse the tree on the left, use Select mode for batch downloads, or jump into the full file browser.</p>
+              <a href={`/${guid}/files`} className="text-blue-600 hover:underline">Open file browser</a>
+            </section>
+          )}
+
+          {activeView === "components" && components.length > 0 && (
             <PaginatedSection<NodeView>
               title="Components"
               prefKey="overview.components"
@@ -233,7 +346,7 @@ export default async function ProjectPage({
             />
           )}
 
-          {linked.length > 0 && (
+          {activeView === "linked" && linked.length > 0 && (
             <PaginatedSection<NodeView>
               title="Linked projects"
               prefKey="overview.linked"
@@ -259,7 +372,7 @@ export default async function ProjectPage({
             />
           )}
 
-          {regs.length > 0 && (
+          {activeView === "registrations" && regs.length > 0 && (
             <PaginatedSection<RegistrationView>
               title="Registrations"
               prefKey="overview.registrations"

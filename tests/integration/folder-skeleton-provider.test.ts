@@ -57,7 +57,7 @@ describe("collectFolderSkeleton — provider propagation", () => {
       ),
     );
 
-    const skeleton = await collectFolderSkeleton("deep");
+    const skeleton = await collectFolderSkeleton("deep", { maxDepth: 8 });
     expect(skeleton).toHaveLength(1);
     const root = skeleton[0]!;
     expect(root.provider).toBe("googledrive");

@@ -10,6 +10,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { UnifiedTree } from "@/components/UnifiedTree";
 import { SplitPane } from "@/components/SplitPane";
 import { FileMissing } from "@/components/FileMissing";
+import { RecordView } from "@/components/RecordView";
 
 const EMPTY_TREE: FullProjectTree = { rootSkeleton: [], components: [], totalComponents: 0, registrationTrees: [], totalRegistrations: 0, linkedTrees: [], totalLinked: 0 };
 
@@ -61,7 +62,13 @@ export default async function DeepFilesPage({
   }
 
   const [fullTree, linked, registrations]: [FullProjectTree, NodeView[], RegistrationView[]] = await Promise.all([
-    collectFullTree(guid).catch((): FullProjectTree => EMPTY_TREE),
+    collectFullTree(guid, {
+      maxComponentsToRecurse: 3,
+      maxRegistrationsToRecurse: 1,
+      maxLinkedToRecurse: 1,
+      componentTimeoutMs: 5_000,
+      rootTimeoutMs: 10_000,
+    }).catch((): FullProjectTree => EMPTY_TREE),
     getAllLinkedNodes(guid).catch((): NodeView[] => []),
     getNodeRegistrations(guid).catch((): RegistrationView[] => []),
   ]);
@@ -108,6 +115,8 @@ export default async function DeepFilesPage({
 
   const w = await walk();
   const zipHref = `/api/zip/${guid}/${provider}${folderSegments.length ? "/" + folderSegments.join("/") : ""}`;
+  const folderTitle = folderSegments[folderSegments.length - 1] ?? provider ?? guid;
+  const folderId = `${guid}/${provider}${folderSegments.length ? "/" + folderSegments.join("/") : ""}`;
 
   return (
     <div>
@@ -149,6 +158,7 @@ export default async function DeepFilesPage({
                 ⬇ Download folder as ZIP
               </a>
             </div>
+            <RecordView refEntry={{ id: folderId, title: folderTitle, kind: "folder" }} />
 
             {w.kind === "fail" ? (
               <FileMissing reason={w.reason} guid={guid} attemptedPath={attemptedPath} />
