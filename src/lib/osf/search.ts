@@ -16,6 +16,21 @@ type RawCollection<R> = {
   meta?: { total?: number };
 };
 
+const FILE_EXTENSION_TERMS = new Set([
+  "pdf", "doc", "docx", "ppt", "pptx", "csv", "tsv", "xls", "xlsx",
+  "mp4", "m4v", "mov", "avi", "webm", "mkv", "mp3", "wav", "m4a", "aac",
+  "png", "jpg", "jpeg", "gif", "svg", "webp", "bmp",
+  "js", "ts", "tsx", "jsx", "py", "r", "rmd", "ipynb", "json", "yaml", "yml", "sh", "html", "css",
+]);
+
+function normalizeSearchTerm(resource: "nodes" | "files" | "registrations" | "users", mode: "filter" | "search", term: string): string {
+  if (resource !== "files" || mode !== "search") return term;
+  const trimmed = term.trim();
+  if (trimmed.startsWith(".")) return trimmed.toLowerCase();
+  const lower = trimmed.toLowerCase();
+  return FILE_EXTENSION_TERMS.has(lower) ? `.${lower}` : term;
+}
+
 async function executeMulti<T>(
   resource: "nodes" | "files" | "registrations" | "users",
   field: string,
@@ -46,7 +61,7 @@ async function executeMulti<T>(
   const fetchOne = async (req: { filters: FilterPair[] }) => {
     const qs = new URLSearchParams();
     if (mode === "search") {
-      const q = req.filters.map(([, v]) => v).join(" ");
+      const q = req.filters.map(([, v]) => normalizeSearchTerm(resource, mode, v)).join(" ");
       if (q) qs.set("q", q);
     } else {
       for (const [k, v] of req.filters) qs.append(`filter[${k}]`, v);
@@ -279,8 +294,12 @@ export async function searchFilesInProjectScope(
   opts?: { maxEntries?: number }
 ): Promise<SearchedFile[]> {
   const include = buildIncludeFn(query, "name");
-  const all = await fetchAllProjectEntries(rootGuid, { maxEntries: opts?.maxEntries ?? 5000 }).catch(() => []);
-  return all
+  const [rootEntries, children] = await Promise.all([
+    fetchAllProjectEntries(rootGuid, { maxEntries: opts?.maxEntries ?? 5000 }).catch(() => []),
+    getAllChildren(rootGuid).catch((): NodeView[] => []),
+  ]);
+
+  const results: SearchedFile[] = rootEntries
     .filter((e) => e.kind === "file" && include(e.name))
     .map((e) => ({
       id: `${rootGuid}:${e.provider}:${e.materializedPath}`,
@@ -292,4 +311,28 @@ export async function searchFilesInProjectScope(
       downloadUrl: e.downloadUrl ?? "",
       nodeId: rootGuid,
     }));
+
+  const componentResults = await Promise.all(
+    children.map(async (c) => {
+      const entries = await fetchAllProjectEntries(c.id, { maxEntries: opts?.maxEntries ?? 5000 }).catch(() => []);
+      return entries
+        .filter((e) => e.kind === "file" && include(e.name))
+        .map((e) => ({
+          id: `${c.id}:${e.provider}:${e.materializedPath}`,
+          name: e.name,
+          kind: "file" as const,
+          size: null,
+          materializedPath: e.materializedPath,
+          modified: "",
+          downloadUrl: e.downloadUrl ?? "",
+          nodeId: c.id,
+        }));
+    })
+  );
+
+  for (const list of componentResults) {
+    results.push(...list);
+  }
+
+  return results;
 }

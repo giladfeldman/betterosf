@@ -46,6 +46,7 @@ const EXT_GROUPS: Record<string, string[]> = {
   docx: ["docx", "doc"],
   pptx: ["pptx", "ppt"],
   image: ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp"],
+  media: ["mp4", "m4v", "mov", "avi", "webm", "mkv", "mp3", "wav", "m4a", "aac"],
   code: ["js", "ts", "tsx", "jsx", "py", "r", "rmd", "ipynb", "json", "yaml", "yml", "sh", "html", "css"],
 };
 
@@ -302,6 +303,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               { value: "docx", label: "DOCX" },
               { value: "pptx", label: "PPTX" },
               { value: "image", label: "Images" },
+              { value: "media", label: "Media" },
               { value: "code", label: "Code" },
             ]}
           />

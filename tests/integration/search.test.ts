@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "../msw/server";
-import { searchNodes, searchFiles, searchRegistrations, searchUsers } from "@/lib/osf/search";
+import { searchNodes, searchFiles, searchRegistrations, searchUsers, searchFilesInProjectScope } from "@/lib/osf/search";
 
 describe("searchNodes", () => {
   it("returns parsed nodes + total + hasMore", async () => {
@@ -94,6 +94,38 @@ describe("searchFiles", () => {
     expect(out.results).toHaveLength(1);
     expect(out.results[0]?.name).toBe("Study1.qsf");
   });
+
+  it("normalizes extension quick searches like MP4 OR MP3 to dotted lowercase terms", async () => {
+    const seen: string[] = [];
+    server.use(
+      http.get("https://api.osf.io/v2/search/files/", ({ request }) => {
+        const url = new URL(request.url);
+        seen.push(url.searchParams.get("q") ?? "");
+        const q = url.searchParams.get("q");
+        return HttpResponse.json({
+          data: q === ".mp4"
+            ? [{
+                id: "v1", type: "files",
+                attributes: { name: "lecture.MP4", kind: "file", size: 10, materialized_path: "/lecture.MP4", date_modified: "2026-01-01" },
+                links: { download: "https://files.osf.io/v1/resources/p1/providers/osfstorage/v1" },
+                relationships: { target: { data: { id: "p1", type: "nodes" } } },
+              }]
+            : [{
+                id: "a1", type: "files",
+                attributes: { name: "audio.mp3", kind: "file", size: 10, materialized_path: "/audio.mp3", date_modified: "2026-01-01" },
+                links: { download: "https://files.osf.io/v1/resources/p1/providers/osfstorage/a1" },
+                relationships: { target: { data: { id: "p1", type: "nodes" } } },
+              }],
+          links: { next: null },
+          meta: { total: 1 },
+        });
+      })
+    );
+
+    const out = await searchFiles("MP4 or MP3");
+    expect(seen).toEqual([".mp4", ".mp3"]);
+    expect(out.results.map((f) => f.name).sort()).toEqual(["audio.mp3", "lecture.MP4"]);
+  });
 });
 
 describe("searchRegistrations", () => {
@@ -132,5 +164,80 @@ describe("searchUsers", () => {
     const out = await searchUsers("ada");
     expect(out.results).toHaveLength(1);
     expect(out.results[0]).toMatchObject({ id: "u1", fullName: "Ada Lovelace", osfUrl: "https://osf.io/u1/" });
+  });
+});
+
+describe("searchFilesInProjectScope", () => {
+  it("recursively walks root project and child components", async () => {
+    server.use(
+      // Root project children (components)
+      http.get("https://api.osf.io/v2/nodes/root1/children/", () =>
+        HttpResponse.json({
+          data: [
+            { id: "comp1", type: "nodes", attributes: { title: "Sub Component 1", category: "project", public: true } }
+          ],
+          links: { next: null }
+        })
+      ),
+      // Root project files provider root
+      http.get("https://api.osf.io/v2/nodes/root1/files/", () =>
+        HttpResponse.json({
+          data: [
+            { id: "prov1", type: "files", attributes: { name: "osfstorage", kind: "folder", materialized_path: "/", provider: "osfstorage" }, relationships: { files: { links: { related: { href: "https://api.osf.io/v2/nodes/root1/files/osfstorage/" } } } } }
+          ],
+          links: { next: null }
+        })
+      ),
+      // Root project folder contents (prov1 has a matching file)
+      http.get("https://api.osf.io/v2/nodes/root1/files/osfstorage/", () =>
+        HttpResponse.json({
+          data: [
+            { id: "f_root", type: "files", attributes: { name: "root_video.mp4", kind: "file", materialized_path: "/root_video.mp4" }, links: { download: "https://files.osf.io/v1/root_video" } }
+          ],
+          links: { next: null }
+        })
+      ),
+      // Component files provider root
+      http.get("https://api.osf.io/v2/nodes/comp1/files/", () =>
+        HttpResponse.json({
+          data: [
+            { id: "prov2", type: "files", attributes: { name: "osfstorage", kind: "folder", materialized_path: "/", provider: "osfstorage" }, relationships: { files: { links: { related: { href: "https://api.osf.io/v2/nodes/comp1/files/osfstorage/" } } } } }
+          ],
+          links: { next: null }
+        })
+      ),
+      // Component folder contents (has a matching mp4 file)
+      http.get("https://api.osf.io/v2/nodes/comp1/files/osfstorage/", () =>
+        HttpResponse.json({
+          data: [
+            { id: "f_comp", type: "files", attributes: { name: "comp_lecture.mp4", kind: "file", materialized_path: "/comp_lecture.mp4" }, links: { download: "https://files.osf.io/v1/comp_lecture" } }
+          ],
+          links: { next: null }
+        })
+      )
+    );
+
+    const out = await searchFilesInProjectScope("root1", "mp4");
+    expect(out).toHaveLength(2);
+    expect(out).toContainEqual({
+      id: "root1:osfstorage:/root_video.mp4",
+      name: "root_video.mp4",
+      kind: "file",
+      size: null,
+      materializedPath: "/root_video.mp4",
+      modified: "",
+      downloadUrl: "https://files.osf.io/v1/root_video",
+      nodeId: "root1"
+    });
+    expect(out).toContainEqual({
+      id: "comp1:osfstorage:/comp_lecture.mp4",
+      name: "comp_lecture.mp4",
+      kind: "file",
+      size: null,
+      materializedPath: "/comp_lecture.mp4",
+      modified: "",
+      downloadUrl: "https://files.osf.io/v1/comp_lecture",
+      nodeId: "comp1"
+    });
   });
 });

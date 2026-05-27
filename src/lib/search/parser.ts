@@ -29,8 +29,8 @@ function tokenize(input: string): Token[] {
     let j = i;
     while (j < s.length && !/[\s()"]/.test(s[j]!)) j++;
     const word = s.slice(i, j);
-    if (word === "OR") tokens.push({ kind: "or", value: "OR" });
-    else if (word === "AND") tokens.push({ kind: "and", value: "AND" });
+    if (word.toUpperCase() === "OR") tokens.push({ kind: "or", value: "OR" });
+    else if (word.toUpperCase() === "AND") tokens.push({ kind: "and", value: "AND" });
     else tokens.push({ kind: "word", value: word });
     i = j;
   }

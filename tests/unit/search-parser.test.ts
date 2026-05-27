@@ -16,7 +16,7 @@ describe("parseQuery", () => {
     });
   });
 
-  it("respects explicit OR (uppercase only)", () => {
+  it("respects explicit OR", () => {
     expect(parseQuery("replication OR meta-analysis")).toEqual({
       type: "or",
       children: [
@@ -26,12 +26,11 @@ describe("parseQuery", () => {
     });
   });
 
-  it("treats lowercase 'or' as a literal token", () => {
+  it("treats lowercase 'or' as an OR operator", () => {
     expect(parseQuery("apples or oranges")).toEqual({
-      type: "and",
+      type: "or",
       children: [
         { type: "term", value: "apples" },
-        { type: "term", value: "or" },
         { type: "term", value: "oranges" },
       ],
     });
@@ -64,7 +63,7 @@ describe("parseQuery", () => {
     });
   });
 
-  it("explicit AND token is recognized when uppercase", () => {
+  it("explicit AND token is recognized", () => {
     expect(parseQuery("a AND b")).toEqual({
       type: "and",
       children: [

@@ -1,0 +1,7 @@
+User-agent: *
+Disallow: /
+
+# BetterOSF is intended for direct human use, not indexing, crawling, or AI
+# training ingestion. The app proxies OSF metadata/files and should not spend
+# OSF or Vercel resources serving crawler traffic.
+Noindex: /

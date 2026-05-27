@@ -304,6 +304,7 @@ async function main() {
       kind: "html",
       url: `/${HEAVY_GUID}/files/view/osfstorage/PCIRR%20Stage%201/Simulated%20data%20and%20planned%20analysis%20code/Newman-etal-2011-Effect-sizes-power-analysis-combined-v4-G.html`,
       success: 'iframe[title="HTML preview"]',
+      deadlineMs: 30_000,
     },
     {
       kind: "image",
@@ -323,7 +324,7 @@ async function main() {
     // either a success-element OR a known error text — whichever lands first.
     let success = false;
     let errText = null;
-    const deadline = Date.now() + 15_000;
+    const deadline = Date.now() + (probe.deadlineMs ?? 15_000);
     while (Date.now() < deadline) {
       errText = await visibleViewerError();
       if (errText) break;
@@ -356,6 +357,15 @@ async function main() {
   const sipHasInThisProject = sipBody.includes("match in this project") || sipBody.includes("walked up to");
   record("search-in-project (files) renders project-scoped UI", sipHasInThisProject);
   await page.screenshot({ path: `${OUT}/INT-09-search-in-project-files.png`, fullPage: true });
+
+  await page.goto(`${BASE}/search?q=MP4%20OR%20MP3&type=files&ext=media`, { waitUntil: "domcontentloaded" });
+  await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
+  const mediaBody = ((await page.textContent("body")) ?? "").toLowerCase();
+  record(
+    "search media filter returns mp4/mp3 results",
+    !mediaBody.includes("no files match") && (mediaBody.includes(".mp4") || mediaBody.includes(".mp3"))
+  );
+  await page.screenshot({ path: `${OUT}/INT-09b-search-media-filter.png`, fullPage: true });
 
   // --- 6) Registrations expand in tree ---
   // The tree is VIRTUALIZED — only visible rows are rendered. To find the

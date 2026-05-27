@@ -7,7 +7,8 @@ import { parseQuery } from "@/lib/search/parser";
  * Regressions guarded:
  * - Hyphenated words like "meta-analysis" must NOT be split into NOT-children
  *   when the hyphen is in the middle of a word.
- * - Lowercase 'or' / 'and' are LITERAL tokens, only uppercase is operator.
+ * - Search operators are case-insensitive, matching what users naturally type
+ *   in quick filters such as "MP4 or MP3".
  * - Nested parens 3+ levels deep parse correctly.
  */
 describe("parseQuery edge cases", () => {
@@ -39,37 +40,34 @@ describe("parseQuery edge cases", () => {
     });
   });
 
-  it("mixed-case 'Or' is a literal token, not an OR operator", () => {
+  it("mixed-case 'Or' is an OR operator", () => {
     const ast = parseQuery("apples Or oranges");
     expect(ast).toEqual({
-      type: "and",
+      type: "or",
       children: [
         { type: "term", value: "apples" },
-        { type: "term", value: "Or" },
         { type: "term", value: "oranges" },
       ],
     });
   });
 
-  it("'oR' lowercased+uppercased mix is a literal token, not an OR operator", () => {
+  it("'oR' lowercased+uppercased mix is an OR operator", () => {
     const ast = parseQuery("a oR b");
     expect(ast).toEqual({
-      type: "and",
+      type: "or",
       children: [
         { type: "term", value: "a" },
-        { type: "term", value: "oR" },
         { type: "term", value: "b" },
       ],
     });
   });
 
-  it("'and' lowercased is a literal token, not an AND operator", () => {
+  it("'and' lowercased is an AND operator", () => {
     const ast = parseQuery("apples and oranges");
     expect(ast).toEqual({
       type: "and",
       children: [
         { type: "term", value: "apples" },
-        { type: "term", value: "and" },
         { type: "term", value: "oranges" },
       ],
     });

@@ -279,14 +279,14 @@ export default async function ProjectPage({
                 <h2 className="mb-2 text-lg font-semibold">Find files quickly</h2>
                 <div className="flex flex-wrap gap-2">
                   {([
-                    ["PDF", "pdf"],
-                    ["DOCX", "docx"],
-                    ["PPTX", "pptx"],
-                    ["CSV", "csv"],
-                    ["Code", "r OR py OR js"],
-                    ["Media", "mp4 OR mp3"],
-                  ] as Array<[string, string]>).map(([label, q]) => (
-                    <a key={label} href={`/search?q=${encodeURIComponent(q)}&scope=project:${guid}&type=files`} className="rounded border border-neutral-300 px-3 py-1 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900">
+                    ["PDF", "pdf", "pdf"],
+                    ["DOCX", "docx", "docx"],
+                    ["PPTX", "pptx", "pptx"],
+                    ["CSV", "csv", "csv"],
+                    ["Code", "r OR py OR js", "code"],
+                    ["Media", "mp4 OR mp3", "media"],
+                  ] as Array<[string, string, string]>).map(([label, q, ext]) => (
+                    <a key={label} href={`/search?q=${encodeURIComponent(q)}&scope=project:${guid}&type=files&ext=${encodeURIComponent(ext)}`} className="rounded border border-neutral-300 px-3 py-1 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900">
                       {label}
                     </a>
                   ))}
