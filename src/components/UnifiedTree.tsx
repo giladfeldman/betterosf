@@ -7,7 +7,8 @@ import type { ComponentTree, RegistrationTree, LinkedTree } from "@/lib/osf/full
 import type { NodeView } from "@/lib/osf/parse";
 import type { RegistrationView } from "@/lib/osf/registrations";
 import type { FileEntry } from "@/lib/osf/files";
-import { UnifiedTreeNode, type TreeNodeData, type TreeSelectionPayload } from "./UnifiedTreeNode";
+import { UnifiedTreeNode, type TreeNodeData, type TreeSelectionPayload, type TreeUploadTarget } from "./UnifiedTreeNode";
+import { UploadDialog } from "./UploadDialog";
 import { getPref, setPref } from "@/lib/prefs";
 import { listPins, type FavoriteRef } from "@/lib/favorites";
 
@@ -145,6 +146,7 @@ export function UnifiedTree({
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Record<string, TreeSelectionPayload>>({});
   const [downloadingSelection, setDownloadingSelection] = useState(false);
+  const [uploadTarget, setUploadTarget] = useState<TreeUploadTarget | null>(null);
 
   // In-flight de-dupe — keep a separate set of keys currently being fetched so
   // mass expand-all doesn't fire the same URL N times.
@@ -239,6 +241,19 @@ export function UnifiedTree({
 
   const clearSelection = useCallback(() => setSelected({}), []);
 
+  const refreshUploadTarget = useCallback(
+    (target: TreeUploadTarget) => {
+      const key = folderKey(target.guid, target.provider, target.path);
+      setLoadedEntries((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      void fetchFiles(target.guid, target.provider, target.path, target.listingUrl);
+    },
+    [fetchFiles]
+  );
+
   const downloadSelection = useCallback(async () => {
     const items = Object.values(selected);
     if (items.length === 0) return;
@@ -280,10 +295,12 @@ export function UnifiedTree({
       nodeGuid: string,
       providers: SkeletonNode[],
       basePrefix: string,
-      baseDepth: number
+      baseDepth: number,
+      allowUploads: boolean
     ) {
       for (const provider of providers) {
         const providerId = `${basePrefix}/provider:${provider.provider}`;
+        const canUploadHere = allowUploads && provider.provider === "osfstorage";
         rows.push({
           id: providerId,
           depth: baseDepth,
@@ -324,6 +341,15 @@ export function UnifiedTree({
               path: "/",
               name: provider.name,
             },
+            uploadTarget: canUploadHere
+              ? {
+                  guid: nodeGuid,
+                  provider: provider.provider,
+                  path: "/",
+                  name: provider.name,
+                  listingUrl: provider.listingUrl,
+                }
+              : undefined,
             loading: !!loadingKeys[`${nodeGuid}|${provider.provider}:/`],
           },
         });
@@ -365,6 +391,15 @@ export function UnifiedTree({
                 path: folder.materializedPath,
                 name: folder.name,
               },
+              uploadTarget: canUploadHere
+                ? {
+                    guid: nodeGuid,
+                    provider: folder.provider,
+                    path: folder.materializedPath,
+                    name: folder.name,
+                    listingUrl: folder.listingUrl,
+                  }
+                : undefined,
               loading: !!loadingKeys[fileKey],
             },
           });
@@ -492,7 +527,7 @@ export function UnifiedTree({
     });
 
     if (expanded["providers-root"]) {
-      emitNodeSubtree(guid, skeleton, "root", 1);
+      emitNodeSubtree(guid, skeleton, "root", 1, true);
     }
 
     // Components root
@@ -526,7 +561,7 @@ export function UnifiedTree({
               },
             });
             if (expanded[compId] && !c.skipped) {
-              emitNodeSubtree(c.guid, c.skeleton, compId, 2);
+              emitNodeSubtree(c.guid, c.skeleton, compId, 2, true);
             }
           }
         } else {
@@ -579,7 +614,7 @@ export function UnifiedTree({
               },
             });
             if (expanded[linkedId] && !l.skipped) {
-              emitNodeSubtree(l.guid, l.skeleton, linkedId, 2);
+              emitNodeSubtree(l.guid, l.skeleton, linkedId, 2, false);
             }
           }
         } else {
@@ -633,7 +668,7 @@ export function UnifiedTree({
               },
             });
             if (expanded[regId] && !r.skipped) {
-              emitNodeSubtree(r.guid, r.skeleton, regId, 2);
+              emitNodeSubtree(r.guid, r.skeleton, regId, 2, false);
             }
           }
         } else {
@@ -779,12 +814,20 @@ export function UnifiedTree({
                   selectMode={selectMode}
                   selected={row.node.selection ? !!selected[selectionKey(row.node.selection)] : false}
                   onSelect={toggleSelected}
+                  onUpload={setUploadTarget}
                 />
               </div>
             );
           })}
         </div>
       </div>
+      {uploadTarget && (
+        <UploadDialog
+          target={uploadTarget}
+          onClose={() => setUploadTarget(null)}
+          onComplete={refreshUploadTarget}
+        />
+      )}
     </div>
   );
 }

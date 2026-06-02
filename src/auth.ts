@@ -1,11 +1,13 @@
 import NextAuth from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import type { Session } from "next-auth";
-import { osfProvider } from "@/lib/auth/osf-provider";
+import { hasOsfWriteScope, osfProvider } from "@/lib/auth/osf-provider";
 
 declare module "next-auth" {
   interface Session {
     accessToken?: string;
+    osfScope?: string;
+    osfCanWrite?: boolean;
     osfUserId?: string;
   }
 }
@@ -15,6 +17,7 @@ declare module "next-auth/jwt" {
     accessToken?: string;
     refreshToken?: string;
     accessTokenExpires?: number;
+    osfScope?: string;
     osfUserId?: string;
   }
 }
@@ -39,6 +42,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.accessToken = account.access_token;
         token.refreshToken = account.refresh_token;
         token.accessTokenExpires = Date.now() + expiresIn * 1000;
+        token.osfScope = account.scope;
         token.osfUserId = (profile as { data?: { id?: string } }).data?.id;
         return token;
       }
@@ -48,6 +52,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
     async session({ session, token }: { session: Session; token: JWT }) {
       session.accessToken = token.accessToken;
+      session.osfScope = token.osfScope;
+      session.osfCanWrite = hasOsfWriteScope(token.osfScope);
       session.osfUserId = token.osfUserId;
       return session;
     },

@@ -21,6 +21,14 @@ export type TreeSelectionPayload =
       name: string;
     };
 
+export type TreeUploadTarget = {
+  guid: string;
+  provider: string;
+  path: string;
+  name: string;
+  listingUrl: string;
+};
+
 export type TreeNodeData = {
   id: string;
   label: string;
@@ -35,6 +43,7 @@ export type TreeNodeData = {
   fileCount?: number;  // # files directly under this folder, shown as "(N)" badge
   downloadHref?: string;
   selection?: TreeSelectionPayload;
+  uploadTarget?: TreeUploadTarget;
   loading?: boolean;
 };
 
@@ -96,6 +105,7 @@ export function UnifiedTreeNode({
   selected,
   selectMode = false,
   onSelect,
+  onUpload,
 }: {
   node: TreeNodeData;
   depth: number;
@@ -105,6 +115,7 @@ export function UnifiedTreeNode({
   selected?: boolean;
   selectMode?: boolean;
   onSelect?: (payload: TreeSelectionPayload, checked: boolean) => void;
+  onUpload?: (target: TreeUploadTarget) => void;
 }) {
   const displayLabel = node.kind === "file" ? middleTruncateFilename(node.label) : node.label;
   const tooltip = [
@@ -221,6 +232,20 @@ export function UnifiedTreeNode({
         >
           ZIP
         </a>
+      )}
+      {node.uploadTarget && (
+        <button
+          type="button"
+          aria-label={`Upload to ${node.label}`}
+          title={`Upload to ${node.label}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onUpload?.(node.uploadTarget!);
+          }}
+          className="hidden shrink-0 rounded border border-blue-300 px-1.5 text-[11px] text-blue-700 hover:bg-blue-50 focus:inline-block focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 group-hover:inline-block dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950"
+        >
+          Upload
+        </button>
       )}
     </div>
   );

@@ -4,7 +4,7 @@ import { http, HttpResponse } from "msw";
 import { server } from "../msw/server";
 import { UnifiedTree } from "@/components/UnifiedTree";
 import type { SkeletonNode } from "@/lib/osf/folder-skeleton";
-import type { ComponentTree } from "@/lib/osf/full-tree";
+import type { ComponentTree, LinkedTree, RegistrationTree } from "@/lib/osf/full-tree";
 
 vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: (opts: { count: number }) => ({
@@ -197,6 +197,64 @@ describe("UnifiedTree expand-all / collapse-all", () => {
     link.addEventListener("click", (e) => e.preventDefault());
     fireEvent.click(link);
     expect(screen.getByText("sub")).toBeInTheDocument();
+  });
+
+  it("shows upload actions only for root/component OSF Storage folders", () => {
+    const sk: SkeletonNode[] = [
+      leaf("osfstorage", "osfstorage", "/", [leaf("osfstorage", "root-data", "/root-data/")]),
+      leaf("dropbox", "Dropbox", "/", [leaf("dropbox", "external", "/external/")]),
+    ];
+    const componentTrees: ComponentTree[] = [
+      {
+        guid: "cmp1",
+        title: "Component 1",
+        category: "project",
+        isPublic: true,
+        skipped: false,
+        skeleton: [leaf("osfstorage", "osfstorage", "/", [leaf("osfstorage", "component-data", "/component-data/")])],
+      },
+    ];
+    const linkedTrees: LinkedTree[] = [
+      {
+        guid: "lnk1",
+        title: "Linked 1",
+        category: "project",
+        isPublic: true,
+        skipped: false,
+        skeleton: [leaf("osfstorage", "osfstorage", "/", [leaf("osfstorage", "linked-data", "/linked-data/")])],
+      },
+    ];
+    const registrationTrees: RegistrationTree[] = [
+      {
+        guid: "reg1",
+        title: "Registration 1",
+        dateRegistered: "",
+        isPublic: true,
+        skipped: false,
+        skeleton: [leaf("osfstorage", "osfstorage", "/", [leaf("osfstorage", "registration-data", "/registration-data/")])],
+      },
+    ];
+    render(
+      <UnifiedTree
+        guid="root"
+        rootTitle="Root"
+        skeleton={sk}
+        components={[{ id: "cmp1", title: "Component 1", description: "", category: "project", public: true, tags: [], dateCreated: "", dateModified: "" }] as never}
+        componentTrees={componentTrees}
+        linkedNodes={[{ id: "lnk1", title: "Linked 1", description: "", category: "project", public: true, tags: [], dateCreated: "", dateModified: "" }] as never}
+        linkedTrees={linkedTrees}
+        registrations={[{ id: "reg1", title: "Registration 1", dateRegistered: "", public: true, osfUrl: "" }]}
+        registrationTrees={registrationTrees}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /expand all/i }));
+
+    expect(screen.getByLabelText("Upload to root-data")).toBeInTheDocument();
+    expect(screen.getByLabelText("Upload to component-data")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Upload to external")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Upload to linked-data")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Upload to registration-data")).not.toBeInTheDocument();
   });
 
   it("select mode exposes checkboxes for folders", () => {

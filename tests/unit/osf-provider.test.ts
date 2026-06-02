@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { osfProvider } from "@/lib/auth/osf-provider";
+import { hasOsfWriteScope, OSF_READ_SCOPE, OSF_WRITE_SCOPE, osfProvider } from "@/lib/auth/osf-provider";
 
 describe("osfProvider", () => {
   const config = osfProvider({ clientId: "cid", clientSecret: "csecret" });
@@ -24,7 +24,14 @@ describe("osfProvider", () => {
       typeof config.authorization === "object"
         ? (config.authorization as { params?: { scope?: string } }).params?.scope
         : undefined;
-    expect(scope).toBe("osf.full_read");
+    expect(scope).toBe(OSF_READ_SCOPE);
+  });
+
+  it("detects write-capable OSF scopes", () => {
+    expect(hasOsfWriteScope(OSF_WRITE_SCOPE)).toBe(true);
+    expect(hasOsfWriteScope(`${OSF_READ_SCOPE} ${OSF_WRITE_SCOPE}`)).toBe(true);
+    expect(hasOsfWriteScope(OSF_READ_SCOPE)).toBe(false);
+    expect(hasOsfWriteScope(undefined)).toBe(false);
   });
 
   it("maps OSF userinfo payload to {id, name, email}", () => {

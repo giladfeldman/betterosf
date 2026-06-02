@@ -3,19 +3,25 @@ REM ============================================================
 REM  start_app.bat  --  BetterOSF local dev launcher
 REM
 REM  - Uses a fixed port (4747) so the URL is always the same.
+REM  - Uses localhost, not 127.0.0.1, because OSF OAuth callback
+REM    URLs must exactly match the configured developer app callback.
 REM  - Soft-kills anything already on that port.
-REM  - Starts `next dev` in a new window.
+REM  - Builds and starts the local production server. Do not use
+REM    `next dev` on this Next.js 15.5 build; the optional-catch-all
+REM    route is known to break dev mode.
 REM  - Polls until the server responds, then opens the default
 REM    browser to http://localhost:4747.
 REM ============================================================
 
 setlocal EnableDelayedExpansion
 set PORT=4747
-set URL=http://localhost:%PORT%
+set HOST=localhost
+set URL=http://%HOST%:%PORT%
 
 echo.
 echo === BetterOSF dev launcher ===
 echo Port: %PORT%
+echo URL:  %URL%
 echo.
 
 REM ---- 1. Soft-kill anything LISTENING on the port ----
@@ -42,11 +48,19 @@ if not exist "node_modules" (
     )
 )
 
-REM ---- 3. Start the dev server in a new console window ----
-echo Starting Next.js dev server on port %PORT%...
-start "BetterOSF dev (port %PORT%)" cmd /k "npx next dev -p %PORT%"
+REM ---- 3. Build before starting local production server ----
+echo Building BetterOSF for local production mode...
+call npm run build
+if errorlevel 1 (
+    echo npm run build failed. Aborting.
+    exit /b 1
+)
 
-REM ---- 4. Poll until the server responds (up to 60 seconds) ----
+REM ---- 4. Start the local production server in a new console window ----
+echo Starting BetterOSF local production server on %URL%...
+start "BetterOSF local (port %PORT%)" cmd /k "npx next start -H %HOST% -p %PORT%"
+
+REM ---- 5. Poll until the server responds (up to 60 seconds) ----
 echo Waiting for server to respond at %URL% ...
 set /a tries=0
 :wait
