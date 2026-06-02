@@ -12,6 +12,7 @@ import { CitationExport } from "@/components/CitationExport";
 import { getCitation, getStyledCitation, toBibTeX, toRIS } from "@/lib/osf/citation";
 import { SplitPane } from "@/components/SplitPane";
 import { UnifiedTree } from "@/components/UnifiedTree";
+import { UploadFilesButton } from "@/components/UploadFilesButton";
 import { PaginatedSection, parsePagination } from "@/components/PaginatedSection";
 import type { NodeView } from "@/lib/osf/parse";
 import type { RegistrationView } from "@/lib/osf/registrations";
@@ -276,7 +277,10 @@ export default async function ProjectPage({
                 </dl>
               </section>
               <section>
-                <h2 className="mb-2 text-lg font-semibold">Find files quickly</h2>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-lg font-semibold">Find files quickly</h2>
+                  <UploadFilesButton guid={guid} />
+                </div>
                 <div className="flex flex-wrap gap-2">
                   {([
                     ["PDF", "pdf", "pdf"],

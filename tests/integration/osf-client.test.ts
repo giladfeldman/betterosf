@@ -41,7 +41,7 @@ describe("osfGet", () => {
       })
     );
 
-    await expect(osfGet("/nodes/public/")).rejects.toMatchObject({ code: "forbidden" });
+    await expect(osfGet("/nodes/public/")).rejects.toMatchObject({ code: "unauthorized" });
     expect(seenAuthHeaders).toEqual([null]);
   });
 

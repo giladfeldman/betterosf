@@ -8,6 +8,7 @@ import type { NodeView } from "@/lib/osf/parse";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { UnifiedTree } from "@/components/UnifiedTree";
 import { SplitPane } from "@/components/SplitPane";
+import { UploadFilesButton } from "@/components/UploadFilesButton";
 
 const EMPTY_TREE: FullProjectTree = { rootSkeleton: [], components: [], totalComponents: 0, registrationTrees: [], totalRegistrations: 0, linkedTrees: [], totalLinked: 0 };
 
@@ -76,9 +77,15 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
           />
         }
         right={
-          <div className="p-6 text-neutral-500">
-            <p>Select a file in the tree to preview it here.</p>
-            <p className="mt-2 text-sm">Or click a folder name to open its listing.</p>
+          <div className="p-6">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h1 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100">Files</h1>
+                <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">Select a file to preview it, open a folder listing, or upload into OSF Storage.</p>
+              </div>
+              <UploadFilesButton guid={guid} />
+            </div>
+            <p className="text-sm text-neutral-500">Use the tree on the left to choose a folder. BetterOSF will keep loading deeper folders in the background.</p>
           </div>
         }
       />

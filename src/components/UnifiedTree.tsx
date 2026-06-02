@@ -9,6 +9,7 @@ import type { RegistrationView } from "@/lib/osf/registrations";
 import type { FileEntry } from "@/lib/osf/files";
 import { UnifiedTreeNode, type TreeNodeData, type TreeSelectionPayload, type TreeUploadTarget } from "./UnifiedTreeNode";
 import { UploadDialog } from "./UploadDialog";
+import { OPEN_UPLOAD_EVENT } from "./UploadFilesButton";
 import { getPref, setPref } from "@/lib/prefs";
 import { listPins, type FavoriteRef } from "@/lib/favorites";
 
@@ -24,6 +25,23 @@ type FlatRow = {
 type LoadedEntries = Record<string, FileEntry[]>; // keyed by `${nodeGuid}|${provider}:${materializedPath}`
 
 const PREFETCH_LIMIT = 12;
+const HYDRATION_MAX_ATTEMPTS = 3;
+
+type HydrationKind = "component" | "linked" | "registration";
+
+type HydrationTask = {
+  id: string;
+  kind: HydrationKind;
+  guid: string;
+  title: string;
+  apiKind: "node" | "registration";
+};
+
+type HydrationFailure = {
+  message: string;
+  attempts: number;
+  nextRetryAt: number;
+};
 
 function zipHref(nodeGuid: string, provider: string, materializedPath: string): string {
   const path = materializedPath === "/" ? "" : materializedPath.replace(/^\/+|\/+$/g, "");
@@ -46,6 +64,19 @@ function fileHref(nodeGuid: string, provider: string, materializedPath: string, 
 function fileSelectionPath(materializedPath: string, name: string): string {
   const folderPath = materializedPath.endsWith("/") ? materializedPath : `${materializedPath}/`;
   return `${folderPath}${name}`;
+}
+
+function hydrationTaskId(kind: HydrationKind, guid: string): string {
+  return `${kind}:${guid}`;
+}
+
+function uploadTargetKey(target: TreeUploadTarget): string {
+  return `${target.guid}|${target.provider}|${target.path}|${target.listingUrl}`;
+}
+
+function collectExpandedProviderIds(task: HydrationTask, skeleton: SkeletonNode[]): string[] {
+  const basePrefix = task.kind === "component" ? `component/${task.guid}` : task.kind === "linked" ? `linked/${task.guid}` : `registration/${task.guid}`;
+  return skeleton.map((provider) => `${basePrefix}/provider:${provider.provider}`);
 }
 
 function skeletonFromFolder(entry: Extract<FileEntry, { kind: "folder" }>, provider: string): SkeletonNode {
@@ -91,6 +122,30 @@ export function UnifiedTree({
     setPinned(listPins());
   }, []);
 
+  const [componentTreeState, setComponentTreeState] = useState<ComponentTree[]>(componentTrees ?? []);
+  const [registrationTreeState, setRegistrationTreeState] = useState<RegistrationTree[]>(registrationTrees ?? []);
+  const [linkedTreeState, setLinkedTreeState] = useState<LinkedTree[]>(linkedTrees ?? []);
+  const [hydratedIds, setHydratedIds] = useState<Record<string, true>>({});
+  const [hydrationFailures, setHydrationFailures] = useState<Record<string, HydrationFailure>>({});
+  const [priorityHydrationIds, setPriorityHydrationIds] = useState<string[]>([]);
+  const [hydrationPaused, setHydrationPaused] = useState(false);
+  const [runningHydrationId, setRunningHydrationId] = useState<string | null>(null);
+  const [rateLimitedUntil, setRateLimitedUntil] = useState(0);
+  const [hydrationNow, setHydrationNow] = useState(Date.now());
+  const hydrationInFlightRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setComponentTreeState(componentTrees ?? []);
+    setRegistrationTreeState(registrationTrees ?? []);
+    setLinkedTreeState(linkedTrees ?? []);
+    setHydratedIds({});
+    setHydrationFailures({});
+    setPriorityHydrationIds([]);
+    setHydrationPaused(false);
+    setRunningHydrationId(null);
+    setRateLimitedUntil(0);
+  }, [guid, componentTrees, registrationTrees, linkedTrees]);
+
   // Initial expand state — all folder paths expanded (root + each component);
   // registrations collapsed; linked projects shown but not auto-recursed.
   const initialExpanded = useMemo(() => {
@@ -119,8 +174,8 @@ export function UnifiedTree({
     }
 
     // Each component: auto-expand the component node + its providers + folders
-    if (componentTrees) {
-      for (const c of componentTrees) {
+    if (componentTreeState) {
+      for (const c of componentTreeState) {
         e[`component/${c.guid}`] = true;
         for (const p of c.skeleton) {
           e[`component/${c.guid}/provider:${p.provider}`] = true;
@@ -130,7 +185,7 @@ export function UnifiedTree({
     }
 
     return e;
-  }, [guid, skeleton, componentTrees]);
+  }, [guid, skeleton, componentTreeState]);
 
   const [expanded, setExpandedState] = useState<Record<string, boolean>>(initialExpanded);
   const setExpanded = useCallback(
@@ -147,6 +202,7 @@ export function UnifiedTree({
   const [selected, setSelected] = useState<Record<string, TreeSelectionPayload>>({});
   const [downloadingSelection, setDownloadingSelection] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<TreeUploadTarget | null>(null);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
 
   // In-flight de-dupe — keep a separate set of keys currently being fetched so
   // mass expand-all doesn't fire the same URL N times.
@@ -182,6 +238,133 @@ export function UnifiedTree({
     [loadedEntries]
   );
 
+  const hydrationTasks = useMemo<HydrationTask[]>(() => {
+    const tasks: HydrationTask[] = [];
+    for (const c of componentTreeState) {
+      if (c.skipped) tasks.push({ id: hydrationTaskId("component", c.guid), kind: "component", guid: c.guid, title: c.title, apiKind: "node" });
+    }
+    for (const l of linkedTreeState) {
+      if (l.skipped) tasks.push({ id: hydrationTaskId("linked", l.guid), kind: "linked", guid: l.guid, title: l.title, apiKind: "node" });
+    }
+    for (const r of registrationTreeState) {
+      if (r.skipped) tasks.push({ id: hydrationTaskId("registration", r.guid), kind: "registration", guid: r.guid, title: r.title, apiKind: "registration" });
+    }
+    return tasks;
+  }, [componentTreeState, linkedTreeState, registrationTreeState]);
+
+  const hydrationTaskById = useMemo(() => new Map(hydrationTasks.map((task) => [task.id, task])), [hydrationTasks]);
+  const failedHydrationCount = Object.values(hydrationFailures).filter((failure) => failure.attempts >= HYDRATION_MAX_ATTEMPTS).length;
+  const successfulHydrationCount = Object.keys(hydratedIds).length;
+  const hydrationTotal = successfulHydrationCount + hydrationTasks.length;
+
+  useEffect(() => {
+    if (hydrationTasks.length === 0 && rateLimitedUntil <= Date.now()) return;
+    const id = window.setInterval(() => setHydrationNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [hydrationTasks.length, rateLimitedUntil]);
+
+  const applyHydratedSkeleton = useCallback(
+    (task: HydrationTask, nextSkeleton: SkeletonNode[]) => {
+      if (task.kind === "component") {
+        setComponentTreeState((prev) => prev.map((item) => item.guid === task.guid ? { ...item, skeleton: nextSkeleton, skipped: false } : item));
+      } else if (task.kind === "linked") {
+        setLinkedTreeState((prev) => prev.map((item) => item.guid === task.guid ? { ...item, skeleton: nextSkeleton, skipped: false } : item));
+      } else {
+        setRegistrationTreeState((prev) => prev.map((item) => item.guid === task.guid ? { ...item, skeleton: nextSkeleton, skipped: false } : item));
+      }
+
+      setExpandedState((prev) => {
+        const rowId = task.kind === "component" ? `component/${task.guid}` : task.kind === "linked" ? `linked/${task.guid}` : `registration/${task.guid}`;
+        if (!prev[rowId]) return prev;
+        const next = { ...prev };
+        for (const id of collectExpandedProviderIds(task, nextSkeleton)) next[id] = true;
+        setPref(`tree.expand.${guid}`, next);
+        return next;
+      });
+      setHydratedIds((prev) => ({ ...prev, [task.id]: true }));
+      setHydrationFailures((prev) => {
+        const next = { ...prev };
+        delete next[task.id];
+        return next;
+      });
+      setPriorityHydrationIds((prev) => prev.filter((id) => id !== task.id));
+    },
+    [guid]
+  );
+
+  const queueHydrationTask = useCallback((task: HydrationTask) => {
+    setHydrationPaused(false);
+    setHydrationFailures((prev) => {
+      const next = { ...prev };
+      delete next[task.id];
+      return next;
+    });
+    setPriorityHydrationIds((prev) => [task.id, ...prev.filter((id) => id !== task.id)]);
+    setHydrationNow(Date.now());
+  }, []);
+
+  const nextHydrationTask = useMemo(() => {
+    if (hydrationPaused || rateLimitedUntil > hydrationNow) return null;
+    const ready = hydrationTasks.filter((task) => {
+      const failure = hydrationFailures[task.id];
+      return !failure || (failure.attempts < HYDRATION_MAX_ATTEMPTS && failure.nextRetryAt <= hydrationNow);
+    });
+    if (ready.length === 0) return null;
+    for (const id of priorityHydrationIds) {
+      const task = ready.find((item) => item.id === id);
+      if (task) return task;
+    }
+    return ready[0] ?? null;
+  }, [hydrationFailures, hydrationNow, hydrationPaused, hydrationTasks, priorityHydrationIds, rateLimitedUntil]);
+
+  useEffect(() => {
+    if (!nextHydrationTask || hydrationInFlightRef.current) return;
+    const task = nextHydrationTask;
+    hydrationInFlightRef.current = task.id;
+    setRunningHydrationId(task.id);
+
+    async function hydrate() {
+      try {
+        const res = await fetch(
+          `/api/files/${task.guid}/skeleton?` + new URLSearchParams({ kind: task.apiKind }),
+          { cache: "no-store" }
+        );
+        if (res.status === 429) {
+          const rawRetry = res.headers.get("retry-after");
+          const retrySeconds = rawRetry ? Number.parseInt(rawRetry, 10) : 60;
+          const retryMs = Number.isFinite(retrySeconds) ? Math.max(5_000, retrySeconds * 1000) : 60_000;
+          setRateLimitedUntil(Date.now() + retryMs);
+          return;
+        }
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          throw new Error(body || `OSF returned ${res.status}`);
+        }
+        const data: { skeleton: SkeletonNode[] } = await res.json();
+        applyHydratedSkeleton(task, data.skeleton);
+      } catch (error) {
+        setHydrationFailures((prev) => {
+          const attempts = (prev[task.id]?.attempts ?? 0) + 1;
+          const backoff = Math.min(45_000, 2_000 * 2 ** Math.max(0, attempts - 1));
+          return {
+            ...prev,
+            [task.id]: {
+              message: error instanceof Error ? error.message : "OSF folder load failed",
+              attempts,
+              nextRetryAt: Date.now() + backoff,
+            },
+          };
+        });
+      } finally {
+        if (hydrationInFlightRef.current === task.id) hydrationInFlightRef.current = null;
+        setRunningHydrationId(null);
+        setHydrationNow(Date.now());
+      }
+    }
+
+    void hydrate();
+  }, [applyHydratedSkeleton, nextHydrationTask]);
+
   // Auto-fetch files for every folder that's currently expanded and visible.
   // This makes the initial render (where folders default to expanded) actually
   // show files, instead of requiring users to click-collapse-then-expand.
@@ -203,22 +386,22 @@ export function UnifiedTree({
       }
     }
     if (expanded["providers-root"]) walkProviderSet(guid, skeleton, "root");
-    if (componentTrees) {
-      for (const c of componentTrees) {
+    if (componentTreeState) {
+      for (const c of componentTreeState) {
         if (c.skipped) continue;
         if (!expanded[`component/${c.guid}`]) continue;
         walkProviderSet(c.guid, c.skeleton, `component/${c.guid}`);
       }
     }
-    if (registrationTrees) {
-      for (const r of registrationTrees) {
+    if (registrationTreeState) {
+      for (const r of registrationTreeState) {
         if (r.skipped) continue;
         if (!expanded[`registration/${r.guid}`]) continue;
         walkProviderSet(r.guid, r.skeleton, `registration/${r.guid}`);
       }
     }
-    if (linkedTrees) {
-      for (const l of linkedTrees) {
+    if (linkedTreeState) {
+      for (const l of linkedTreeState) {
         if (l.skipped) continue;
         if (!expanded[`linked/${l.guid}`]) continue;
         walkProviderSet(l.guid, l.skeleton, `linked/${l.guid}`);
@@ -227,7 +410,7 @@ export function UnifiedTree({
     for (const t of targets.slice(0, PREFETCH_LIMIT)) {
       void fetchFiles(t.nodeGuid, t.provider, t.materializedPath, t.listingUrl);
     }
-  }, [expanded, skeleton, componentTrees, registrationTrees, linkedTrees, guid, fetchFiles]);
+  }, [expanded, skeleton, componentTreeState, registrationTreeState, linkedTreeState, guid, fetchFiles]);
 
   const toggleSelected = useCallback((payload: TreeSelectionPayload, checked: boolean) => {
     const key = selectionKey(payload);
@@ -296,7 +479,9 @@ export function UnifiedTree({
       providers: SkeletonNode[],
       basePrefix: string,
       baseDepth: number,
-      allowUploads: boolean
+      allowUploads: boolean,
+      sourceKind: TreeUploadTarget["sourceKind"],
+      nodeTitle: string
     ) {
       for (const provider of providers) {
         const providerId = `${basePrefix}/provider:${provider.provider}`;
@@ -348,6 +533,8 @@ export function UnifiedTree({
                   path: "/",
                   name: provider.name,
                   listingUrl: provider.listingUrl,
+                  nodeTitle,
+                  sourceKind,
                 }
               : undefined,
             loading: !!loadingKeys[`${nodeGuid}|${provider.provider}:/`],
@@ -398,6 +585,8 @@ export function UnifiedTree({
                     path: folder.materializedPath,
                     name: folder.name,
                     listingUrl: folder.listingUrl,
+                    nodeTitle,
+                    sourceKind,
                   }
                 : undefined,
               loading: !!loadingKeys[fileKey],
@@ -527,7 +716,7 @@ export function UnifiedTree({
     });
 
     if (expanded["providers-root"]) {
-      emitNodeSubtree(guid, skeleton, "root", 1, true);
+      emitNodeSubtree(guid, skeleton, "root", 1, true, "project", rootTitle);
     }
 
     // Components root
@@ -542,26 +731,34 @@ export function UnifiedTree({
       });
 
       if (expanded["components-root"]) {
-        if (componentTrees && componentTrees.length > 0) {
-          for (const c of componentTrees) {
+        if (componentTreeState.length > 0) {
+          for (const c of componentTreeState) {
             const compId = `component/${c.guid}`;
+            const task: HydrationTask = { id: hydrationTaskId("component", c.guid), kind: "component", guid: c.guid, title: c.title, apiKind: "node" };
+            const failure = hydrationFailures[task.id];
+            const failed = failure && failure.attempts >= HYDRATION_MAX_ATTEMPTS;
             const compHasContent = c.skeleton.length > 0;
             rows.push({
               id: compId,
               depth: 1,
               expanded: !!expanded[compId],
-              hasChildren: compHasContent,
-              onToggle: toggle(compId),
+              hasChildren: compHasContent || c.skipped,
+              onToggle: () => {
+                const nextOpen = !expanded[compId];
+                setExpanded({ ...expanded, [compId]: nextOpen });
+                if (nextOpen && c.skipped) queueHydrationTask(task);
+              },
               node: {
                 id: c.guid,
                 label: c.title,
                 kind: "component",
                 href: `/${c.guid}`,
-                badge: c.skipped ? "skipped" : c.isPublic ? undefined : "private",
+                badge: c.skipped ? (failed ? "retry" : "indexing") : c.isPublic ? undefined : "private",
+                loading: c.skipped && runningHydrationId === task.id,
               },
             });
             if (expanded[compId] && !c.skipped) {
-              emitNodeSubtree(c.guid, c.skeleton, compId, 2, true);
+              emitNodeSubtree(c.guid, c.skeleton, compId, 2, true, "component", c.title);
             }
           }
         } else {
@@ -592,16 +789,23 @@ export function UnifiedTree({
         node: { id: "linked-root", label: `Linked projects (${linkedNodes.length})`, kind: "linked-root" },
       });
       if (expanded["linked-root"]) {
-        if (linkedTrees && linkedTrees.length > 0) {
-          for (const l of linkedTrees) {
+        if (linkedTreeState.length > 0) {
+          for (const l of linkedTreeState) {
             const linkedId = `linked/${l.guid}`;
+            const task: HydrationTask = { id: hydrationTaskId("linked", l.guid), kind: "linked", guid: l.guid, title: l.title, apiKind: "node" };
+            const failure = hydrationFailures[task.id];
+            const failed = failure && failure.attempts >= HYDRATION_MAX_ATTEMPTS;
             const linkedHasContent = l.skeleton.length > 0;
             rows.push({
               id: linkedId,
               depth: 1,
               expanded: !!expanded[linkedId],
-              hasChildren: linkedHasContent,
-              onToggle: toggle(linkedId),
+              hasChildren: linkedHasContent || l.skipped,
+              onToggle: () => {
+                const nextOpen = !expanded[linkedId];
+                setExpanded({ ...expanded, [linkedId]: nextOpen });
+                if (nextOpen && l.skipped) queueHydrationTask(task);
+              },
               node: {
                 id: l.guid,
                 label: l.title,
@@ -610,11 +814,12 @@ export function UnifiedTree({
                 // Keep same-tab so clicking expands; if the user wants the
                 // linked project in a new tab, right-click → open-in-new-tab.
                 newTab: false,
-                badge: l.skipped ? "skipped" : l.isPublic ? undefined : "private",
+                badge: l.skipped ? (failed ? "retry" : "indexing") : l.isPublic ? undefined : "private",
+                loading: l.skipped && runningHydrationId === task.id,
               },
             });
             if (expanded[linkedId] && !l.skipped) {
-              emitNodeSubtree(l.guid, l.skeleton, linkedId, 2, false);
+              emitNodeSubtree(l.guid, l.skeleton, linkedId, 2, true, "linked", l.title);
             }
           }
         } else {
@@ -644,31 +849,39 @@ export function UnifiedTree({
         node: { id: "registrations-root", label: `Registrations (${registrations.length})`, kind: "registrations-root" },
       });
       if (expanded["registrations-root"]) {
-        if (registrationTrees && registrationTrees.length > 0) {
+        if (registrationTreeState.length > 0) {
           // Registrations as expandable sub-trees. Each registration row is
           // a folder-style container; expanding it reveals its provider/folder
           // hierarchy via emitNodeSubtree (kind-agnostic since the API route
           // `/api/files/<guid>/folder?listingUrl=…` works for both nodes and
           // registrations as long as the listingUrl starts with v2/).
-          for (const r of registrationTrees) {
+          for (const r of registrationTreeState) {
             const regId = `registration/${r.guid}`;
+            const task: HydrationTask = { id: hydrationTaskId("registration", r.guid), kind: "registration", guid: r.guid, title: r.title, apiKind: "registration" };
+            const failure = hydrationFailures[task.id];
+            const failed = failure && failure.attempts >= HYDRATION_MAX_ATTEMPTS;
             const regHasContent = r.skeleton.length > 0;
             rows.push({
               id: regId,
               depth: 1,
               expanded: !!expanded[regId],
-              hasChildren: regHasContent,
-              onToggle: toggle(regId),
+              hasChildren: regHasContent || r.skipped,
+              onToggle: () => {
+                const nextOpen = !expanded[regId];
+                setExpanded({ ...expanded, [regId]: nextOpen });
+                if (nextOpen && r.skipped) queueHydrationTask(task);
+              },
               node: {
                 id: r.guid,
                 label: r.title || r.guid,
                 kind: "registration",
                 href: `/registrations/${r.guid}`,
-                badge: r.skipped ? "skipped" : r.isPublic ? undefined : "private",
+                badge: r.skipped ? (failed ? "retry" : "indexing") : r.isPublic ? undefined : "private",
+                loading: r.skipped && runningHydrationId === task.id,
               },
             });
             if (expanded[regId] && !r.skipped) {
-              emitNodeSubtree(r.guid, r.skeleton, regId, 2, false);
+              emitNodeSubtree(r.guid, r.skeleton, regId, 2, false, undefined, r.title || r.guid);
             }
           }
         } else {
@@ -688,7 +901,39 @@ export function UnifiedTree({
     }
 
     return rows;
-  }, [expanded, loadedEntries, loadingKeys, skeleton, components, componentTrees, linkedNodes, linkedTrees, registrations, registrationTrees, pinned, rootTitle, guid, fetchFiles, setExpanded]);
+  }, [expanded, loadedEntries, loadingKeys, skeleton, components, componentTreeState, linkedNodes, linkedTreeState, registrations, registrationTreeState, pinned, rootTitle, guid, fetchFiles, setExpanded, queueHydrationTask, hydrationFailures, runningHydrationId]);
+
+  const uploadTargets = useMemo(() => {
+    const seen = new Set<string>();
+    const targets: TreeUploadTarget[] = [];
+    for (const row of flatRows) {
+      const target = row.node.uploadTarget;
+      if (!target) continue;
+      const key = uploadTargetKey(target);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push(target);
+    }
+    return targets;
+  }, [flatRows]);
+
+  const openUploadDialog = useCallback(
+    (target?: TreeUploadTarget) => {
+      setUploadTarget(target ?? uploadTargets[0] ?? null);
+      setUploadDialogOpen(true);
+    },
+    [uploadTargets]
+  );
+
+  useEffect(() => {
+    function onOpenUpload(event: Event) {
+      const detail = (event as CustomEvent<{ guid?: string; target?: TreeUploadTarget }>).detail;
+      if (detail?.guid && detail.guid !== guid) return;
+      openUploadDialog(detail?.target);
+    }
+    window.addEventListener(OPEN_UPLOAD_EVENT, onOpenUpload);
+    return () => window.removeEventListener(OPEN_UPLOAD_EVENT, onOpenUpload);
+  }, [guid, openUploadDialog]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -721,8 +966,8 @@ export function UnifiedTree({
       walkSkeleton(p.children, `root/provider:${p.provider}`);
     }
     // Component sub-trees
-    if (componentTrees) {
-      for (const c of componentTrees) {
+    if (componentTreeState) {
+      for (const c of componentTreeState) {
         ids.push(`component/${c.guid}`);
         for (const p of c.skeleton) {
           ids.push(`component/${c.guid}/provider:${p.provider}`);
@@ -731,8 +976,8 @@ export function UnifiedTree({
       }
     }
     // Registration sub-trees
-    if (registrationTrees) {
-      for (const r of registrationTrees) {
+    if (registrationTreeState) {
+      for (const r of registrationTreeState) {
         ids.push(`registration/${r.guid}`);
         for (const p of r.skeleton) {
           ids.push(`registration/${r.guid}/provider:${p.provider}`);
@@ -741,8 +986,8 @@ export function UnifiedTree({
       }
     }
     // Linked-project sub-trees
-    if (linkedTrees) {
-      for (const l of linkedTrees) {
+    if (linkedTreeState) {
+      for (const l of linkedTreeState) {
         ids.push(`linked/${l.guid}`);
         for (const p of l.skeleton) {
           ids.push(`linked/${l.guid}/provider:${p.provider}`);
@@ -751,7 +996,7 @@ export function UnifiedTree({
       }
     }
     return ids;
-  }, [skeleton, componentTrees, registrationTrees, linkedTrees]);
+  }, [skeleton, componentTreeState, registrationTreeState, linkedTreeState]);
 
   const expandAll = () => {
     const next: Record<string, boolean> = {};
@@ -762,6 +1007,21 @@ export function UnifiedTree({
     setExpanded({});
   };
   const selectedCount = Object.keys(selected).length;
+  const rateLimitSeconds = Math.max(0, Math.ceil((rateLimitedUntil - hydrationNow) / 1000));
+  const hydrationProgress = hydrationTotal > 0 ? Math.round((successfulHydrationCount / hydrationTotal) * 100) : 100;
+  const showHydrationWidget = hydrationTasks.length > 0 || failedHydrationCount > 0 || Boolean(runningHydrationId);
+  const firstHydrationFailure = Object.values(hydrationFailures).find((failure) => failure.attempts >= HYDRATION_MAX_ATTEMPTS);
+  const hydrationStatusText = rateLimitSeconds > 0
+    ? `OSF asked us to slow down. Resuming in ${rateLimitSeconds}s.`
+    : hydrationPaused
+    ? "Folder indexing paused."
+    : failedHydrationCount > 0
+    ? `${failedHydrationCount} folder ${failedHydrationCount === 1 ? "section" : "sections"} need retry: ${firstHydrationFailure?.message ?? "OSF folder load failed"}`
+    : hydrationTasks.length > 0
+    ? runningHydrationId
+      ? `Loading ${hydrationTaskById.get(runningHydrationId)?.title ?? "folders"}...`
+      : "Loading remaining project folders..."
+    : "Folder index complete.";
 
   return (
     <div className="h-full flex flex-col">
@@ -777,6 +1037,13 @@ export function UnifiedTree({
           className={`rounded border px-2 py-0.5 ${selectMode ? "border-blue-500 bg-blue-50 dark:bg-blue-950" : "border-neutral-300 dark:border-neutral-700"}`}
         >
           {selectMode ? "Done" : "Select"}
+        </button>
+        <button
+          type="button"
+          onClick={() => openUploadDialog()}
+          className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 font-medium text-blue-800 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200 dark:hover:bg-blue-900"
+        >
+          Upload files
         </button>
         {selectMode && (
           <>
@@ -814,17 +1081,59 @@ export function UnifiedTree({
                   selectMode={selectMode}
                   selected={row.node.selection ? !!selected[selectionKey(row.node.selection)] : false}
                   onSelect={toggleSelected}
-                  onUpload={setUploadTarget}
+                  onUpload={openUploadDialog}
                 />
               </div>
             );
           })}
         </div>
       </div>
-      {uploadTarget && (
+      {showHydrationWidget && (
+        <div className="fixed bottom-4 right-4 z-40 w-[min(22rem,calc(100vw-2rem))] rounded border border-neutral-200 bg-white p-3 text-xs shadow-lg dark:border-neutral-800 dark:bg-neutral-950">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-medium">
+                Loading project folders {Math.min(successfulHydrationCount, hydrationTotal)}/{hydrationTotal}
+              </p>
+              <p className="mt-0.5 truncate text-neutral-600 dark:text-neutral-400" title={hydrationStatusText}>{hydrationStatusText}</p>
+            </div>
+            <div className="flex shrink-0 gap-1">
+              <button
+                type="button"
+                onClick={() => setHydrationPaused((paused) => !paused)}
+                className="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900"
+              >
+                {hydrationPaused ? "Resume" : "Pause"}
+              </button>
+              {failedHydrationCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHydrationFailures({});
+                    setHydrationPaused(false);
+                    setHydrationNow(Date.now());
+                  }}
+                  className="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900"
+                >
+                  Retry failed
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded bg-neutral-200 dark:bg-neutral-800" aria-hidden="true">
+            <div className="h-full rounded bg-blue-500 transition-all" style={{ width: `${hydrationProgress}%` }} />
+          </div>
+        </div>
+      )}
+      {uploadDialogOpen && (
         <UploadDialog
           target={uploadTarget}
-          onClose={() => setUploadTarget(null)}
+          targets={uploadTargets}
+          onTargetChange={setUploadTarget}
+          onClose={() => {
+            setUploadDialogOpen(false);
+            setUploadTarget(null);
+          }}
           onComplete={refreshUploadTarget}
         />
       )}

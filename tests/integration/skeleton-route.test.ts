@@ -22,7 +22,7 @@ describe("/api/files/[guid]/skeleton", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns a JSON skeleton on the happy path with cache headers", async () => {
+  it("returns a JSON skeleton on the happy path without shared caching", async () => {
     server.use(
       http.get("https://api.osf.io/v2/nodes/happy/files/", () =>
         HttpResponse.json({
@@ -41,7 +41,7 @@ describe("/api/files/[guid]/skeleton", () => {
     const req = new Request("http://localhost:3000/api/files/happy/skeleton");
     const res = await GET(req, { params: Promise.resolve({ guid: "happy" }) });
     expect(res.status).toBe(200);
-    expect(res.headers.get("cache-control")).toContain("max-age=300");
+    expect(res.headers.get("cache-control")).toContain("no-store");
     const body = await res.json();
     expect(body.skeleton).toBeInstanceOf(Array);
     expect(body.skeleton[0]).toMatchObject({ provider: "osfstorage", name: "osfstorage" });

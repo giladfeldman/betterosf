@@ -61,7 +61,7 @@ function writeCache(key: string, value: unknown, revalidateSeconds: number): voi
 function mapError(status: number, body: string): OsfError {
   if (status === 404) return new OsfError(404, "not_found", "OSF resource not found");
   if (status === 403) return new OsfError(403, "forbidden", "Access to this OSF resource is forbidden");
-  if (status === 401) return new OsfError(401, "forbidden", "OSF authentication required");
+  if (status === 401) return new OsfError(401, "unauthorized", "OSF authentication required");
   if (status === 429) return new OsfError(429, "rate_limited", "OSF rate limit exceeded");
   if (status >= 500) return new OsfError(status, "upstream", `OSF upstream error ${status}`);
   return new OsfError(status, "unknown", `OSF returned ${status}: ${body.slice(0, 200)}`);
@@ -89,7 +89,7 @@ export async function osfGetUrl<T = unknown>(
   let userToken: string | null = null;
   try {
     const session = await auth();
-    userToken = session?.accessToken ?? null;
+    userToken = session?.osfAuthError ? null : session?.accessToken ?? null;
   } catch {
     userToken = null;
   }

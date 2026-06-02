@@ -9,6 +9,8 @@ declare module "next-auth" {
     osfScope?: string;
     osfCanWrite?: boolean;
     osfUserId?: string;
+    osfAccessTokenExpires?: number;
+    osfAuthError?: "RefreshAccessTokenError" | "MissingRefreshToken";
   }
 }
 
@@ -19,6 +21,46 @@ declare module "next-auth/jwt" {
     accessTokenExpires?: number;
     osfScope?: string;
     osfUserId?: string;
+    osfAuthError?: "RefreshAccessTokenError" | "MissingRefreshToken";
+  }
+}
+
+async function refreshOsfAccessToken(token: JWT): Promise<JWT> {
+  if (!token.refreshToken) {
+    return { ...token, osfAuthError: "MissingRefreshToken" };
+  }
+
+  try {
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: token.refreshToken,
+      client_id: process.env.AUTH_OSF_ID ?? "",
+      client_secret: process.env.AUTH_OSF_SECRET ?? "",
+    });
+    const res = await fetch("https://accounts.osf.io/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`OSF token refresh failed: ${res.status}`);
+    const refreshed = await res.json() as {
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
+      scope?: string;
+    };
+    const expiresIn = typeof refreshed.expires_in === "number" ? refreshed.expires_in : 3600;
+    return {
+      ...token,
+      accessToken: refreshed.access_token ?? token.accessToken,
+      refreshToken: refreshed.refresh_token ?? token.refreshToken,
+      accessTokenExpires: Date.now() + expiresIn * 1000,
+      osfScope: refreshed.scope ?? token.osfScope,
+      osfAuthError: undefined,
+    };
+  } catch {
+    return { ...token, osfAuthError: "RefreshAccessTokenError" };
   }
 }
 
@@ -46,6 +88,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.osfUserId = (profile as { data?: { id?: string } }).data?.id;
         return token;
       }
+      if (token.accessToken && token.accessTokenExpires && Date.now() < token.accessTokenExpires - 60_000) {
+        return token;
+      }
+      if (token.accessToken) {
+        return refreshOsfAccessToken(token);
+      }
       // Subsequent calls — return as-is. Refresh logic is not wired in v1 of Plan 3
       // because OSF refresh-token TTL semantics aren't documented; users re-auth after expiry.
       return token;
@@ -55,6 +103,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.osfScope = token.osfScope;
       session.osfCanWrite = hasOsfWriteScope(token.osfScope);
       session.osfUserId = token.osfUserId;
+      session.osfAccessTokenExpires = token.accessTokenExpires;
+      session.osfAuthError = token.osfAuthError;
       return session;
     },
   },

@@ -27,6 +27,8 @@ export type TreeUploadTarget = {
   path: string;
   name: string;
   listingUrl: string;
+  nodeTitle?: string;
+  sourceKind?: "project" | "component" | "linked";
 };
 
 export type TreeNodeData = {
@@ -242,7 +244,7 @@ export function UnifiedTreeNode({
             e.stopPropagation();
             onUpload?.(node.uploadTarget!);
           }}
-          className="hidden shrink-0 rounded border border-blue-300 px-1.5 text-[11px] text-blue-700 hover:bg-blue-50 focus:inline-block focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 group-hover:inline-block dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950"
+          className="ml-1 shrink-0 rounded border border-blue-300 bg-blue-50 px-1.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900"
         >
           Upload
         </button>

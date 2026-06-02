@@ -20,7 +20,7 @@ export type JsonApiSingle<TAttr = unknown, TRel = unknown> = {
 export class OsfError extends Error {
   constructor(
     public status: number,
-    public code: "not_found" | "forbidden" | "rate_limited" | "upstream" | "unknown",
+    public code: "not_found" | "unauthorized" | "forbidden" | "rate_limited" | "upstream" | "unknown",
     message: string
   ) {
     super(message);

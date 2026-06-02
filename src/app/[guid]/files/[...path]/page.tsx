@@ -11,6 +11,7 @@ import { UnifiedTree } from "@/components/UnifiedTree";
 import { SplitPane } from "@/components/SplitPane";
 import { FileMissing } from "@/components/FileMissing";
 import { RecordView } from "@/components/RecordView";
+import { UploadFilesButton } from "@/components/UploadFilesButton";
 
 const EMPTY_TREE: FullProjectTree = { rootSkeleton: [], components: [], totalComponents: 0, registrationTrees: [], totalRegistrations: 0, linkedTrees: [], totalLinked: 0 };
 
@@ -90,7 +91,7 @@ export default async function DeepFilesPage({
   const matchingProvider = providers.find((p) => p.provider === provider);
 
   type WalkResult =
-    | { kind: "ok"; entries: FileEntry[] }
+    | { kind: "ok"; entries: FileEntry[]; listingUrl: string }
     | { kind: "fail"; reason: "wrong-provider" | "missing-folder" | "upstream-error" };
 
   async function walk(): Promise<WalkResult> {
@@ -104,7 +105,7 @@ export default async function DeepFilesPage({
         listingUrl = next.listingUrl;
         entries = await getFolderContents(listingUrl, guid);
       }
-      return { kind: "ok", entries };
+      return { kind: "ok", entries, listingUrl };
     } catch (e) {
       if (e instanceof OsfError && (e.code === "not_found" || e.code === "forbidden")) {
         return { kind: "fail", reason: "upstream-error" };
@@ -117,6 +118,17 @@ export default async function DeepFilesPage({
   const zipHref = `/api/zip/${guid}/${provider}${folderSegments.length ? "/" + folderSegments.join("/") : ""}`;
   const folderTitle = folderSegments[folderSegments.length - 1] ?? provider ?? guid;
   const folderId = `${guid}/${provider}${folderSegments.length ? "/" + folderSegments.join("/") : ""}`;
+  const uploadTarget = w.kind === "ok" && provider === "osfstorage"
+    ? {
+        guid,
+        provider,
+        path: folderSegments.length ? `/${folderSegments.join("/")}/` : "/",
+        name: folderTitle,
+        listingUrl: w.listingUrl,
+        nodeTitle: node.title || guid,
+        sourceKind: "project" as const,
+      }
+    : undefined;
 
   return (
     <div>
@@ -150,13 +162,16 @@ export default async function DeepFilesPage({
         }
         right={
           <div className="p-6 max-w-5xl">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <h1 className="text-2xl font-semibold font-mono-files">
                 {provider}{folderSegments.length ? "/" + folderSegments.join("/") : ""}
               </h1>
-              <a href={zipHref} className="border rounded px-3 py-1 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-900">
+              <div className="flex flex-wrap items-center gap-2">
+                {uploadTarget && <UploadFilesButton guid={guid} target={uploadTarget}>Upload here</UploadFilesButton>}
+                <a href={zipHref} className="border rounded px-3 py-1 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-900">
                 ⬇ Download folder as ZIP
-              </a>
+                </a>
+              </div>
             </div>
             <RecordView refEntry={{ id: folderId, title: folderTitle, kind: "folder" }} />
 

@@ -13,6 +13,7 @@ import { ViewerDispatcher } from "@/components/viewers/Dispatcher";
 import { PinButton } from "@/components/PinButton";
 import { RecordView } from "@/components/RecordView";
 import { FileMissing } from "@/components/FileMissing";
+import { UploadFilesButton } from "@/components/UploadFilesButton";
 
 const EMPTY_TREE: FullProjectTree = { rootSkeleton: [], components: [], totalComponents: 0, registrationTrees: [], totalRegistrations: 0, linkedTrees: [], totalLinked: 0 };
 
@@ -122,7 +123,7 @@ export default async function FileViewerPage({
   // render the surrounding chrome (tree, breadcrumb, RecordView) even when
   // the specific file can't be resolved, so users can recover via the tree.
   type WalkResult =
-    | { kind: "ok"; file: Extract<FileEntry, { kind: "file" }> }
+    | { kind: "ok"; file: Extract<FileEntry, { kind: "file" }>; listingUrl?: string }
     | { kind: "fail"; reason: "wrong-provider" | "missing-folder" | "missing-file" | "upstream-error" };
 
   async function walkToFile(): Promise<WalkResult> {
@@ -154,7 +155,7 @@ export default async function FileViewerPage({
       }
       const f = entries.find((e) => e.kind === "file" && e.name === filename);
       if (!f || f.kind !== "file") return { kind: "fail", reason: "missing-file" };
-      return { kind: "ok", file: f };
+      return { kind: "ok", file: f, listingUrl };
     } catch (e) {
       if (e instanceof OsfError && (e.code === "not_found" || e.code === "forbidden")) {
         return { kind: "fail", reason: "upstream-error" };
@@ -164,6 +165,17 @@ export default async function FileViewerPage({
   }
 
   const walk = await walkToFile();
+  const uploadTarget = walk.kind === "ok" && walk.listingUrl && provider === "osfstorage" && resourceKind === "node"
+    ? {
+        guid,
+        provider,
+        path: folderSegments.length ? `/${folderSegments.join("/")}/` : "/",
+        name: folderSegments[folderSegments.length - 1] ?? "OSF Storage",
+        listingUrl: walk.listingUrl,
+        nodeTitle: node.title || guid,
+        sourceKind: "project" as const,
+      }
+    : undefined;
 
   return (
     <div>
@@ -182,9 +194,12 @@ export default async function FileViewerPage({
           { label: filename, href: `/${guid}/files/view/${provider}/${rest.join("/")}` },
         ]}
       />
-      <div className="flex items-center justify-between gap-3 mb-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <h1 className="text-lg font-semibold truncate">{filename}</h1>
-        <PinButton refEntry={{ id: `${guid}/${provider}/${rest.join("/")}`, title: filename, kind: "file" }} />
+        <div className="flex items-center gap-2">
+          {uploadTarget && <UploadFilesButton guid={guid} target={uploadTarget}>Upload to parent folder</UploadFilesButton>}
+          <PinButton refEntry={{ id: `${guid}/${provider}/${rest.join("/")}`, title: filename, kind: "file" }} />
+        </div>
       </div>
       <RecordView refEntry={{ id: `${guid}/${provider}/${rest.join("/")}`, title: filename, kind: "file" }} />
       <SplitPane

@@ -1,5 +1,5 @@
 import { beforeEach, describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { server } from "../msw/server";
 import { UnifiedTree } from "@/components/UnifiedTree";
@@ -114,6 +114,55 @@ describe("UnifiedTree expand-all / collapse-all", () => {
       // (Provider root + sub-folder = 2 separate fetches.)
       expect(calls.some((u) => u.includes("/api/files/r1/folder"))).toBe(true);
       expect(calls.filter((u) => u.includes("/api/files/r1/folder")).length).toBeGreaterThanOrEqual(2);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("auto-loads capped component skeletons in the background", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("/api/files/cmp2/skeleton")) {
+        return new Response(JSON.stringify({
+          skeleton: [
+            leaf("osfstorage", "osfstorage", "/", [
+              leaf("osfstorage", "hydrated-data", "/hydrated-data/"),
+            ]),
+          ],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ entries: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const componentTrees: ComponentTree[] = [
+      {
+        guid: "cmp2",
+        title: "Component 2",
+        category: "project",
+        isPublic: true,
+        skipped: true,
+        skeleton: [],
+      },
+    ];
+
+    try {
+      render(
+        <UnifiedTree
+          guid="auto-root"
+          rootTitle="Root"
+          skeleton={[]}
+          components={[{ id: "cmp2", title: "Component 2", description: "", category: "project", public: true, tags: [], dateCreated: "", dateModified: "" }] as never}
+          componentTrees={componentTrees}
+          linkedNodes={[]}
+          registrations={[]}
+        />
+      );
+
+      expect(screen.getByText("indexing")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("hydrated-data")).toBeInTheDocument());
+      expect(screen.queryByText("indexing")).not.toBeInTheDocument();
     } finally {
       fetchSpy.mockRestore();
     }
@@ -253,7 +302,7 @@ describe("UnifiedTree expand-all / collapse-all", () => {
     expect(screen.getByLabelText("Upload to root-data")).toBeInTheDocument();
     expect(screen.getByLabelText("Upload to component-data")).toBeInTheDocument();
     expect(screen.queryByLabelText("Upload to external")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Upload to linked-data")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Upload to linked-data")).toBeInTheDocument();
     expect(screen.queryByLabelText("Upload to registration-data")).not.toBeInTheDocument();
   });
 
