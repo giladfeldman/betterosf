@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasOsfWriteScope, OSF_READ_SCOPE, OSF_WRITE_SCOPE, osfProvider } from "@/lib/auth/osf-provider";
+import { hasOsfWriteScope, OSF_READ_SCOPE, OSF_UPLOAD_SCOPE, OSF_WRITE_SCOPE, osfProvider } from "@/lib/auth/osf-provider";
 
 describe("osfProvider", () => {
   const config = osfProvider({ clientId: "cid", clientSecret: "csecret" });
@@ -19,12 +19,12 @@ describe("osfProvider", () => {
       .toBe("https://api.osf.io/v2/users/me/");
   });
 
-  it("requests osf.full_read scope", () => {
+  it("requests read and write scopes for upload-capable sessions", () => {
     const scope =
       typeof config.authorization === "object"
         ? (config.authorization as { params?: { scope?: string } }).params?.scope
         : undefined;
-    expect(scope).toBe(OSF_READ_SCOPE);
+    expect(scope).toBe(OSF_UPLOAD_SCOPE);
   });
 
   it("detects write-capable OSF scopes", () => {

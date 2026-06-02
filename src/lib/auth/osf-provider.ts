@@ -17,6 +17,7 @@ export type OsfProfile = OsfUserinfo;
 
 export const OSF_READ_SCOPE = "osf.full_read";
 export const OSF_WRITE_SCOPE = "osf.full_write";
+export const OSF_UPLOAD_SCOPE = `${OSF_READ_SCOPE} ${OSF_WRITE_SCOPE}`;
 
 export function hasOsfWriteScope(scope: string | undefined | null): boolean {
   return (scope ?? "").split(/\s+/).includes(OSF_WRITE_SCOPE);
@@ -29,7 +30,7 @@ export function osfProvider(opts: OAuthUserConfig<OsfProfile>): OAuth2Config<Osf
     type: "oauth",
     authorization: {
       url: "https://accounts.osf.io/oauth2/authorize",
-      params: { scope: OSF_READ_SCOPE },
+      params: { scope: OSF_UPLOAD_SCOPE },
     },
     token: "https://accounts.osf.io/oauth2/token",
     userinfo: {

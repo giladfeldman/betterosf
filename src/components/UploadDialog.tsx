@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { signIn } from "next-auth/react";
-import { OSF_WRITE_SCOPE } from "@/lib/auth/osf-provider";
+import { OSF_UPLOAD_SCOPE } from "@/lib/auth/osf-provider";
 import type { TreeUploadTarget } from "./UnifiedTreeNode";
 
 type WriteStatus = {
@@ -57,7 +57,7 @@ export function UploadDialog({
         if (alive) setStatus(data);
       })
       .catch(() => {
-        if (alive) setStatus({ signedIn: false, canWrite: false, writeScope: OSF_WRITE_SCOPE });
+        if (alive) setStatus({ signedIn: false, canWrite: false, writeScope: OSF_UPLOAD_SCOPE });
       });
     return () => {
       alive = false;
@@ -154,7 +154,7 @@ export function UploadDialog({
               <p className="mb-2">Enable uploads to grant BetterOSF OSF write access for this session.</p>
               <button
                 type="button"
-                onClick={() => signIn("osf", undefined, { scope: status.writeScope || OSF_WRITE_SCOPE })}
+                onClick={() => signIn("osf", undefined, { scope: status.writeScope || OSF_UPLOAD_SCOPE })}
                 className="rounded border border-blue-300 bg-white px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300"
               >
                 Enable uploads
