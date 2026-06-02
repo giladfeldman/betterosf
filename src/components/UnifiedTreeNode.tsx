@@ -27,6 +27,8 @@ export type TreeUploadTarget = {
   path: string;
   name: string;
   listingUrl: string;
+  uploadUrl?: string;
+  newFolderUrl?: string;
   nodeTitle?: string;
   sourceKind?: "project" | "component" | "linked";
 };

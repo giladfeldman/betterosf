@@ -22,6 +22,8 @@ export type UploadTarget = {
   provider: string;
   path: string;
   listingUrl: string;
+  uploadUrl?: string;
+  newFolderUrl?: string;
 };
 
 function safeDecode(s: string): string {
@@ -62,6 +64,35 @@ function targetUrl(target: UploadTarget, kind: "file" | "folder", name: string):
   return url.toString();
 }
 
+function cleanOptionalUrl(value: string | undefined): string | undefined {
+  const trimmed = (value ?? "").trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function validateWaterbutlerActionUrl(urlString: string, guid: string): string {
+  let url: URL;
+  try {
+    url = new URL(urlString);
+  } catch {
+    throw new OsfWriteError(400, "invalid", "Invalid OSF upload URL.");
+  }
+  const prefix = `/v1/resources/${guid}/providers/${OSF_STORAGE}`;
+  if (url.origin !== "https://files.osf.io" || !url.pathname.startsWith(prefix)) {
+    throw new OsfWriteError(400, "invalid", "Uploads are only supported for this project's OSF Storage.");
+  }
+  return url.toString();
+}
+
+function actionUrl(target: UploadTarget, kind: "file" | "folder", name: string): string {
+  const candidate = kind === "folder"
+    ? cleanOptionalUrl(target.newFolderUrl) ?? cleanOptionalUrl(target.uploadUrl)
+    : cleanOptionalUrl(target.uploadUrl);
+  const url = new URL(candidate ? validateWaterbutlerActionUrl(candidate, target.guid) : targetUrl(target, kind, name));
+  url.searchParams.set("kind", kind);
+  url.searchParams.set("name", name);
+  return url.toString();
+}
+
 export async function requireOsfWriteToken(): Promise<string> {
   const session = await auth().catch(() => null);
   if (!session?.accessToken) {
@@ -81,7 +112,12 @@ export function validateUploadTarget(target: UploadTarget): UploadTarget {
   if (!target.listingUrl.startsWith("https://api.osf.io/v2/nodes/")) {
     throw new OsfWriteError(400, "invalid", "Uploads are only supported for project and component OSF Storage.");
   }
-  return { ...target, path: cleanPath(target.path) };
+  return {
+    ...target,
+    path: cleanPath(target.path),
+    uploadUrl: cleanOptionalUrl(target.uploadUrl),
+    newFolderUrl: cleanOptionalUrl(target.newFolderUrl),
+  };
 }
 
 async function ensureNoDuplicate(target: UploadTarget, name: string): Promise<void> {
@@ -91,12 +127,40 @@ async function ensureNoDuplicate(target: UploadTarget, name: string): Promise<vo
   }
 }
 
+function readableUpstreamBody(body: string): string {
+  const trimmed = body.trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as Record<string, unknown>;
+      const message = record.message ?? record.detail ?? record.error;
+      if (typeof message === "string" && message.trim()) return message.trim();
+      if (Array.isArray(record.errors)) {
+        const first = record.errors[0] as unknown;
+        if (first && typeof first === "object") {
+          const firstMessage = (first as Record<string, unknown>).detail ?? (first as Record<string, unknown>).message;
+          if (typeof firstMessage === "string" && firstMessage.trim()) return firstMessage.trim();
+        }
+      }
+    }
+  } catch {
+    // Fall through to the HTML/plain-text handling below.
+  }
+  if (/^\s*<!doctype html/i.test(trimmed) || /^\s*<html/i.test(trimmed)) {
+    const title = trimmed.match(/<title[^>]*>(.*?)<\/title>/is)?.[1]?.replace(/\s+/g, " ").trim();
+    return title ? `OSF returned an HTML error page: ${title}` : "OSF returned an HTML error page instead of an upload response.";
+  }
+  return trimmed.replace(/\s+/g, " ").slice(0, 300);
+}
+
 function mapUploadStatus(status: number, body: string): OsfWriteError {
+  const message = readableUpstreamBody(body);
   if (status === 401) return new OsfWriteError(401, "unauthorized", "Your OSF session expired. Sign in again.");
   if (status === 403) return new OsfWriteError(403, "forbidden", "You may not have write permission on this project or component.");
-  if (status === 409) return new OsfWriteError(409, "conflict", body || "A file or folder with that name already exists.");
+  if (status === 409) return new OsfWriteError(409, "conflict", message || "A file or folder with that name already exists.");
   if (status === 413) return new OsfWriteError(413, "too_large", "OSF rejected this upload as too large.");
-  return new OsfWriteError(status, "upstream", body || `OSF upload failed with status ${status}.`);
+  return new OsfWriteError(status, "upstream", message || `OSF upload failed with status ${status}.`);
 }
 
 export async function uploadFileToOsfStorage(
@@ -111,9 +175,9 @@ export async function uploadFileToOsfStorage(
   }
   const token = await requireOsfWriteToken();
   if (!opts.overwrite) await ensureNoDuplicate(checked, name);
-  const res = await fetch(targetUrl(checked, "file", name), {
+  const res = await fetch(actionUrl(checked, "file", name), {
     method: "PUT",
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
     body: file,
     cache: "no-store",
   });
@@ -129,7 +193,7 @@ export async function createOsfStorageFolder(target: UploadTarget, name: string)
   const folderName = cleanName(name);
   const token = await requireOsfWriteToken();
   await ensureNoDuplicate(checked, folderName);
-  const res = await fetch(targetUrl(checked, "folder", folderName), {
+  const res = await fetch(actionUrl(checked, "folder", folderName), {
     method: "PUT",
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
     cache: "no-store",

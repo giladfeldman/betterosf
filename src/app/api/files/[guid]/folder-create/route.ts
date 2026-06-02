@@ -14,6 +14,8 @@ export async function POST(
       provider: String(body.provider ?? ""),
       path: String(body.path ?? "/"),
       listingUrl: String(body.listingUrl ?? ""),
+      uploadUrl: String(body.uploadUrl ?? ""),
+      newFolderUrl: String(body.newFolderUrl ?? ""),
     };
     const result = await createOsfStorageFolder(target, String(body.name ?? ""));
     return Response.json({ ok: true, folder: result }, {

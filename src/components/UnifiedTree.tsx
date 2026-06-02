@@ -71,7 +71,7 @@ function hydrationTaskId(kind: HydrationKind, guid: string): string {
 }
 
 function uploadTargetKey(target: TreeUploadTarget): string {
-  return `${target.guid}|${target.provider}|${target.path}|${target.listingUrl}`;
+  return `${target.guid}|${target.provider}|${target.path}|${target.listingUrl}|${target.uploadUrl ?? ""}`;
 }
 
 function collectExpandedProviderIds(task: HydrationTask, skeleton: SkeletonNode[]): string[] {
@@ -85,6 +85,8 @@ function skeletonFromFolder(entry: Extract<FileEntry, { kind: "folder" }>, provi
     name: entry.name,
     materializedPath: entry.materializedPath,
     listingUrl: entry.listingUrl,
+    uploadUrl: entry.uploadUrl,
+    newFolderUrl: entry.newFolderUrl,
     children: [],
     fileCount: 0,
   };
@@ -533,6 +535,8 @@ export function UnifiedTree({
                   path: "/",
                   name: provider.name,
                   listingUrl: provider.listingUrl,
+                  uploadUrl: provider.uploadUrl,
+                  newFolderUrl: provider.newFolderUrl,
                   nodeTitle,
                   sourceKind,
                 }
@@ -585,6 +589,8 @@ export function UnifiedTree({
                     path: folder.materializedPath,
                     name: folder.name,
                     listingUrl: folder.listingUrl,
+                    uploadUrl: folder.uploadUrl,
+                    newFolderUrl: folder.newFolderUrl,
                     nodeTitle,
                     sourceKind,
                   }

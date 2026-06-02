@@ -123,7 +123,7 @@ export default async function FileViewerPage({
   // render the surrounding chrome (tree, breadcrumb, RecordView) even when
   // the specific file can't be resolved, so users can recover via the tree.
   type WalkResult =
-    | { kind: "ok"; file: Extract<FileEntry, { kind: "file" }>; listingUrl?: string }
+    | { kind: "ok"; file: Extract<FileEntry, { kind: "file" }>; listingUrl?: string; uploadUrl?: string; newFolderUrl?: string }
     | { kind: "fail"; reason: "wrong-provider" | "missing-folder" | "missing-file" | "upstream-error" };
 
   async function walkToFile(): Promise<WalkResult> {
@@ -146,16 +146,20 @@ export default async function FileViewerPage({
     }
     try {
       let listingUrl = providerMatch.listingUrl;
+      let uploadUrl = providerMatch.uploadUrl;
+      let newFolderUrl = providerMatch.newFolderUrl;
       let entries: FileEntry[] = await getFolderContents(listingUrl, guid);
       for (const seg of folderSegments) {
         const next = entries.find((e) => e.kind === "folder" && e.name === seg);
         if (!next || next.kind !== "folder") return { kind: "fail", reason: "missing-folder" };
         listingUrl = next.listingUrl;
+        uploadUrl = next.uploadUrl;
+        newFolderUrl = next.newFolderUrl;
         entries = await getFolderContents(listingUrl, guid);
       }
       const f = entries.find((e) => e.kind === "file" && e.name === filename);
       if (!f || f.kind !== "file") return { kind: "fail", reason: "missing-file" };
-      return { kind: "ok", file: f, listingUrl };
+      return { kind: "ok", file: f, listingUrl, uploadUrl, newFolderUrl };
     } catch (e) {
       if (e instanceof OsfError && (e.code === "not_found" || e.code === "forbidden")) {
         return { kind: "fail", reason: "upstream-error" };
@@ -172,6 +176,8 @@ export default async function FileViewerPage({
         path: folderSegments.length ? `/${folderSegments.join("/")}/` : "/",
         name: folderSegments[folderSegments.length - 1] ?? "OSF Storage",
         listingUrl: walk.listingUrl,
+        uploadUrl: walk.uploadUrl,
+        newFolderUrl: walk.newFolderUrl,
         nodeTitle: node.title || guid,
         sourceKind: "project" as const,
       }

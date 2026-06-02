@@ -91,21 +91,25 @@ export default async function DeepFilesPage({
   const matchingProvider = providers.find((p) => p.provider === provider);
 
   type WalkResult =
-    | { kind: "ok"; entries: FileEntry[]; listingUrl: string }
+    | { kind: "ok"; entries: FileEntry[]; listingUrl: string; uploadUrl?: string; newFolderUrl?: string }
     | { kind: "fail"; reason: "wrong-provider" | "missing-folder" | "upstream-error" };
 
   async function walk(): Promise<WalkResult> {
     if (!matchingProvider) return { kind: "fail", reason: "wrong-provider" };
     try {
       let listingUrl = matchingProvider.listingUrl;
+      let uploadUrl = matchingProvider.uploadUrl;
+      let newFolderUrl = matchingProvider.newFolderUrl;
       let entries: FileEntry[] = await getFolderContents(listingUrl, guid);
       for (const segment of folderSegments) {
         const next = entries.find((e) => e.kind === "folder" && e.name === segment);
         if (!next || next.kind !== "folder") return { kind: "fail", reason: "missing-folder" };
         listingUrl = next.listingUrl;
+        uploadUrl = next.uploadUrl;
+        newFolderUrl = next.newFolderUrl;
         entries = await getFolderContents(listingUrl, guid);
       }
-      return { kind: "ok", entries, listingUrl };
+      return { kind: "ok", entries, listingUrl, uploadUrl, newFolderUrl };
     } catch (e) {
       if (e instanceof OsfError && (e.code === "not_found" || e.code === "forbidden")) {
         return { kind: "fail", reason: "upstream-error" };
@@ -125,6 +129,8 @@ export default async function DeepFilesPage({
         path: folderSegments.length ? `/${folderSegments.join("/")}/` : "/",
         name: folderTitle,
         listingUrl: w.listingUrl,
+        uploadUrl: w.uploadUrl,
+        newFolderUrl: w.newFolderUrl,
         nodeTitle: node.title || guid,
         sourceKind: "project" as const,
       }

@@ -83,13 +83,13 @@ export function UploadDialog({
   const targetOptions = useMemo(() => {
     const seen = new Set<string>();
     return targets.filter((item) => {
-      const key = `${item.guid}|${item.provider}|${item.path}|${item.listingUrl}`;
+      const key = `${item.guid}|${item.provider}|${item.path}|${item.listingUrl}|${item.uploadUrl ?? ""}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
   }, [targets]);
-  const selectedTargetKey = target ? `${target.guid}|${target.provider}|${target.path}|${target.listingUrl}` : "";
+  const selectedTargetKey = target ? `${target.guid}|${target.provider}|${target.path}|${target.listingUrl}|${target.uploadUrl ?? ""}` : "";
 
   function addFiles(files: FileList | File[]) {
     const next = Array.from(files).map((file) => ({
@@ -114,6 +114,8 @@ export function UploadDialog({
     form.set("provider", target.provider);
     form.set("path", target.path);
     form.set("listingUrl", target.listingUrl);
+    if (target.uploadUrl) form.set("uploadUrl", target.uploadUrl);
+    if (target.newFolderUrl) form.set("newFolderUrl", target.newFolderUrl);
     const res = await fetch(`/api/files/${target.guid}/upload`, { method: "POST", body: form });
     if (!res.ok) {
       const body = await res.json().catch(() => ({ error: "Upload failed" }));
@@ -140,7 +142,14 @@ export function UploadDialog({
     const res = await fetch(`/api/files/${target.guid}/folder-create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: target.provider, path: target.path, listingUrl: target.listingUrl, name }),
+      body: JSON.stringify({
+        provider: target.provider,
+        path: target.path,
+        listingUrl: target.listingUrl,
+        uploadUrl: target.uploadUrl,
+        newFolderUrl: target.newFolderUrl,
+        name,
+      }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({ error: "Folder creation failed" }));
@@ -175,13 +184,13 @@ export function UploadDialog({
               <select
                 value={selectedTargetKey}
                 onChange={(e) => {
-                  const next = targetOptions.find((item) => `${item.guid}|${item.provider}|${item.path}|${item.listingUrl}` === e.currentTarget.value);
+                  const next = targetOptions.find((item) => `${item.guid}|${item.provider}|${item.path}|${item.listingUrl}|${item.uploadUrl ?? ""}` === e.currentTarget.value);
                   if (next) onTargetChange?.(next);
                 }}
                 className="w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm dark:border-neutral-700 dark:bg-neutral-950"
               >
                 {targetOptions.map((item) => {
-                  const key = `${item.guid}|${item.provider}|${item.path}|${item.listingUrl}`;
+                  const key = `${item.guid}|${item.provider}|${item.path}|${item.listingUrl}|${item.uploadUrl ?? ""}`;
                   return (
                     <option key={key} value={key}>
                       {targetLabel(item)}

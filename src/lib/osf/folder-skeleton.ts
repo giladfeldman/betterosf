@@ -6,6 +6,8 @@ export type SkeletonNode = {
   name: string;
   materializedPath: string;
   listingUrl: string;
+  uploadUrl?: string;
+  newFolderUrl?: string;
   children: SkeletonNode[];
   /** Number of files (NOT folders) directly under this folder. Used by the UI
    *  to show "(N)" badges so users see there's content before clicking. */
@@ -44,6 +46,8 @@ export async function collectFolderSkeleton(
         name: f.name,
         materializedPath: f.materializedPath,
         listingUrl: f.listingUrl,
+        uploadUrl: f.uploadUrl,
+        newFolderUrl: f.newFolderUrl,
         children: child.subfolders,
         fileCount: child.fileCount,
       });
@@ -60,6 +64,8 @@ export async function collectFolderSkeleton(
       name: p.name,
       materializedPath: "/",
       listingUrl: p.listingUrl,
+      uploadUrl: p.uploadUrl,
+      newFolderUrl: p.newFolderUrl,
       children: top.subfolders,
       fileCount: top.fileCount,
     });

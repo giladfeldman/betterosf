@@ -6,6 +6,8 @@ export type ProviderRoot = {
   provider: string;
   name: string;
   listingUrl: string;
+  uploadUrl?: string;
+  newFolderUrl?: string;
 };
 
 export type FileEntry =
@@ -24,6 +26,8 @@ export type FileEntry =
       name: string;
       materializedPath: string;
       listingUrl: string;
+      uploadUrl?: string;
+      newFolderUrl?: string;
     };
 
 type RawEntry = {
@@ -38,7 +42,7 @@ type RawEntry = {
     materialized_path?: string;
   };
   relationships?: { files?: { links?: { related?: { href?: string } } } };
-  links?: { download?: string };
+  links?: { download?: string; upload?: string; new_folder?: string };
 };
 
 type CollectionResponse = { data: RawEntry[]; links: { next: string | null } };
@@ -51,6 +55,8 @@ function parseEntry(raw: RawEntry): FileEntry {
       name: String(raw.attributes.name ?? ""),
       materializedPath: String(raw.attributes.materialized_path ?? ""),
       listingUrl: raw.relationships?.files?.links?.related?.href ?? "",
+      uploadUrl: raw.links?.upload,
+      newFolderUrl: raw.links?.new_folder,
     };
   }
   return {
@@ -76,6 +82,8 @@ export async function getProviderRoots(guid: string, opts: { kind?: FilesKind } 
     provider: String(r.attributes.provider ?? r.attributes.name ?? r.id),
     name: String(r.attributes.name ?? r.id),
     listingUrl: r.relationships?.files?.links?.related?.href ?? "",
+    uploadUrl: r.links?.upload,
+    newFolderUrl: r.links?.new_folder,
   }));
 }
 

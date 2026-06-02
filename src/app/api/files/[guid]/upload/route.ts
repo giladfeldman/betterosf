@@ -18,6 +18,8 @@ export async function POST(
       provider: String(form.get("provider") ?? ""),
       path: String(form.get("path") ?? "/"),
       listingUrl: String(form.get("listingUrl") ?? ""),
+      uploadUrl: String(form.get("uploadUrl") ?? ""),
+      newFolderUrl: String(form.get("newFolderUrl") ?? ""),
     };
     const overwrite = String(form.get("overwrite") ?? "") === "true";
     const result = await uploadFileToOsfStorage(target, file, { overwrite });
