@@ -286,8 +286,8 @@ async function main() {
     {
       kind: "pdf",
       url: `/${HEAVY_GUID}/files/view/osfstorage/PCIRR%20Stage%201/Materials/Newman_et_al_2011_RE_Studies_12.pdf`,
-      // react-pdf-viewer renders a canvas inside .rpv-core__inner-page.
-      success: 'canvas, [class*="rpv-core"], [class*="rpv-default-layout"]',
+      // Browser-native <iframe> PDF viewer.
+      success: 'iframe[title="PDF viewer"]',
     },
     {
       kind: "docx",
