@@ -139,6 +139,35 @@ describe("OSF Storage write routes", () => {
     expect(seenUrls[0]).toContain(canonicalUrl);
   });
 
+  it("accepts OSF regional WaterButler upload hosts", async () => {
+    authMock.mockResolvedValue({ accessToken: "user-token", osfCanWrite: true });
+    const regionalUrl = "https://files.de-1.osf.io/v1/resources/kgtf7/providers/osfstorage/69b7a5ddf213f7286fa7322b/";
+    const seenUrls: string[] = [];
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/kgtf7/files/osfstorage/69b7a5ddf213f7286fa7322b/", () =>
+        HttpResponse.json({ data: [], links: { next: null } })
+      ),
+      http.put(regionalUrl, ({ request }) => {
+        seenUrls.push(request.url);
+        const url = new URL(request.url);
+        expect(url.searchParams.get("kind")).toBe("file");
+        expect(url.searchParams.get("name")).toBe("hello.txt");
+        return HttpResponse.json({ data: { id: "new-file" } });
+      })
+    );
+    const res = await uploadPost(
+      uploadRequest({
+        provider: "osfstorage",
+        path: "/Lectures/",
+        listingUrl: "https://api.osf.io/v2/nodes/kgtf7/files/osfstorage/69b7a5ddf213f7286fa7322b/",
+        uploadUrl: regionalUrl,
+      }),
+      { params: Promise.resolve({ guid: "kgtf7" }) }
+    );
+    expect(res.status).toBe(200);
+    expect(seenUrls[0]).toContain("https://files.de-1.osf.io/v1/resources/kgtf7/providers/osfstorage/");
+  });
+
   it("maps upstream HTML upload failures to a readable error", async () => {
     authMock.mockResolvedValue({ accessToken: "user-token", osfCanWrite: true });
     server.use(

@@ -77,8 +77,13 @@ function validateWaterbutlerActionUrl(urlString: string, guid: string): string {
     throw new OsfWriteError(400, "invalid", "Invalid OSF upload URL.");
   }
   const prefix = `/v1/resources/${guid}/providers/${OSF_STORAGE}`;
-  if (url.origin !== "https://files.osf.io" || !url.pathname.startsWith(prefix)) {
-    throw new OsfWriteError(400, "invalid", "Uploads are only supported for this project's OSF Storage.");
+  const hostAllowed = url.protocol === "https:" && /^files(?:\.[a-z]{2}-\d+)?\.osf\.io$/i.test(url.hostname);
+  if (!hostAllowed || !url.pathname.toLowerCase().startsWith(prefix.toLowerCase())) {
+    throw new OsfWriteError(
+      400,
+      "invalid",
+      "BetterOSF could not verify this OSF upload destination. Refresh the project page and choose an OSF Storage folder again. If this repeats, send us the project URL and folder path."
+    );
   }
   return url.toString();
 }

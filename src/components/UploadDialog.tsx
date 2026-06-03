@@ -18,6 +18,7 @@ type UploadItem = {
   file: File;
   state: "pending" | "uploading" | "done" | "error";
   error?: string;
+  errorCode?: string;
 };
 
 function formatBytes(bytes: number): string {
@@ -118,8 +119,13 @@ export function UploadDialog({
     if (target.newFolderUrl) form.set("newFolderUrl", target.newFolderUrl);
     const res = await fetch(`/api/files/${target.guid}/upload`, { method: "POST", body: form });
     if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: "Upload failed" }));
-      setItems((prev) => prev.map((x) => x.id === item.id ? { ...x, state: "error", error: String(body.error ?? "Upload failed") } : x));
+      const body = await res.json().catch(() => ({ error: "Upload failed", code: "upstream" }));
+      setItems((prev) => prev.map((x) => x.id === item.id ? {
+        ...x,
+        state: "error",
+        error: String(body.error ?? "Upload failed"),
+        errorCode: typeof body.code === "string" ? body.code : undefined,
+      } : x));
       return;
     }
     setItems((prev) => prev.map((x) => x.id === item.id ? { ...x, state: "done" } : x));
@@ -292,15 +298,27 @@ export function UploadDialog({
                       Upload pending
                     </button>
                   </div>
-                  <ul className="max-h-60 overflow-auto text-sm">
+                  {items.some((item) => item.state === "error") && (
+                    <div className="border-b border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-100">
+                      Upload failed. Read the message below, then retry after fixing the issue. If the message says your session expired or uploads are not enabled, reconnect OSF and try again.
+                    </div>
+                  )}
+                  <ul className="max-h-72 overflow-auto text-sm">
                     {items.map((item) => (
-                      <li key={item.id} className="flex items-center gap-3 border-b border-neutral-100 px-3 py-2 last:border-b-0 dark:border-neutral-900">
-                        <span className="min-w-0 flex-1 truncate" title={item.file.name}>{item.file.name}</span>
-                        <span className="shrink-0 text-xs text-neutral-500">{formatBytes(item.file.size)}</span>
-                        <span className={`shrink-0 text-xs ${item.state === "error" ? "text-red-600 dark:text-red-400" : item.state === "done" ? "text-green-700 dark:text-green-400" : "text-neutral-500"}`}>
-                          {item.state === "uploading" ? "uploading..." : item.state}
-                        </span>
-                        {item.error && <span className="min-w-24 max-w-56 truncate text-xs text-red-600 dark:text-red-400" title={item.error}>{item.error}</span>}
+                      <li key={item.id} className="border-b border-neutral-100 px-3 py-2 last:border-b-0 dark:border-neutral-900">
+                        <div className="flex items-center gap-3">
+                          <span className="min-w-0 flex-1 truncate font-medium" title={item.file.name}>{item.file.name}</span>
+                          <span className="shrink-0 text-xs text-neutral-500">{formatBytes(item.file.size)}</span>
+                          <span className={`shrink-0 text-xs ${item.state === "error" ? "text-red-600 dark:text-red-400" : item.state === "done" ? "text-green-700 dark:text-green-400" : "text-neutral-500"}`}>
+                            {item.state === "uploading" ? "uploading..." : item.state}
+                          </span>
+                        </div>
+                        {item.error && (
+                          <div className="mt-2 whitespace-pre-wrap break-words rounded border border-red-200 bg-red-50 p-2 text-xs leading-relaxed text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-100">
+                            {item.errorCode && <span className="font-semibold uppercase">{item.errorCode}: </span>}
+                            {item.error}
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>
