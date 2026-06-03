@@ -58,6 +58,7 @@ export async function GET(
   const url = new URL(req.url);
   const downloadUrl = url.searchParams.get("u");
   const filename = url.searchParams.get("name") ?? "";
+  const forceDownload = url.searchParams.get("dl") === "1";
   if (!downloadUrl) return new Response("Missing u (download URL)", { status: 400 });
 
   // SSRF guard — only allow OSF-owned hosts.
@@ -72,12 +73,21 @@ export async function GET(
   }
 
   // The downloadUrl from OSF returns a 302 to files.osf.io. Follow redirects.
+  // Forward client Range header so PDF.js can request byte ranges for
+  // incremental rendering. OSF's S3 backend supports Range requests.
+  const rangeHeader = req.headers.get("range");
+
+  const buildFetchHeaders = (bearer: string) => {
+    const h: Record<string, string> = { Accept: "application/octet-stream, */*" };
+    if (bearer) h["Authorization"] = `Bearer ${bearer}`;
+    if (rangeHeader) h["Range"] = rangeHeader;
+    return h;
+  };
+
   let token = "";
   try { token = await selectToken(); } catch { /* anonymous */ }
   let upstream = await fetch(target.toString(), {
-    headers: token
-      ? { Authorization: `Bearer ${token}`, Accept: "application/octet-stream, */*" }
-      : { Accept: "application/octet-stream, */*" },
+    headers: buildFetchHeaders(token),
     redirect: "follow",
     // Cache files for a day at the edge — OSF storage URLs are content-addressed,
     // so the response is immutable for a given OSF file revision.
@@ -89,7 +99,7 @@ export async function GET(
   // as blank iframes or failed downloads.
   if (token && (upstream.status === 401 || upstream.status === 403 || upstream.status === 429)) {
     upstream = await fetch(target.toString(), {
-      headers: { Accept: "application/octet-stream, */*" },
+      headers: buildFetchHeaders(""),
       redirect: "follow",
       next: { revalidate: 86400, tags: [`download:${guid}`] },
     });
@@ -98,6 +108,8 @@ export async function GET(
   if (!upstream.ok || !upstream.body) {
     return new Response(`OSF upstream returned ${upstream.status}`, { status: upstream.status });
   }
+
+  const isPartial = upstream.status === 206;
 
   // Strip the OSF-side CORS / framing headers and replace with our own. We
   // want browsers to:
@@ -114,10 +126,25 @@ export async function GET(
   } else if (ct) {
     headers.set("content-type", ct);
   }
+
+  if (isPartial) {
+    // Forward byte-range response headers so PDF.js can render incrementally.
+    const cr = upstream.headers.get("content-range");
+    if (cr) headers.set("content-range", cr);
+    const cl = upstream.headers.get("content-length");
+    if (cl) headers.set("content-length", cl);
+    headers.set("accept-ranges", "bytes");
+    return new Response(upstream.body, { status: 206, headers });
+  }
+
   const cl = upstream.headers.get("content-length");
   if (cl) headers.set("content-length", cl);
-  // Force inline display — viewers embed the response in iframe/img/object.
-  headers.set("content-disposition", "inline");
+  headers.set("accept-ranges", "bytes");
+  if (forceDownload) {
+    headers.set("content-disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
+  } else {
+    headers.set("content-disposition", "inline");
+  }
   // Edge cache aligned with revalidate above.
   headers.set("cache-control", "public, max-age=86400");
   // Allow same-origin iframes (HtmlViewer).

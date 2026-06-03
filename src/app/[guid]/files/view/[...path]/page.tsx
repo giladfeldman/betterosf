@@ -169,6 +169,9 @@ export default async function FileViewerPage({
   }
 
   const walk = await walkToFile();
+  const downloadHref = walk.kind === "ok"
+    ? `/api/files/${guid}/download?u=${encodeURIComponent(walk.file.downloadUrl)}&name=${encodeURIComponent(filename)}&dl=1`
+    : undefined;
   const uploadTarget = walk.kind === "ok" && walk.listingUrl && provider === "osfstorage" && resourceKind === "node"
     ? {
         guid,
@@ -203,6 +206,11 @@ export default async function FileViewerPage({
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <h1 className="text-lg font-semibold truncate">{filename}</h1>
         <div className="flex items-center gap-2">
+          {downloadHref && (
+            <a href={downloadHref} download={filename} className="text-sm border rounded px-2 py-1 hover:bg-neutral-100 dark:hover:bg-neutral-800">
+              <span aria-hidden="true">⬇</span> <span className="sr-only md:not-sr-only">Download</span>
+            </a>
+          )}
           {uploadTarget && <UploadFilesButton guid={guid} target={uploadTarget}>Upload to parent folder</UploadFilesButton>}
           <PinButton refEntry={{ id: `${guid}/${provider}/${rest.join("/")}`, title: filename, kind: "file" }} />
         </div>
