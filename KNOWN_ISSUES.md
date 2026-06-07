@@ -1,5 +1,32 @@
 # Known Issues
 
+## Malformed multi-body `.docx` renders blank in docx-preview (mitigated 2026-06-07)
+
+**Symptom.** Some `.docx` files on OSF — notably survey-tool exports (Qualtrics)
+— contain hundreds of `<w:body>` elements, which violates OOXML (exactly one is
+allowed). docx-preview reads only the first `<w:body>` (often empty) and
+**resolves without throwing**, so the viewer used to show a blank gray page with
+a misleading "Track changes rendering is experimental" footer, as if it had
+succeeded. Real example: the project `3kmr9` file
+`Newman_et_al_2011_RE_Studies_12.docx` has 485 `<w:body>` elements.
+
+**Mitigation.** `DocxViewer` now detects an empty render
+(`renderProducedContent()` — checks for text/media, ignoring docx-preview's
+injected `<style>`) and shows an honest "Couldn't preview — malformed file,
+download to view in Word" fallback instead of a blank box. There is no
+docx-preview option that repairs multi-body files; only Microsoft Word merges
+them on open. A future enhancement could merge the `<w:body>` elements in
+`document.xml` before handing the blob to docx-preview so these files actually
+render. Locked by `tests/unit/docx-empty-render.test.ts` and a visual-qa
+assertion that accepts the fallback for the known-malformed fixture.
+
+**Detector caveat.** `renderProducedContent()` must NOT key on a specific
+wrapper element (it originally checked for `<article>`, which docx-preview
+doesn't emit, so it false-positived and blanked *valid* docs). It now keys on
+content signal (text or `img`/`table`/`svg`).
+
+---
+
 ## Closed — Next.js 15.5 catch-all routing trap (resolved 2026-05-25)
 
 **Was breaking:** every route returned 504 GATEWAY_TIMEOUT after the v0.6 deploy. Root cause: `src/app/[guid]/files/[...path]/view/page.tsx` put a static segment (`view`) AFTER a catch-all (`[...path]`), which Next.js 15.5 rejects at runtime with `Error: Catch-all must be the last part of the URL.` The error is fatal at module-init for the entire app, so even static routes like `/about` and `/` 504'd.
