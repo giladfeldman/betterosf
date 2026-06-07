@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode, type DragEvent } from "react";
 
 export type TreeNodeKind = "pinned-root" | "provider-root" | "components-root" | "linked-root" | "registrations-root" | "folder" | "file" | "component" | "linked" | "registration";
 
@@ -116,6 +116,7 @@ export function UnifiedTreeNode({
   selectMode = false,
   onSelect,
   onUpload,
+  onDropUpload,
   onRetry,
 }: {
   node: TreeNodeData;
@@ -127,9 +128,30 @@ export function UnifiedTreeNode({
   selectMode?: boolean;
   onSelect?: (payload: TreeSelectionPayload, checked: boolean) => void;
   onUpload?: (target: TreeUploadTarget) => void;
+  onDropUpload?: (target: TreeUploadTarget, items: DataTransferItem[]) => void;
   onRetry?: () => void;
 }) {
   const displayLabel = node.kind === "file" ? middleTruncateFilename(node.label) : node.label;
+
+  // Drag-and-drop upload: only rows with an uploadTarget (writable osfstorage
+  // folders/provider-roots) accept file drops. Non-writable rows reject with the
+  // native no-drop cursor (dropEffect="none") and do nothing.
+  const [isDragOver, setIsDragOver] = useState(false);
+  const canDrop = !!node.uploadTarget && !!onDropUpload;
+  const onDragOver = (e: DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = canDrop ? "copy" : "none";
+    if (canDrop && !isDragOver) setIsDragOver(true);
+  };
+  const onDragLeave = () => { if (isDragOver) setIsDragOver(false); };
+  const onDrop = (e: DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    setIsDragOver(false);
+    if (!canDrop || !node.uploadTarget) return;
+    onDropUpload!(node.uploadTarget, Array.from(e.dataTransfer.items));
+  };
   const tooltip = [
     node.label,
     node.size != null ? formatSize(node.size) : "",
@@ -217,7 +239,10 @@ export function UnifiedTreeNode({
       role="treeitem"
       aria-expanded={hasChildren ? expanded : undefined}
       aria-selected={selected}
-      className={`group flex items-center gap-1 py-0.5 px-1 text-sm font-mono-files hover:bg-neutral-100 dark:hover:bg-neutral-800 ${selected ? "bg-blue-50 dark:bg-blue-900/30" : ""}`}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={`group flex items-center gap-1 py-0.5 px-1 text-sm font-mono-files hover:bg-neutral-100 dark:hover:bg-neutral-800 ${selected ? "bg-blue-50 dark:bg-blue-900/30" : ""} ${isDragOver ? "outline outline-2 outline-blue-500 bg-blue-50 dark:bg-blue-950" : ""}`}
       style={{ paddingLeft: `${depth * 0.75}rem` }}
     >
       {selectMode && node.selection && (

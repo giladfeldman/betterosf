@@ -9,7 +9,9 @@ import type { RegistrationView } from "@/lib/osf/registrations";
 import type { FileEntry } from "@/lib/osf/files";
 import { UnifiedTreeNode, type TreeNodeData, type TreeSelectionPayload, type TreeUploadTarget } from "./UnifiedTreeNode";
 import { UploadDialog } from "./UploadDialog";
+import { UploadActivityDrawer } from "./UploadActivityDrawer";
 import { OPEN_UPLOAD_EVENT } from "./UploadFilesButton";
+import type { DroppedNode } from "@/lib/upload/types";
 import { getPref, setPref } from "@/lib/prefs";
 import { listPins, type FavoriteRef } from "@/lib/favorites";
 
@@ -224,6 +226,30 @@ export function UnifiedTree({
   const [downloadingSelection, setDownloadingSelection] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<TreeUploadTarget | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [droppedNodes, setDroppedNodes] = useState<DroppedNode[] | null>(null);
+
+  // Drag-and-drop intake: read dropped files/folders into a DroppedNode tree,
+  // then open the UploadDialog pre-targeted to the dropped-on folder (every drop
+  // is confirmed via the dialog — auth, conflicts, and integrity live there).
+  const handleDropUpload = useCallback(async (target: TreeUploadTarget, items: DataTransferItem[]) => {
+    const { readDroppedEntries } = await import("@/lib/upload/entries");
+    const entries = items
+      .map((it) => (typeof it.webkitGetAsEntry === "function" ? it.webkitGetAsEntry() : null))
+      .filter((e): e is NonNullable<typeof e> => e != null);
+    let nodes: DroppedNode[];
+    if (entries.length > 0) {
+      nodes = await readDroppedEntries(entries as unknown as Parameters<typeof readDroppedEntries>[0]);
+    } else {
+      nodes = items
+        .map((it) => it.getAsFile())
+        .filter((f): f is File => f != null)
+        .map((file) => ({ kind: "file" as const, name: file.name, file }));
+    }
+    if (nodes.length === 0) return;
+    setUploadTarget(target);
+    setDroppedNodes(nodes);
+    setUploadDialogOpen(true);
+  }, []);
 
   // In-flight de-dupe — keep a separate set of keys currently being fetched so
   // mass expand-all doesn't fire the same URL N times.
@@ -1211,6 +1237,7 @@ export function UnifiedTree({
                   selected={row.node.selection ? !!selected[selectionKey(row.node.selection)] : false}
                   onSelect={toggleSelected}
                   onUpload={openUploadDialog}
+                  onDropUpload={handleDropUpload}
                   onRetry={
                     row.node.retry
                       ? () => {
@@ -1272,14 +1299,17 @@ export function UnifiedTree({
         <UploadDialog
           target={uploadTarget}
           targets={uploadTargets}
+          initialNodes={droppedNodes ?? undefined}
           onTargetChange={setUploadTarget}
           onClose={() => {
             setUploadDialogOpen(false);
             setUploadTarget(null);
+            setDroppedNodes(null);
           }}
           onComplete={refreshUploadTarget}
         />
       )}
+      <UploadActivityDrawer />
     </div>
   );
 }

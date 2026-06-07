@@ -18,14 +18,14 @@ describe("upload activity log", () => {
   it("patchActivity updates an entry in place", () => {
     appendActivity(entry("a", 1));
     patchActivity("a", { status: "success", confirmed: 1 });
-    expect(listActivity()[0]).toMatchObject({ status: "success", confirmed: 1 });
+    expect(listActivity()[0]!).toMatchObject({ status: "success", confirmed: 1 });
   });
 
   it("caps at 200 entries, dropping oldest", () => {
     for (let i = 0; i < 205; i++) appendActivity(entry(String(i), i));
     const list = listActivity();
     expect(list).toHaveLength(200);
-    expect(list[0].id).toBe("204");
+    expect(list[0]!.id).toBe("204");
     expect(list.some((e) => e.id === "0")).toBe(false);
   });
 

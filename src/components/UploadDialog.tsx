@@ -1,9 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react";
 import { signIn } from "next-auth/react";
 import { OSF_UPLOAD_SCOPE } from "@/lib/auth/osf-provider";
 import type { TreeUploadTarget } from "./UnifiedTreeNode";
+import type { DroppedNode, FileOutcome, ConflictChoice } from "@/lib/upload/types";
+import { runUploadPlan, type UploadIO } from "@/lib/upload/orchestrate";
+import { countDropped } from "@/lib/upload/entries";
+import { appendActivity, patchActivity } from "@/lib/upload/log";
+import type { FileEntry } from "@/lib/osf/files";
 
 type WriteStatus = {
   signedIn: boolean;
@@ -39,15 +44,52 @@ function targetLabel(target: TreeUploadTarget): string {
   return `${title} (${scope}) / ${folder}`;
 }
 
+type FlatFile = { path: string; name: string; size: number };
+
+/** Flatten a dropped tree into the list of files it will upload (with relative paths). */
+function flattenDropped(nodes: DroppedNode[], base = ""): FlatFile[] {
+  const out: FlatFile[] = [];
+  for (const n of nodes) {
+    const p = `${base}${n.name}`;
+    if (n.kind === "file") out.push({ path: p, name: n.name, size: n.file.size });
+    else out.push(...flattenDropped(n.children, `${p}/`));
+  }
+  return out;
+}
+
+/** Remove files whose relative path is in `skip`; report the skipped ones. Empty
+ *  folders (no children at all) are kept so they're still created on OSF. */
+function pruneSkipped(nodes: DroppedNode[], skip: Set<string>, base = ""): { kept: DroppedNode[]; skipped: FlatFile[] } {
+  const kept: DroppedNode[] = [];
+  const skipped: FlatFile[] = [];
+  for (const n of nodes) {
+    const p = `${base}${n.name}`;
+    if (n.kind === "file") {
+      if (skip.has(p)) skipped.push({ path: p, name: n.name, size: n.file.size });
+      else kept.push(n);
+    } else {
+      const r = pruneSkipped(n.children, skip, `${p}/`);
+      skipped.push(...r.skipped);
+      if (r.kept.length > 0 || n.children.length === 0) kept.push({ kind: "folder", name: n.name, children: r.kept });
+    }
+  }
+  return { kept, skipped };
+}
+
 export function UploadDialog({
   target,
   targets = [],
+  initialNodes,
   onTargetChange,
   onClose,
   onComplete,
 }: {
   target: TreeUploadTarget | null;
   targets?: TreeUploadTarget[];
+  /** When set, the dialog runs in drag-drop payload mode (files/folders dropped
+   *  onto a tree folder) with integrity verification, instead of the manual
+   *  flat-file picker. */
+  initialNodes?: DroppedNode[];
   onTargetChange?: (target: TreeUploadTarget) => void;
   onClose: () => void;
   onComplete: (target: TreeUploadTarget) => void;
@@ -58,6 +100,94 @@ export function UploadDialog({
   const [folderState, setFolderState] = useState<"idle" | "creating" | "done" | "error">("idle");
   const [folderError, setFolderError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
+
+  // ---- Drag-drop payload mode (integrity-first upload of dropped files/folders) ----
+  const [running, setRunning] = useState(false);
+  const [outcomes, setOutcomes] = useState<FileOutcome[]>([]);
+  const [skip, setSkip] = useState<Set<string>>(new Set());
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [reconciled, setReconciled] = useState<null | { confirmed: number; skipped: number; failed: number }>(null);
+
+  const droppedSummary = useMemo(() => (initialNodes ? countDropped(initialNodes) : null), [initialNodes]);
+  const payloadFiles = useMemo(() => (initialNodes ? flattenDropped(initialNodes) : []), [initialNodes]);
+
+  // Live HTTP IO over the existing folder / folder-create / upload routes.
+  const makeIO = useCallback((guid: string): UploadIO => ({
+    list: async (t) => {
+      const res = await fetch(`/api/files/${guid}/folder?` + new URLSearchParams({ listingUrl: t.listingUrl, fresh: "1" }), { cache: "no-store" });
+      if (!res.ok) { const e = new Error(await res.text().catch(() => "Could not read folder")) as Error & { status?: number }; e.status = res.status; throw e; }
+      const data: { entries: FileEntry[] } = await res.json();
+      return data.entries;
+    },
+    createFolder: async (t, name) => {
+      const res = await fetch(`/api/files/${guid}/folder-create`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: t.provider, path: t.path, listingUrl: t.listingUrl, uploadUrl: t.uploadUrl, newFolderUrl: t.newFolderUrl, name }),
+      });
+      // 409 = the folder already exists → merge into it, not an error.
+      if (!res.ok && res.status !== 409) { const b = await res.json().catch(() => ({})); const e = new Error(String(b.error ?? "Folder creation failed")) as Error & { status?: number; code?: string }; e.status = res.status; e.code = b.code; throw e; }
+    },
+    uploadFile: async (t, file, { overwrite }) => {
+      const form = new FormData();
+      form.set("file", file);
+      form.set("provider", t.provider);
+      form.set("path", t.path);
+      form.set("listingUrl", t.listingUrl);
+      if (t.uploadUrl) form.set("uploadUrl", t.uploadUrl);
+      if (t.newFolderUrl) form.set("newFolderUrl", t.newFolderUrl);
+      if (overwrite) form.set("overwrite", "true");
+      const res = await fetch(`/api/files/${guid}/upload`, { method: "POST", body: form });
+      if (!res.ok) { const b = await res.json().catch(() => ({})); const e = new Error(String(b.error ?? "Upload failed")) as Error & { status?: number; code?: string }; e.status = res.status; e.code = b.code; throw e; }
+    },
+  }), []);
+
+  const execute = useCallback(async (nodesToRun: DroppedNode[], carry: FileOutcome[]) => {
+    if (!target) return;
+    setRunning(true);
+    setReconciled(null);
+    const runId = crypto.randomUUID();
+    const summary = droppedSummary
+      ? `${droppedSummary.files} file${droppedSummary.files === 1 ? "" : "s"}${droppedSummary.folders ? ` in ${droppedSummary.folders} folder${droppedSummary.folders === 1 ? "" : "s"}` : ""}`
+      : `${nodesToRun.length} item(s)`;
+    appendActivity({ id: runId, ts: Date.now(), guid: target.guid, destinationLabel: targetLabel(target), summary, status: "in_progress", confirmed: 0, skipped: 0, failed: 0, outcomes: [] });
+
+    const live: FileOutcome[] = [...carry];
+    setOutcomes([...live]);
+    const result = await runUploadPlan(
+      target, nodesToRun,
+      { resolve: () => "new_version" as ConflictChoice },
+      makeIO(target.guid),
+      { onProgress: (o) => { live.push(o); setOutcomes([...live]); } }
+    );
+    const all = [...carry, ...result.outcomes];
+    const confirmed = all.filter((o) => o.status === "confirmed").length;
+    const skippedCount = all.filter((o) => o.status === "skipped").length;
+    const failed = all.filter((o) => o.status === "failed").length;
+    const status = failed > 0 ? (confirmed + skippedCount > 0 ? "partial" : "failed") : "success";
+    patchActivity(runId, { status, confirmed, skipped: skippedCount, failed, outcomes: all });
+    setReconciled({ confirmed, skipped: skippedCount, failed });
+    setRunning(false);
+    onComplete(target);
+  }, [target, droppedSummary, makeIO, onComplete]);
+
+  const runDropped = useCallback(() => {
+    if (!initialNodes) return;
+    const { kept, skipped } = pruneSkipped(initialNodes, skip);
+    const skippedOutcomes: FileOutcome[] = skipped.map((s) => ({ path: s.path, name: s.name, size: s.size, status: "skipped", attempts: 0 }));
+    void execute(kept, skippedOutcomes);
+  }, [initialNodes, skip, execute]);
+
+  const retryFailed = useCallback(() => {
+    if (!initialNodes) return;
+    const failedPaths = new Set(outcomes.filter((o) => o.status === "failed").map((o) => o.path));
+    const carry = outcomes.filter((o) => o.status !== "failed"); // keep confirmed + skipped
+    const retrySkip = new Set<string>();
+    for (const f of payloadFiles) if (!failedPaths.has(f.path)) retrySkip.add(f.path);
+    const { kept } = pruneSkipped(initialNodes, retrySkip);
+    void execute(kept, carry);
+  }, [initialNodes, outcomes, payloadFiles, execute]);
+
+  const selectedToUpload = payloadFiles.length - skip.size;
 
   useEffect(() => {
     let alive = true;
@@ -178,7 +308,12 @@ export function UploadDialog({
               {target ? targetLabel(target) : "Choose a writable OSF Storage folder."}
             </p>
           </div>
-          <button type="button" onClick={onClose} className="rounded border border-neutral-300 px-2 py-1 text-sm hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={running || (!!reconciled && reconciled.failed > 0 && !acknowledged)}
+            className="rounded border border-neutral-300 px-2 py-1 text-sm hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-900"
+          >
             Close
           </button>
         </div>
@@ -248,7 +383,96 @@ export function UploadDialog({
             </div>
           )}
 
-          {status?.canWrite && target && (
+          {status?.canWrite && target && initialNodes && (
+            <div className="space-y-3">
+              <div className="rounded border border-neutral-200 p-3 text-sm dark:border-neutral-800">
+                <p className="font-medium">
+                  Ready to upload {droppedSummary?.files} file{droppedSummary?.files === 1 ? "" : "s"}
+                  {droppedSummary && droppedSummary.folders > 0 ? ` across ${droppedSummary.folders} folder${droppedSummary.folders === 1 ? "" : "s"}` : ""}.
+                </p>
+                <p className="mt-1 text-neutral-600 dark:text-neutral-400">Destination: {targetLabel(target)}</p>
+                <p className="mt-1 text-xs text-neutral-500">
+                  Files that already exist will be uploaded as a <strong>new version</strong> — OSF keeps the previous version in its revision history. Untick any file below to skip it instead.
+                </p>
+              </div>
+
+              {!reconciled && !running && payloadFiles.length > 0 && (
+                <div className="rounded border border-neutral-200 dark:border-neutral-800">
+                  <ul className="max-h-56 overflow-auto text-sm">
+                    {payloadFiles.map((f) => (
+                      <li key={f.path} className="flex items-center gap-2 border-b border-neutral-100 px-3 py-1.5 last:border-b-0 dark:border-neutral-900">
+                        <input
+                          type="checkbox"
+                          aria-label={`Upload ${f.path}`}
+                          checked={!skip.has(f.path)}
+                          onChange={(e) => setSkip((prev) => {
+                            const next = new Set(prev);
+                            if (e.currentTarget.checked) next.delete(f.path); else next.add(f.path);
+                            return next;
+                          })}
+                          className="h-3.5 w-3.5 shrink-0"
+                        />
+                        <span className="min-w-0 flex-1 truncate" title={f.path}>{f.path}</span>
+                        <span className="shrink-0 text-xs text-neutral-500">{formatBytes(f.size)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {!running && !reconciled && (
+                <button
+                  type="button"
+                  onClick={runDropped}
+                  disabled={selectedToUpload === 0}
+                  className="rounded border border-blue-300 bg-blue-50 px-4 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200"
+                >
+                  Upload {selectedToUpload} file{selectedToUpload === 1 ? "" : "s"}
+                </button>
+              )}
+
+              {(running || outcomes.length > 0) && (
+                <ul className="max-h-72 overflow-auto rounded border border-neutral-200 text-sm dark:border-neutral-800">
+                  {outcomes.map((o) => (
+                    <li key={o.path} className="flex items-center gap-3 border-b border-neutral-100 px-3 py-1.5 last:border-b-0 dark:border-neutral-900">
+                      <span className="min-w-0 flex-1 truncate" title={o.detail ? `${o.path} — ${o.detail}` : o.path}>{o.path}</span>
+                      <span className={`shrink-0 text-xs ${o.status === "failed" ? "text-red-600 dark:text-red-400" : o.status === "confirmed" ? "text-green-700 dark:text-green-400" : "text-neutral-500"}`}>
+                        {o.status === "confirmed" ? "✓ on OSF" : o.status === "skipped" ? "skipped" : `✗ ${o.cause}`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {running && <p className="text-xs text-neutral-500">Uploading and verifying each file on OSF…</p>}
+
+              {reconciled && reconciled.failed === 0 && (
+                <div className="rounded border border-green-300 bg-green-50 p-3 text-sm text-green-900 dark:border-green-800 dark:bg-green-950 dark:text-green-100">
+                  All {reconciled.confirmed} file{reconciled.confirmed === 1 ? "" : "s"} confirmed on OSF{reconciled.skipped ? ` (${reconciled.skipped} skipped)` : ""}. Safe to close.
+                </div>
+              )}
+
+              {reconciled && reconciled.failed > 0 && (
+                <div className="space-y-2 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-100">
+                  <p className="font-semibold">{reconciled.failed} file{reconciled.failed === 1 ? "" : "s"} did NOT upload to OSF.</p>
+                  <ul className="list-disc space-y-1 pl-5">
+                    {outcomes.filter((o) => o.status === "failed").map((o) => (
+                      <li key={o.path}><span className="font-medium break-all">{o.path}</span> — {o.detail}</li>
+                    ))}
+                  </ul>
+                  <button type="button" onClick={retryFailed} className="rounded border border-red-400 bg-white px-3 py-1 font-medium text-red-700 hover:bg-red-50 dark:bg-red-950 dark:text-red-200">
+                    Retry failed
+                  </button>
+                  <label className="flex items-start gap-2">
+                    <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.currentTarget.checked)} className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>I understand these {reconciled.failed} file{reconciled.failed === 1 ? "" : "s"} did not upload to OSF.</span>
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
+
+          {status?.canWrite && target && !initialNodes && (
             <>
               <div
                 onDragOver={(e) => {

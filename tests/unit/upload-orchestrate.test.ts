@@ -47,7 +47,7 @@ describe("runUploadPlan", () => {
     const result = await runUploadPlan(ROOT, [tree], { resolve: () => "new_version" }, io);
     expect(result.confirmed).toBe(2);
     expect(io.createFolder).toHaveBeenCalledTimes(2); // data, sub
-    expect(store["https://api.osf.io/v2/nodes/ezcuj/files/osfstorage/data/"].map((e) => e.name)).toContain("x.csv");
+    expect(store["https://api.osf.io/v2/nodes/ezcuj/files/osfstorage/data/"]!.map((e) => e.name)).toContain("x.csv");
   });
 
   it("merges into an existing folder instead of recreating it", async () => {
@@ -79,8 +79,8 @@ describe("runUploadPlan", () => {
     io.uploadFile = vi.fn(async () => {});
     const result = await runUploadPlan(ROOT, [fileNode("ghost.txt")], { resolve: () => "new_version" }, io);
     expect(result.failed).toBe(1);
-    expect(result.outcomes[0].status).toBe("failed");
-    expect(result.outcomes[0].detail).toMatch(/verif/i);
+    expect(result.outcomes[0]!.status).toBe("failed");
+    expect(result.outcomes[0]!.detail).toMatch(/verif/i);
   });
 
   it("retries a transient upload error then confirms", async () => {

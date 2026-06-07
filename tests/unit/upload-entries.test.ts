@@ -38,7 +38,7 @@ describe("readDroppedEntries", () => {
     const tree = dirEntry("data", [fileEntry("x.csv"), dirEntry("sub", [fileEntry("y.csv")])]);
     const nodes = await readDroppedEntries([tree]);
     expect(nodes).toHaveLength(1);
-    const folder = nodes[0];
+    const folder = nodes[0]!;
     expect(folder.kind).toBe("folder");
     if (folder.kind !== "folder") throw new Error("expected folder");
     expect(folder.name).toBe("data");
