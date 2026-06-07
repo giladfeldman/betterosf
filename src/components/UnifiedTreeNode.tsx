@@ -49,6 +49,12 @@ export type TreeNodeData = {
   selection?: TreeSelectionPayload;
   uploadTarget?: TreeUploadTarget;
   loading?: boolean;
+  /** This folder's last fetch failed; show a retry affordance. */
+  failed?: boolean;
+  /** Error message for the failed fetch (tooltip on the retry control). */
+  failedMessage?: string;
+  /** Params to re-fetch this folder's contents (used by the retry control). */
+  retry?: { guid: string; provider: string; path: string; listingUrl: string };
 };
 
 function kindIcon(kind: TreeNodeKind, provider?: string): ReactNode {
@@ -110,6 +116,7 @@ export function UnifiedTreeNode({
   selectMode = false,
   onSelect,
   onUpload,
+  onRetry,
 }: {
   node: TreeNodeData;
   depth: number;
@@ -120,6 +127,7 @@ export function UnifiedTreeNode({
   selectMode?: boolean;
   onSelect?: (payload: TreeSelectionPayload, checked: boolean) => void;
   onUpload?: (target: TreeUploadTarget) => void;
+  onRetry?: () => void;
 }) {
   const displayLabel = node.kind === "file" ? middleTruncateFilename(node.label) : node.label;
   const tooltip = [
@@ -138,7 +146,12 @@ export function UnifiedTreeNode({
       )}
       {node.size != null && <span className="ml-2 text-xs text-neutral-500 shrink-0">{formatSize(node.size)}</span>}
       {node.badge && <span className="ml-2 text-[10px] uppercase text-neutral-500 border rounded px-1 shrink-0">{node.badge}</span>}
-      {node.loading && <span className="ml-2 text-xs text-neutral-500 shrink-0">loading...</span>}
+      {node.loading && !node.failed && (
+        <span className="ml-2 inline-flex items-center gap-1 text-xs text-neutral-500 shrink-0">
+          <span className="inline-block h-3 w-3 animate-spin rounded-full border border-neutral-400 border-t-transparent" aria-hidden="true" />
+          loading…
+        </span>
+      )}
     </span>
   );
 
@@ -226,6 +239,20 @@ export function UnifiedTreeNode({
         {expanded ? "▼" : "▶"}
       </button>
       {content}
+      {node.failed && (
+        <button
+          type="button"
+          title={node.failedMessage ? `Failed: ${node.failedMessage}` : "Failed to load — click to retry"}
+          aria-label={`Retry loading ${node.label}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRetry?.();
+          }}
+          className="ml-2 shrink-0 rounded border border-red-300 bg-red-50 px-1.5 text-[11px] font-medium text-red-700 hover:bg-red-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-500 dark:border-red-800 dark:bg-red-950 dark:text-red-300 dark:hover:bg-red-900"
+        >
+          ⟳ Retry
+        </button>
+      )}
       {node.downloadHref && (
         <a
           href={node.downloadHref}

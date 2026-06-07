@@ -244,6 +244,16 @@ async function main() {
     const overviewTrees = await page.locator('[role="tree"]').count();
     record("registration overview shows file tree navigator", overviewTrees > 0, `trees=${overviewTrees}`);
 
+    // Registrations are immutable — no upload affordance anywhere on the page.
+    const uploadButtons = await page.getByRole("button", { name: /upload/i }).count();
+    record("registration shows NO upload buttons (immutable)", uploadButtons === 0, `uploadButtons=${uploadButtons}`);
+
+    // Progressive auto-load: deep folders/files appear WITHOUT the user clicking
+    // through each level (the reported annoyance). Allow the cascade a moment.
+    await page.waitForTimeout(5000);
+    const leafCount = await page.locator('[role="tree"] a[href*="/files/view/"]').count();
+    record("registration tree auto-loads files (file leaf visible, no clicks)", leafCount > 0, `fileLeaves=${leafCount}`);
+
     const fresp = await page.goto(`${BASE}/${REG}/files`, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => null);
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
     const fstatus = String(fresp?.status() ?? "no-resp");

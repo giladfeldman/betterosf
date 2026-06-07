@@ -233,6 +233,7 @@ export default async function FileViewerPage({
             registrations={registrations}
             registrationTrees={fullTree.registrationTrees}
             linkedTrees={fullTree.linkedTrees}
+            readOnly={resourceKind === "registration"}
           />
         }
         right={

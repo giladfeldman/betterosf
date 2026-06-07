@@ -114,8 +114,13 @@ export async function osfGetUrl<T = unknown>(
     // one of these and 500 the whole page. Retry transient failures a couple
     // of times with short backoff so a single upstream hiccup is absorbed.
     // We do NOT retry 429 (handled by the app-token fallback) or any 4xx.
-    const TRANSIENT = new Set([502, 503, 504]);
-    const MAX_ATTEMPTS = 3;
+    // 500 is included: OSF intermittently returns transient 500s on idempotent
+    // GET reads, and retrying a read is safe.
+    const TRANSIENT = new Set([500, 502, 503, 504]);
+    // 2 attempts (1 retry). Bounded worst case = MAX_ATTEMPTS * ATTEMPT_TIMEOUT
+    // (~16s) stays under page render budgets even when OSF hangs; a single retry
+    // still absorbs the common transient blip.
+    const MAX_ATTEMPTS = 2;
     // Backoff base. Zero under test so retries stay instant (tests that mock
     // failures/unmatched handlers must not pay real wall-clock backoff).
     const BACKOFF_MS = process.env.VITEST ? 0 : 150;
@@ -123,7 +128,7 @@ export async function osfGetUrl<T = unknown>(
       ms <= 0 ? Promise.resolve() : new Promise<void>((r) => setTimeout(r, ms));
     // Per-attempt timeout so a hung OSF connection fails fast and retries
     // instead of blocking the whole page render. Zero/disabled under test.
-    const ATTEMPT_TIMEOUT_MS = process.env.VITEST ? 0 : 12_000;
+    const ATTEMPT_TIMEOUT_MS = process.env.VITEST ? 0 : 8_000;
     let lastError: unknown;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const ac = ATTEMPT_TIMEOUT_MS > 0 ? new AbortController() : null;

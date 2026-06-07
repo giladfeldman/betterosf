@@ -127,6 +127,7 @@ export async function RegistrationOverview({ guid }: { guid: string }) {
             registrations={[]}
             registrationTrees={[]}
             linkedTrees={[]}
+            readOnly
           />
         }
         right={right}

@@ -24,8 +24,16 @@ type FlatRow = {
 
 type LoadedEntries = Record<string, FileEntry[]>; // keyed by `${nodeGuid}|${provider}:${materializedPath}`
 
-const PREFETCH_LIMIT = 12;
 const HYDRATION_MAX_ATTEMPTS = 3;
+// Upper bound on folders auto-loaded into the tree before we stop and let the
+// rest load on click. Keeps very large trees from hammering OSF, while still
+// fully auto-loading typical projects/registrations. Surfaced to the user when
+// hit (no silent truncation).
+const AUTO_LOAD_MAX_FOLDERS = 400;
+// Max concurrent auto-load folder fetches. Keeps the eager tree-fill from
+// bursting OSF's anonymous rate limit (429); the pipeline refills as fetches
+// settle. User-initiated clicks bypass this and fetch immediately.
+const MAX_CONCURRENT_AUTOLOAD = 4;
 
 type HydrationKind = "component" | "linked" | "registration";
 
@@ -102,11 +110,14 @@ export function UnifiedTree({
   registrations,
   registrationTrees,
   linkedTrees,
+  readOnly = false,
 }: {
   guid: string;
   rootTitle: string;
   skeleton: SkeletonNode[];
   components: NodeView[];
+  /** Hide all upload affordances (registrations are immutable). Default false. */
+  readOnly?: boolean;
   /** When provided, components are rendered as expandable sub-trees with their own provider+folder hierarchy. Falls back to flat-list rendering if absent. */
   componentTrees?: ComponentTree[];
   linkedNodes: NodeView[];
@@ -200,6 +211,14 @@ export function UnifiedTree({
 
   const [loadedEntries, setLoadedEntries] = useState<LoadedEntries>({});
   const [loadingKeys, setLoadingKeys] = useState<Record<string, boolean>>({});
+  // Per-folder fetch failures (key → message). Surfaced as a retry affordance.
+  const [folderFailures, setFolderFailures] = useState<Record<string, string>>({});
+  // Progressive auto-load: whether we hit the folder cap, and whether the user
+  // disabled auto-expand via "Collapse all".
+  const [autoLoadCapped, setAutoLoadCapped] = useState(false);
+  const autoExpandEnabledRef = useRef(true);
+  // Bumped by "Retry all" to re-run the auto-load effect for failed folders.
+  const [retryNonce, setRetryNonce] = useState(0);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Record<string, TreeSelectionPayload>>({});
   const [downloadingSelection, setDownloadingSelection] = useState(false);
@@ -223,11 +242,24 @@ export function UnifiedTree({
         const res = await fetch(
           `/api/files/${nodeGuid}/folder?` + new URLSearchParams({ provider, listingUrl })
         );
-        if (!res.ok) return;
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          throw new Error(body || `OSF returned ${res.status}`);
+        }
         const data: { entries: FileEntry[] } = await res.json();
         setLoadedEntries((prev) => ({ ...prev, [key]: data.entries }));
-      } catch {
-        // silent
+        // Clear any prior failure for this folder on success.
+        setFolderFailures((prev) => {
+          if (!(key in prev)) return prev;
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      } catch (e) {
+        setFolderFailures((prev) => ({
+          ...prev,
+          [key]: e instanceof Error ? e.message.slice(0, 160) : "Couldn't load this folder",
+        }));
       } finally {
         inFlightRef.current.delete(key);
         setLoadingKeys((prev) => {
@@ -367,52 +399,90 @@ export function UnifiedTree({
     void hydrate();
   }, [applyHydratedSkeleton, nextHydrationTask]);
 
-  // Auto-fetch files for every folder that's currently expanded and visible.
-  // This makes the initial render (where folders default to expanded) actually
-  // show files, instead of requiring users to click-collapse-then-expand.
-  // De-duped via loadedEntries + inFlightRef in fetchFiles.
+  // Progressive auto-load: fill the navigator with ALL folders/files without
+  // the user clicking through each level. We walk the known folder tree —
+  // static skeleton folders AND dynamically-loaded subfolders — auto-expanding
+  // each folder the first time we see it and fetching its contents. As each
+  // fetch lands, loadedEntries changes and this effect re-runs, cascading one
+  // level deeper, until the whole tree is loaded or AUTO_LOAD_MAX_FOLDERS is
+  // hit (surfaced via autoLoadCapped, not silently truncated). fetchFiles
+  // de-dupes via loadedEntries + inFlightRef, and we respect a user's explicit
+  // collapse (an explicit `false` in `expanded`) and "Collapse all".
   useEffect(() => {
-    const targets: Array<{ nodeGuid: string; provider: string; materializedPath: string; listingUrl: string }> = [];
-    function walkProviderSet(nodeGuid: string, providers: SkeletonNode[], basePrefix: string) {
+    type Target = { nodeGuid: string; provider: string; materializedPath: string; listingUrl: string };
+    const targets: Target[] = [];
+    const toExpand: Record<string, boolean> = {};
+
+    const visitFolder = (nodeGuid: string, folder: SkeletonNode, rowId: string) => {
+      // Auto-expand the first time we encounter a folder (undefined = never
+      // decided). A user's explicit collapse leaves `false`, which we respect.
+      if (autoExpandEnabledRef.current && expanded[rowId] === undefined) toExpand[rowId] = true;
+      const open = expanded[rowId] === true || toExpand[rowId] === true;
+      if (!open) return;
+      const key = folderKey(nodeGuid, folder.provider, folder.materializedPath);
+      const entries = loadedEntries[key];
+      if (entries === undefined) {
+        targets.push({ nodeGuid, provider: folder.provider, materializedPath: folder.materializedPath, listingUrl: folder.listingUrl });
+        return; // children unknown until this loads; a later pass recurses
+      }
+      const staticPaths = new Set(folder.children.map((c) => c.materializedPath));
+      for (const c of folder.children) visitFolder(nodeGuid, c, `${rowId}/${c.name}`);
+      for (const e of entries) {
+        if (e.kind === "folder" && !staticPaths.has(e.materializedPath)) {
+          visitFolder(nodeGuid, skeletonFromFolder(e, folder.provider), `${rowId}/${e.name}`);
+        }
+      }
+    };
+
+    const visitProviderSet = (nodeGuid: string, providers: SkeletonNode[], basePrefix: string) => {
       for (const p of providers) {
         const providerId = `${basePrefix}/provider:${p.provider}`;
         if (!expanded[providerId]) continue;
-        targets.push({ nodeGuid, provider: p.provider, materializedPath: "/", listingUrl: p.listingUrl });
-        function walkFolder(folder: SkeletonNode, parentId: string) {
-          const id = `${parentId}/${folder.name}`;
-          if (!expanded[id]) return;
-          targets.push({ nodeGuid, provider: folder.provider, materializedPath: folder.materializedPath, listingUrl: folder.listingUrl });
-          for (const sub of folder.children) walkFolder(sub, id);
+        const key = folderKey(nodeGuid, p.provider, "/");
+        const entries = loadedEntries[key];
+        if (entries === undefined) {
+          targets.push({ nodeGuid, provider: p.provider, materializedPath: "/", listingUrl: p.listingUrl });
+          continue;
         }
-        for (const folder of p.children) walkFolder(folder, providerId);
+        const staticPaths = new Set(p.children.map((c) => c.materializedPath));
+        for (const folder of p.children) visitFolder(nodeGuid, folder, `${providerId}/${folder.name}`);
+        for (const e of entries) {
+          if (e.kind === "folder" && !staticPaths.has(e.materializedPath)) {
+            visitFolder(nodeGuid, skeletonFromFolder(e, p.provider), `${providerId}/${e.name}`);
+          }
+        }
+      }
+    };
+
+    if (expanded["providers-root"]) visitProviderSet(guid, skeleton, "root");
+    for (const c of componentTreeState ?? []) {
+      if (!c.skipped && expanded[`component/${c.guid}`]) visitProviderSet(c.guid, c.skeleton, `component/${c.guid}`);
+    }
+    for (const r of registrationTreeState ?? []) {
+      if (!r.skipped && expanded[`registration/${r.guid}`]) visitProviderSet(r.guid, r.skeleton, `registration/${r.guid}`);
+    }
+    for (const l of linkedTreeState ?? []) {
+      if (!l.skipped && expanded[`linked/${l.guid}`]) visitProviderSet(l.guid, l.skeleton, `linked/${l.guid}`);
+    }
+
+    if (Object.keys(toExpand).length > 0) setExpanded({ ...expanded, ...toExpand });
+
+    if (targets.length > 0) {
+      // Bound total distinct folders auto-loaded. knownCount = already-loaded +
+      // in-flight; the rest load on click once the cap is hit.
+      const knownCount = Object.keys(loadedEntries).length + inFlightRef.current.size;
+      const capRoom = Math.max(0, AUTO_LOAD_MAX_FOLDERS - knownCount);
+      if (targets.length > capRoom) setAutoLoadCapped(true);
+      // Throttle: cap concurrent auto-fetches so we don't burst OSF into a 429.
+      // The effect re-runs as each fetch settles (loadingKeys changes), pulling
+      // the next batch — a paced pipeline rather than a flood.
+      const concurrencyRoom = Math.max(0, MAX_CONCURRENT_AUTOLOAD - inFlightRef.current.size);
+      const room = Math.min(capRoom, concurrencyRoom);
+      for (const t of targets.slice(0, room)) {
+        void fetchFiles(t.nodeGuid, t.provider, t.materializedPath, t.listingUrl);
       }
     }
-    if (expanded["providers-root"]) walkProviderSet(guid, skeleton, "root");
-    if (componentTreeState) {
-      for (const c of componentTreeState) {
-        if (c.skipped) continue;
-        if (!expanded[`component/${c.guid}`]) continue;
-        walkProviderSet(c.guid, c.skeleton, `component/${c.guid}`);
-      }
-    }
-    if (registrationTreeState) {
-      for (const r of registrationTreeState) {
-        if (r.skipped) continue;
-        if (!expanded[`registration/${r.guid}`]) continue;
-        walkProviderSet(r.guid, r.skeleton, `registration/${r.guid}`);
-      }
-    }
-    if (linkedTreeState) {
-      for (const l of linkedTreeState) {
-        if (l.skipped) continue;
-        if (!expanded[`linked/${l.guid}`]) continue;
-        walkProviderSet(l.guid, l.skeleton, `linked/${l.guid}`);
-      }
-    }
-    for (const t of targets.slice(0, PREFETCH_LIMIT)) {
-      void fetchFiles(t.nodeGuid, t.provider, t.materializedPath, t.listingUrl);
-    }
-  }, [expanded, skeleton, componentTreeState, registrationTreeState, linkedTreeState, guid, fetchFiles]);
+  }, [expanded, loadedEntries, loadingKeys, skeleton, componentTreeState, registrationTreeState, linkedTreeState, guid, fetchFiles, setExpanded, retryNonce]);
 
   const toggleSelected = useCallback((payload: TreeSelectionPayload, checked: boolean) => {
     const key = selectionKey(payload);
@@ -541,7 +611,10 @@ export function UnifiedTree({
                   sourceKind,
                 }
               : undefined,
-            loading: !!loadingKeys[`${nodeGuid}|${provider.provider}:/`],
+            loading: !!loadingKeys[folderKey(nodeGuid, provider.provider, "/")],
+            failed: !!folderFailures[folderKey(nodeGuid, provider.provider, "/")],
+            failedMessage: folderFailures[folderKey(nodeGuid, provider.provider, "/")],
+            retry: { guid: nodeGuid, provider: provider.provider, path: "/", listingUrl: provider.listingUrl },
           },
         });
 
@@ -596,6 +669,9 @@ export function UnifiedTree({
                   }
                 : undefined,
               loading: !!loadingKeys[fileKey],
+              failed: !!folderFailures[fileKey],
+              failedMessage: folderFailures[fileKey],
+              retry: { guid: nodeGuid, provider: folder.provider, path: folder.materializedPath, listingUrl: folder.listingUrl },
             },
           });
           if (expanded[id]) {
@@ -722,7 +798,7 @@ export function UnifiedTree({
     });
 
     if (expanded["providers-root"]) {
-      emitNodeSubtree(guid, skeleton, "root", 1, true, "project", rootTitle);
+      emitNodeSubtree(guid, skeleton, "root", 1, !readOnly, "project", rootTitle);
     }
 
     // Components root
@@ -907,7 +983,7 @@ export function UnifiedTree({
     }
 
     return rows;
-  }, [expanded, loadedEntries, loadingKeys, skeleton, components, componentTreeState, linkedNodes, linkedTreeState, registrations, registrationTreeState, pinned, rootTitle, guid, fetchFiles, setExpanded, queueHydrationTask, hydrationFailures, runningHydrationId]);
+  }, [expanded, loadedEntries, loadingKeys, folderFailures, readOnly, skeleton, components, componentTreeState, linkedNodes, linkedTreeState, registrations, registrationTreeState, pinned, rootTitle, guid, fetchFiles, setExpanded, queueHydrationTask, hydrationFailures, runningHydrationId]);
 
   const uploadTargets = useMemo(() => {
     const seen = new Set<string>();
@@ -1005,11 +1081,16 @@ export function UnifiedTree({
   }, [skeleton, componentTreeState, registrationTreeState, linkedTreeState]);
 
   const expandAll = () => {
+    // Re-enable progressive auto-load so dynamically-discovered subfolders keep
+    // expanding too (allExpandableIds only covers the static skeleton).
+    autoExpandEnabledRef.current = true;
     const next: Record<string, boolean> = {};
     for (const id of allExpandableIds) next[id] = true;
     setExpanded(next);
   };
   const collapseAll = () => {
+    // User explicitly collapsed — stop auto-expanding folders for this session.
+    autoExpandEnabledRef.current = false;
     setExpanded({});
   };
   const selectedCount = Object.keys(selected).length;
@@ -1029,6 +1110,23 @@ export function UnifiedTree({
       : "Loading remaining project folders..."
     : "Folder index complete.";
 
+  // Root-tree folder load status (distinct from the component/registration
+  // sub-tree hydration widget above).
+  const loadingFolderCount = Object.keys(loadingKeys).length;
+  const failedFolderCount = Object.keys(folderFailures).length;
+  const folderStatus =
+    failedFolderCount > 0
+      ? `Couldn't load ${failedFolderCount} folder${failedFolderCount === 1 ? "" : "s"} — retry below.`
+      : loadingFolderCount > 0
+      ? `Loading folders… (${loadingFolderCount} in progress)`
+      : autoLoadCapped
+      ? "Large tree — deeper folders load when you open them."
+      : null;
+  const retryAllFolders = () => {
+    setFolderFailures({});
+    setRetryNonce((n) => n + 1);
+  };
+
   return (
     <div className="h-full flex flex-col">
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-white px-2 py-1 text-xs dark:border-neutral-800 dark:bg-neutral-950">
@@ -1044,13 +1142,15 @@ export function UnifiedTree({
         >
           {selectMode ? "Done" : "Select"}
         </button>
-        <button
-          type="button"
-          onClick={() => openUploadDialog()}
-          className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 font-medium text-blue-800 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200 dark:hover:bg-blue-900"
-        >
-          Upload files
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() => openUploadDialog()}
+            className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 font-medium text-blue-800 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200 dark:hover:bg-blue-900"
+          >
+            Upload files
+          </button>
+        )}
         {selectMode && (
           <>
             <span className="text-neutral-500">{selectedCount} selected</span>
@@ -1068,6 +1168,29 @@ export function UnifiedTree({
           </>
         )}
       </div>
+      {folderStatus && (
+        <div
+          className={`flex items-center gap-2 border-b px-2 py-1 text-xs ${
+            failedFolderCount > 0
+              ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+              : "border-neutral-200 bg-neutral-50 text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400"
+          }`}
+        >
+          {failedFolderCount === 0 && loadingFolderCount > 0 && (
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" aria-hidden="true" />
+          )}
+          <span className="truncate">{folderStatus}</span>
+          {failedFolderCount > 0 && (
+            <button
+              type="button"
+              onClick={retryAllFolders}
+              className="ml-auto shrink-0 rounded border border-red-300 px-1.5 py-0.5 font-medium hover:bg-red-100 dark:border-red-800 dark:hover:bg-red-900"
+            >
+              ⟳ Retry all
+            </button>
+          )}
+        </div>
+      )}
       <div ref={parentRef} role="tree" className="flex-1 overflow-auto">
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {virtualizer.getVirtualItems().map((vi) => {
@@ -1088,6 +1211,20 @@ export function UnifiedTree({
                   selected={row.node.selection ? !!selected[selectionKey(row.node.selection)] : false}
                   onSelect={toggleSelected}
                   onUpload={openUploadDialog}
+                  onRetry={
+                    row.node.retry
+                      ? () => {
+                          const r = row.node.retry!;
+                          // Clear cached failure + entries so fetchFiles re-runs.
+                          setFolderFailures((prev) => {
+                            const next = { ...prev };
+                            delete next[folderKey(r.guid, r.provider, r.path)];
+                            return next;
+                          });
+                          void fetchFiles(r.guid, r.provider, r.path, r.listingUrl);
+                        }
+                      : undefined
+                  }
                 />
               </div>
             );

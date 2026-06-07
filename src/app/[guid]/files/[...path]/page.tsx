@@ -141,6 +141,7 @@ export default async function DeepFilesPage({
             registrations={registrations}
             registrationTrees={fullTree.registrationTrees}
             linkedTrees={fullTree.linkedTrees}
+            readOnly={kind === "registration"}
           />
         }
         right={
