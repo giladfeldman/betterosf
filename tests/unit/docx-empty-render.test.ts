@@ -43,4 +43,20 @@ describe("renderProducedContent (DOCX empty-render detection)", () => {
   it("returns false when articles exist but are all whitespace-only", () => {
     expect(renderProducedContent(container("<section><article>   \n  </article></section>"))).toBe(false);
   });
+
+  // Regression (2026-06-07): the original detector keyed on <article> elements,
+  // but docx-preview's real output renders paragraphs directly in a <section>
+  // (no <article>), so EVERY valid docx was false-positived as "empty" and
+  // blanked. These lock the wrapper-agnostic detection in.
+  it("returns true for docx-preview real output (paragraphs in a section, no <article>)", () => {
+    expect(renderProducedContent(container('<section class="docx"><p>Real document text.</p></section>'))).toBe(true);
+  });
+
+  it("ignores docx-preview's injected <style> block (CSS is not document content)", () => {
+    expect(renderProducedContent(container('<section class="docx"><style>.docx{color:red}</style></section>'))).toBe(false);
+  });
+
+  it("returns true for a section-level table with no text and no article", () => {
+    expect(renderProducedContent(container('<section><table><tr><td></td></tr></table></section>'))).toBe(true);
+  });
 });

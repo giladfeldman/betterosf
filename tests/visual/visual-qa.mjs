@@ -363,8 +363,13 @@ async function main() {
     {
       kind: "docx",
       url: `/${HEAVY_GUID}/files/view/osfstorage/PCIRR%20Stage%201/Materials/Newman_et_al_2011_RE_Studies_12.docx`,
-      // docx-preview renders into .docx-render
-      success: ".docx-render, article",
+      // docx-preview renders valid files into .docx-render. THIS fixture is a
+      // malformed multi-body export (485 <w:body> elements — Qualtrics-style),
+      // which docx-preview renders blank; the viewer correctly shows the honest
+      // "Couldn't preview — malformed file" fallback instead of a silent gray
+      // box (see DocxViewer.renderProducedContent + docx-empty-render.test.ts).
+      // PASS = rendered content OR the fallback heading; never a silent blank.
+      success: '.docx-render, article, h2:has-text("preview this document")',
     },
     {
       kind: "pptx",

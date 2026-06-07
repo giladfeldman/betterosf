@@ -2,23 +2,28 @@
 
 import { useEffect, useRef, useState } from "react";
 
-// docx-preview renders each page as a <section> whose document content lives
-// in <article> children. A structurally valid file always yields at least one
-// article with element children (every paragraph/table/image becomes one). An
-// EMPTY render — zero content across all articles — means docx-preview parsed
-// the file but produced nothing. The usual culprit is a malformed .docx with
-// multiple <w:body> elements (survey-tool exports like Qualtrics concatenate
-// many document bodies; the spec allows exactly one). docx-preview reads only
-// the first <w:body>, which is often empty, and resolves WITHOUT throwing — so
-// we must detect the blank result ourselves rather than trust renderAsync.
+// A structurally valid .docx renders into the container as real content —
+// paragraphs/headings/tables/images carrying text or media. An EMPTY render —
+// no text and no media anywhere — means docx-preview parsed the file but
+// produced nothing. The usual culprit is a malformed .docx with multiple
+// <w:body> elements (survey-tool exports like Qualtrics concatenate many
+// document bodies; the spec allows exactly one). docx-preview reads only the
+// first <w:body>, which is often empty, and resolves WITHOUT throwing — so we
+// must detect the blank result ourselves rather than trust renderAsync.
 // See KNOWN_ISSUES.md and the research note: no docx-preview option repairs
 // this; only Microsoft Word silently merges the bodies on open.
+//
+// IMPORTANT: do NOT key this on a specific wrapper element (e.g. <article>).
+// docx-preview's output structure varies by version and document, and an
+// element-name assumption silently false-positives — blanking valid files
+// (regression caught by visual-qa 2026-06-07, fixed here). Detect content by
+// the presence of media OR non-whitespace text, ignoring the <style> block
+// docx-preview injects (its CSS text is not document content).
 export function renderProducedContent(container: HTMLElement): boolean {
-  const articles = container.querySelectorAll("article");
-  if (articles.length === 0) return false;
-  return Array.from(articles).some(
-    (a) => a.children.length > 0 || a.textContent!.trim().length > 0,
-  );
+  if (container.querySelector("img, table, svg")) return true;
+  const clone = container.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll("style, script").forEach((n) => n.remove());
+  return (clone.textContent ?? "").trim().length > 0;
 }
 
 export function DocxViewer({ url }: { url: string }) {
