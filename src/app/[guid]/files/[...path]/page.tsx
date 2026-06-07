@@ -1,19 +1,14 @@
 import { notFound } from "next/navigation";
 import { isValidGuid } from "@/lib/osf/guid";
-import { getProviderRoots, getFolderContents, type FileEntry } from "@/lib/osf/files";
-import { getNode, getAllLinkedNodes } from "@/lib/osf/nodes";
-import { getNodeRegistrations, type RegistrationView } from "@/lib/osf/registrations";
-import { collectFullTree, type FullProjectTree } from "@/lib/osf/full-tree";
+import { getFolderContents, type FileEntry } from "@/lib/osf/files";
+import { collectResourceTree } from "@/lib/osf/resource-tree";
 import { OsfError } from "@/lib/osf/types";
-import type { NodeView } from "@/lib/osf/parse";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { UnifiedTree } from "@/components/UnifiedTree";
 import { SplitPane } from "@/components/SplitPane";
 import { FileMissing } from "@/components/FileMissing";
 import { RecordView } from "@/components/RecordView";
 import { UploadFilesButton } from "@/components/UploadFilesButton";
-
-const EMPTY_TREE: FullProjectTree = { rootSkeleton: [], components: [], totalComponents: 0, registrationTrees: [], totalRegistrations: 0, linkedTrees: [], totalLinked: 0 };
 
 function safeDecode(s: string): string {
   try {
@@ -49,42 +44,24 @@ export default async function DeepFilesPage({
 
   const [provider, ...folderSegments] = path;
 
-  // Critical-path: project + providers. Side data (tree/linked/regs) for the
-  // navigation pane is best-effort.
-  let providers, node;
+  // The guid may be a node OR a registration. collectResourceTree resolves
+  // either and returns the same shape; provider roots come from the resolved
+  // tree's rootSkeleton, so no second kind-detection round-trip is needed.
+  let resource;
   try {
-    [providers, node] = await Promise.all([
-      getProviderRoots(guid),
-      getNode(guid),
-    ]);
+    resource = await collectResourceTree(guid);
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") notFound();
     throw e;
   }
-
-  const [fullTree, linked, registrations]: [FullProjectTree, NodeView[], RegistrationView[]] = await Promise.all([
-    collectFullTree(guid, {
-      maxComponentsToRecurse: 3,
-      maxRegistrationsToRecurse: 1,
-      maxLinkedToRecurse: 1,
-      componentTimeoutMs: 5_000,
-      rootTimeoutMs: 10_000,
-    }).catch((): FullProjectTree => EMPTY_TREE),
-    getAllLinkedNodes(guid).catch((): NodeView[] => []),
-    getNodeRegistrations(guid).catch((): RegistrationView[] => []),
-  ]);
-
-  const components = fullTree.components.map((c) => ({
-    id: c.guid,
-    title: c.title,
-    description: "",
-    category: c.category,
-    public: c.isPublic,
-    tags: [] as string[],
-    dateCreated: "",
-    dateModified: "",
-    osfUrl: `https://osf.io/${c.guid}/`,
-    related: { children: "", linkedNodes: "", registrations: "", files: "", contributors: "" },
+  const { kind, title, fullTree, linked, registrations, components } = resource;
+  const node = { title };
+  const providers = fullTree.rootSkeleton.map((p) => ({
+    provider: p.provider,
+    name: p.name,
+    listingUrl: p.listingUrl,
+    uploadUrl: p.uploadUrl,
+    newFolderUrl: p.newFolderUrl,
   }));
 
   const attemptedPath = `/${guid}/${provider}${folderSegments.length ? "/" + folderSegments.join("/") : ""}`;
@@ -122,7 +99,7 @@ export default async function DeepFilesPage({
   const zipHref = `/api/zip/${guid}/${provider}${folderSegments.length ? "/" + folderSegments.join("/") : ""}`;
   const folderTitle = folderSegments[folderSegments.length - 1] ?? provider ?? guid;
   const folderId = `${guid}/${provider}${folderSegments.length ? "/" + folderSegments.join("/") : ""}`;
-  const uploadTarget = w.kind === "ok" && provider === "osfstorage"
+  const uploadTarget = w.kind === "ok" && provider === "osfstorage" && kind === "node"
     ? {
         guid,
         provider,

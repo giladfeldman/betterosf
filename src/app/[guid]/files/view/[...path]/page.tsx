@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { isValidGuid } from "@/lib/osf/guid";
 import { getProviderRootsAuto, getFolderContents, type FileEntry, type ProviderRoot } from "@/lib/osf/files";
+import { collectFolderSkeleton } from "@/lib/osf/folder-skeleton";
 import { getNode, getAllLinkedNodes } from "@/lib/osf/nodes";
 import { getNodeRegistrations, getRegistration, type RegistrationView } from "@/lib/osf/registrations";
 import { collectFullTree, type FullProjectTree } from "@/lib/osf/full-tree";
@@ -85,7 +86,9 @@ export default async function FileViewerPage({
   const [titleStr, fullTree, linked, registrations]: [string, FullProjectTree, NodeView[], RegistrationView[]] = await Promise.all([
     titlePromise,
     resourceKind === "registration"
-      ? Promise.resolve<FullProjectTree>(EMPTY_TREE)
+      ? collectFolderSkeleton(guid, { kind: "registration" })
+          .then((rootSkeleton): FullProjectTree => ({ ...EMPTY_TREE, rootSkeleton }))
+          .catch((): FullProjectTree => EMPTY_TREE)
       : collectFullTree(guid, {
           maxComponentsToRecurse: 3,
           maxRegistrationsToRecurse: 1,

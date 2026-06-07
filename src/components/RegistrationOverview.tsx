@@ -1,15 +1,24 @@
 import { notFound } from "next/navigation";
 import { getRegistration } from "@/lib/osf/registrations";
+import { collectFolderSkeleton } from "@/lib/osf/folder-skeleton";
+import type { SkeletonNode } from "@/lib/osf/folder-skeleton";
 import { OsfError } from "@/lib/osf/types";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { PinButton } from "@/components/PinButton";
 import { RecordView } from "@/components/RecordView";
+import { SplitPane } from "@/components/SplitPane";
+import { UnifiedTree } from "@/components/UnifiedTree";
 import { renderValue } from "@/lib/registrations/render-value";
 
 /**
  * Renders an OSF registration. Used by BOTH the canonical `/registrations/<guid>`
  * route and the flat `/<guid>` dispatcher (a registration's canonical OSF URL is
  * `osf.io/<guid>`, with no `/registrations/` prefix), so the two stay in sync.
+ *
+ * Layout mirrors the project overview: a UnifiedTree file/folder navigator on
+ * the left (a registration's files load via the registration files API; the
+ * skeleton's listing URLs are absolute so folder hydration works unchanged) and
+ * the registration metadata + schema responses on the right.
  */
 export async function RegistrationOverview({ guid }: { guid: string }) {
   let reg;
@@ -20,17 +29,16 @@ export async function RegistrationOverview({ guid }: { guid: string }) {
     throw e;
   }
 
+  // File skeleton for the left navigator. Best-effort: a registration with no
+  // public files (or a transient OSF hiccup) still renders the metadata.
+  const skeleton: SkeletonNode[] = await collectFolderSkeleton(guid, { kind: "registration" }).catch(
+    (): SkeletonNode[] => []
+  );
+
   const responseKeys = Object.keys(reg.responses);
 
-  return (
-    <article className="max-w-4xl">
-      <Breadcrumb
-        crumbs={[
-          { label: "Home", href: "/" },
-          { label: "Registrations", href: "/search?type=registrations&q=" },
-          { label: reg.title || guid, href: `/${guid}` },
-        ]}
-      />
+  const right = (
+    <article className="max-w-4xl px-4 py-4 sm:px-6">
       <header className="mb-6 flex items-start justify-between gap-3">
         <div>
           <h1 className="text-3xl font-semibold">{reg.title}</h1>
@@ -94,5 +102,35 @@ export async function RegistrationOverview({ guid }: { guid: string }) {
         )}
       </section>
     </article>
+  );
+
+  return (
+    <div>
+      <Breadcrumb
+        crumbs={[
+          { label: "Home", href: "/" },
+          { label: "Registrations", href: "/search?type=registrations&q=" },
+          { label: reg.title || guid, href: `/${guid}` },
+        ]}
+      />
+      <SplitPane
+        prefKey="overview"
+        defaultLeftWidth={360}
+        left={
+          <UnifiedTree
+            guid={guid}
+            rootTitle={reg.title || guid}
+            skeleton={skeleton}
+            components={[]}
+            componentTrees={[]}
+            linkedNodes={[]}
+            registrations={[]}
+            registrationTrees={[]}
+            linkedTrees={[]}
+          />
+        }
+        right={right}
+      />
+    </div>
   );
 }

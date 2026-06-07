@@ -233,6 +233,27 @@ async function main() {
     }
   }
 
+  // --- 2.6) Registrations are first-class: the overview shows the file/folder
+  //     tree navigator (like project pages), and /<reg>/files resolves
+  //     (regression: it used to show "Project not found"). ---
+  console.log("\n--- Registration files + tree navigator ---");
+  {
+    const REG = "P9QB4";
+    await page.goto(`${BASE}/${REG}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    const overviewTrees = await page.locator('[role="tree"]').count();
+    record("registration overview shows file tree navigator", overviewTrees > 0, `trees=${overviewTrees}`);
+
+    const fresp = await page.goto(`${BASE}/${REG}/files`, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => null);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    const fstatus = String(fresp?.status() ?? "no-resp");
+    const fNotFound = await visibleProjectNotFound();
+    record("registration /<guid>/files resolves (not 'Project not found')", fstatus === "200" && !fNotFound, `status=${fstatus} notFound=${fNotFound}`);
+    const filesTrees = await page.locator('[role="tree"]').count();
+    record("registration files page shows tree navigator", filesTrees > 0, `trees=${filesTrees}`);
+    await page.screenshot({ path: `${OUT}/G2b-registration-files.png`, fullPage: true });
+  }
+
   // --- 3) Click a file in the tree → preview shows in right pane ---
   console.log("\n--- File-click-from-tree → right-pane preview ---");
   await page.goto(`${BASE}/${MANY_LABS_GUID}/files`, { waitUntil: "domcontentloaded" });
