@@ -1,8 +1,15 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { isValidGuid } from "@/lib/osf/guid";
+import { resolveGuidType } from "@/lib/osf/resolve";
 import { getNode, getAllLinkedNodes } from "@/lib/osf/nodes";
-import { getNodeRegistrations } from "@/lib/osf/registrations";
+import { getNodeRegistrations, getRegistration } from "@/lib/osf/registrations";
+import { getPreprint } from "@/lib/osf/preprints";
+import { getUser } from "@/lib/osf/users";
+import { RegistrationOverview } from "@/components/RegistrationOverview";
+import { PreprintOverview } from "@/components/PreprintOverview";
+import { UserProfile } from "@/components/UserProfile";
+import { UnsupportedGuid } from "@/components/UnsupportedGuid";
 import { collectFullTree } from "@/lib/osf/full-tree";
 import { OsfError } from "@/lib/osf/types";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -107,7 +114,51 @@ export async function generateMetadata({
       },
     };
   } catch {
+    // Not a node — resolve the real type for a correct title (best-effort).
+    try {
+      const r = await resolveGuidType(guid);
+      if (r.kind === "registration") return { title: `${(await getRegistration(guid)).title} — BetterOSF` };
+      if (r.kind === "preprint") return { title: `${(await getPreprint(guid)).title} — BetterOSF` };
+      if (r.kind === "user") return { title: `${(await getUser(guid)).fullName} — BetterOSF` };
+    } catch {
+      /* fall through */
+    }
     return { title: "BetterOSF" };
+  }
+}
+
+/**
+ * `/<guid>` mirrors OSF's flat guid namespace: a guid can be a node, a
+ * registration, a preprint, a user, or a file. The node path stays the fast
+ * one-request common case; only when the node lookup 404s do we resolve the
+ * real type and render the right view (or redirect a file to the viewer).
+ */
+async function renderNonNode(
+  guid: string,
+  sp: Record<string, string | string[] | undefined>,
+) {
+  let resolved;
+  try {
+    resolved = await resolveGuidType(guid);
+  } catch (e) {
+    if (e instanceof OsfError && e.code === "not_found") notFound();
+    throw e;
+  }
+  switch (resolved.kind) {
+    case "registration":
+      return <RegistrationOverview guid={guid} />;
+    case "preprint":
+      return <PreprintOverview guid={guid} />;
+    case "user":
+      return <UserProfile guid={guid} basePath={`/${guid}`} searchParams={sp} />;
+    case "file":
+      if (resolved.file) {
+        const segs = resolved.file.path.split("/").map(encodeURIComponent).join("/");
+        redirect(`/${resolved.file.resourceId}/files/view/${encodeURIComponent(resolved.file.provider)}/${segs}`);
+      }
+      return <UnsupportedGuid guid={guid} kind="file" />;
+    default:
+      return <UnsupportedGuid guid={guid} kind={resolved.kind === "unknown" ? undefined : resolved.kind} />;
   }
 }
 
@@ -128,7 +179,9 @@ export default async function ProjectPage({
   try {
     node = await getNode(guid);
   } catch (e) {
-    if (e instanceof OsfError && e.code === "not_found") notFound();
+    // Not a project. OSF guids are a flat namespace — dispatch to the real type
+    // (registration/preprint/user/file) instead of a dead-end "not found".
+    if (e instanceof OsfError && e.code === "not_found") return await renderNonNode(guid, sp);
     throw e;
   }
   const [fullTree, linked, regs]: [

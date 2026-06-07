@@ -9,16 +9,40 @@ export type UserView = {
   id: string;
   fullName: string;
   osfUrl: string;
+  employment?: string;
 };
 
 type RawUser = {
   data: {
     id: string;
     type: string;
-    attributes: { full_name?: string; given_name?: string; family_name?: string };
+    attributes: {
+      full_name?: string;
+      given_name?: string;
+      family_name?: string;
+      employment?: Array<{ institution?: string; department?: string; title?: string }>;
+    };
     links?: { html?: string };
   };
 };
+
+/** Fetch any OSF user by guid (used by the /<guid> dispatcher + /users/<guid>). */
+export async function getUser(guid: string): Promise<UserView> {
+  const raw = await osfGet<RawUser>(`/users/${guid}/`, { tags: [`user:${guid}`], revalidate: 300 });
+  const a = raw.data.attributes;
+  const joined = [a.given_name, a.family_name].filter(Boolean).join(" ");
+  const fullName = a.full_name ?? (joined.length > 0 ? joined : raw.data.id);
+  const job = Array.isArray(a.employment) ? a.employment[0] : undefined;
+  const employment = job
+    ? [job.title, job.department, job.institution].filter(Boolean).join(", ")
+    : undefined;
+  return {
+    id: raw.data.id,
+    fullName,
+    osfUrl: raw.data.links?.html ?? `https://osf.io/${raw.data.id}/`,
+    employment: employment || undefined,
+  };
+}
 
 export async function getCurrentUser(): Promise<UserView> {
   const raw = await osfGet<RawUser>("/users/me/", { tags: ["users:me"], revalidate: 60 });
@@ -84,6 +108,19 @@ export async function searchUserNodes(
   }
 
   return { results: merged.slice(0, size), total, hasMore };
+}
+
+/** First page (up to 100) of a user's PUBLIC projects, with the total count.
+ *  Bounded to one request so a prolific user's profile doesn't fan out. */
+export async function getUserNodes(userId: string): Promise<{ results: NodeView[]; total: number }> {
+  const raw = await osfGet<NodeCollectionResponse & { meta?: { total?: number } }>(
+    `/users/${userId}/nodes/?page[size]=100`,
+    { tags: [`user:${userId}`], revalidate: 300 },
+  );
+  return {
+    results: raw.data.map((r) => parseNode({ data: r })),
+    total: raw.meta?.total ?? raw.data.length,
+  };
 }
 
 export async function getMyProjects(): Promise<NodeView[]> {

@@ -38,6 +38,15 @@ export async function getNodeRegistrations(guid: string): Promise<RegistrationVi
   });
 }
 
+/** First page (up to 100) of a user's PUBLIC registrations, with total count. */
+export async function getUserRegistrations(userId: string): Promise<{ results: RegistrationView[]; total: number }> {
+  const raw = await osfGet<CollectionResponse & { meta?: { total?: number } }>(
+    `/users/${userId}/registrations/?page[size]=100`,
+    { tags: [`user:${userId}`], revalidate: 300 },
+  );
+  return { results: raw.data.map(parse), total: raw.meta?.total ?? raw.data.length };
+}
+
 export type RegistrationDetailView = RegistrationView & {
   description: string;
   responses: Record<string, string | string[] | number | boolean | null>;

@@ -32,4 +32,22 @@ describe("parseOsfUrl", () => {
     expect(parseOsfUrl("https://example.com/foo")).toBe(null);
     expect(parseOsfUrl("not a url")).toBe(null);
   });
+  it("extracts the registration guid from a canonical bare URL", () => {
+    expect(parseOsfUrl("https://osf.io/p9qb4/")).toBe("p9qb4");
+  });
+  it("extracts the preprint guid from a provider-prefixed URL", () => {
+    expect(parseOsfUrl("https://osf.io/preprints/psyarxiv/g7w6u/")).toBe("g7w6u");
+    expect(parseOsfUrl("https://osf.io/preprints/g7w6u")).toBe("g7w6u");
+  });
+  it("extracts the guid from deep file/wiki URLs", () => {
+    expect(parseOsfUrl("https://osf.io/ezcuj/files/osfstorage/data.csv")).toBe("ezcuj");
+    expect(parseOsfUrl("https://osf.io/ezcuj/wiki/home/")).toBe("ezcuj");
+  });
+  it("accepts protocol-less and subdomain osf.io URLs", () => {
+    expect(parseOsfUrl("osf.io/ezcuj")).toBe("ezcuj");
+    expect(parseOsfUrl("www.osf.io/ezcuj/")).toBe("ezcuj");
+  });
+  it("skips known section prefixes that look guid-shaped", () => {
+    expect(parseOsfUrl("https://osf.io/registries/abc12")).toBe("abc12");
+  });
 });

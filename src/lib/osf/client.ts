@@ -107,15 +107,55 @@ export async function osfGetUrl<T = unknown>(
     headers: HeadersInit,
     opts: { sharedCache: boolean }
   ): Promise<{ ok: true; value: T } | { ok: false; res: Response; body: string }> {
-    const res = await fetch(url, {
-      headers,
-      ...(opts.sharedCache ? { next } : { cache: "no-store" as const }),
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      return { ok: false, res, body };
+    // OSF's API intermittently returns transient 502/503/504s and drops
+    // connections (network errors), especially during its recovery windows.
+    // A page that fans out several OSF calls (e.g. the guid dispatcher:
+    // node-probe → guid-resolve → typed fetch) is statistically likely to hit
+    // one of these and 500 the whole page. Retry transient failures a couple
+    // of times with short backoff so a single upstream hiccup is absorbed.
+    // We do NOT retry 429 (handled by the app-token fallback) or any 4xx.
+    const TRANSIENT = new Set([502, 503, 504]);
+    const MAX_ATTEMPTS = 3;
+    // Backoff base. Zero under test so retries stay instant (tests that mock
+    // failures/unmatched handlers must not pay real wall-clock backoff).
+    const BACKOFF_MS = process.env.VITEST ? 0 : 150;
+    const sleep = (ms: number) =>
+      ms <= 0 ? Promise.resolve() : new Promise<void>((r) => setTimeout(r, ms));
+    // Per-attempt timeout so a hung OSF connection fails fast and retries
+    // instead of blocking the whole page render. Zero/disabled under test.
+    const ATTEMPT_TIMEOUT_MS = process.env.VITEST ? 0 : 12_000;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const ac = ATTEMPT_TIMEOUT_MS > 0 ? new AbortController() : null;
+      const timer = ac ? setTimeout(() => ac.abort(), ATTEMPT_TIMEOUT_MS) : null;
+      try {
+        const res = await fetch(url, {
+          headers,
+          ...(ac ? { signal: ac.signal } : {}),
+          ...(opts.sharedCache ? { next } : { cache: "no-store" as const }),
+        });
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          if (TRANSIENT.has(res.status) && attempt < MAX_ATTEMPTS) {
+            await sleep(BACKOFF_MS * attempt);
+            continue;
+          }
+          return { ok: false, res, body };
+        }
+        return { ok: true, value: (await res.json()) as T };
+      } catch (e) {
+        // Network-level failure (reset/DNS/abort-timeout). Retry, else rethrow.
+        lastError = e;
+        if (attempt < MAX_ATTEMPTS) {
+          await sleep(BACKOFF_MS * attempt);
+          continue;
+        }
+        throw e;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     }
-    return { ok: true, value: (await res.json()) as T };
+    throw lastError; // unreachable; satisfies the type checker
   }
 
   const work = (async (): Promise<T> => {

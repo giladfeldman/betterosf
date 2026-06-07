@@ -50,6 +50,18 @@ const MANY_LABS_GUID = "8cd4r";      // Many Labs 2 — components + registratio
 const REG_PARENT_GUID = "3kmr9";     // 3kmr9 has registration ujyh9 — used for registration-expand test
 const PPTX_GUID = "qyzha";           // Public project with a small OSF Storage PPTX fixture
 
+// One representative REAL guid per OSF object type. The flat /<guid> route must
+// resolve ALL of these — the regression that shipped P9QB4 ("Project not found"
+// for a registration) is exactly what this guards. If OSF removes any fixture,
+// swap in another public one of the same type.
+const GUID_TYPES = [
+  { name: "G1-node", guid: MANY_LABS_GUID, kind: "node" },
+  { name: "G2-registration", guid: "P9QB4", kind: "registration" },   // the reported bug
+  { name: "G3-preprint", guid: "g7w6u", kind: "preprint" },
+  { name: "G4-user", guid: "m4kfe", kind: "user" },
+  { name: "G5-file-redirect", guid: "iuky6", kind: "file" },          // → /8cd4r/files/view/osfstorage/ML2_-_Protocol.pdf
+];
+
 const checks = [];
 function record(name, ok, detail = "") {
   checks.push({ name, ok, detail });
@@ -81,6 +93,7 @@ const PAGES = [
   { name: "16-about", url: "/about" },
   { name: "17-privacy", url: "/privacy" },
   { name: "18-404", url: "/notarealroute/files" },
+  ...GUID_TYPES.map((g) => ({ name: `19-guidtype-${g.kind}`, url: `/${g.guid}` })),
 ];
 
 async function main() {
@@ -191,6 +204,33 @@ async function main() {
   async function visibleFileMissing() {
     const heading = page.getByRole("heading", { name: /^(Storage provider not found|Folder not found|File not found|OSF didn't return this file)$/i });
     return (await heading.count()) > 0 && (await heading.first().isVisible());
+  }
+
+  // --- 2.5) GUID type coverage: /<guid> must resolve EVERY OSF object type ---
+  // OSF uses one flat guid namespace; the flat route must dispatch nodes,
+  // registrations, preprints, users, and files. This is the gate that the
+  // "Project not found" P9QB4 regression would have tripped.
+  console.log("\n--- GUID type coverage (/<guid> dispatches all OSF types) ---");
+  for (const g of GUID_TYPES) {
+    try {
+      const resp = await page.goto(`${BASE}/${g.guid}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+      const status = String(resp?.status() ?? "no-resp");
+      const notFound = await visibleProjectNotFound();
+      const fileMissing = await visibleFileMissing();
+      const finalUrl = page.url();
+      // A file guid must REDIRECT into the file viewer; the rest stay at /<guid>.
+      const redirectedOk = g.kind !== "file" || /\/files\/view\//.test(finalUrl);
+      const ok = status === "200" && !notFound && !fileMissing && redirectedOk;
+      record(
+        `${g.name}: /${g.guid} resolves (${g.kind})`,
+        ok,
+        ok ? finalUrl.replace(BASE, "") : `status=${status} notFound=${notFound} fileMissing=${fileMissing} url=${finalUrl.replace(BASE, "")}`,
+      );
+      await page.screenshot({ path: `${OUT}/${g.name}.png`, fullPage: true });
+    } catch (e) {
+      record(`${g.name}: /${g.guid} resolves (${g.kind})`, false, e instanceof Error ? e.message.slice(0, 120) : String(e));
+    }
   }
 
   // --- 3) Click a file in the tree → preview shows in right pane ---

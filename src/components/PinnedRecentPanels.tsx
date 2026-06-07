@@ -33,7 +33,7 @@ function tabKinds(tab: Tab): FavoriteKind[] {
   if (tab === "files") return ["file"];
   if (tab === "folders") return ["folder"];
   if (tab === "registrations") return ["registration"];
-  return ["project", "component", "file", "folder", "registration"];
+  return ["project", "component", "file", "folder", "registration", "preprint", "user"];
 }
 
 function itemList(items: FavoriteRef[], emptyMsg: string) {
