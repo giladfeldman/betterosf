@@ -108,10 +108,17 @@ export async function getProviderRootsAuto(guid: string): Promise<{ roots: Provi
   }
 }
 
-export async function getFolderContents(listingUrl: string, guidForCacheTag: string): Promise<FileEntry[]> {
+export async function getFolderContents(
+  listingUrl: string,
+  guidForCacheTag: string,
+  opts: { fresh?: boolean } = {}
+): Promise<FileEntry[]> {
   return collectAll<FileEntry>(async (nextUrl) => {
     const url = nextUrl ?? `${listingUrl}${listingUrl.includes("?") ? "&" : "?"}page[size]=100`;
-    const raw = await osfGetUrl<CollectionResponse>(url, { tags: [`node:${guidForCacheTag}`] });
+    const raw = await osfGetUrl<CollectionResponse>(url, {
+      tags: [`node:${guidForCacheTag}`],
+      ...(opts.fresh ? { revalidate: 0 } : {}),
+    });
     return { data: raw.data.map(parseEntry), links: raw.links };
   });
 }

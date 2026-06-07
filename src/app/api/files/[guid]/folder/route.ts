@@ -15,10 +15,11 @@ export async function GET(
   if (!listingUrl) return new Response("Missing listingUrl", { status: 400 });
   if (!listingUrl.startsWith("https://api.osf.io/v2/")) return new Response("Invalid listingUrl", { status: 400 });
 
+  const fresh = url.searchParams.get("fresh") === "1";
   try {
-    const entries = await getFolderContents(listingUrl, guid);
+    const entries = await getFolderContents(listingUrl, guid, { fresh });
     return Response.json({ entries }, {
-      headers: { "Cache-Control": "private, max-age=60" },
+      headers: { "Cache-Control": fresh ? "private, no-store" : "private, max-age=60" },
     });
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") return new Response("Not found", { status: 404 });
