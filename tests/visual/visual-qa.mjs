@@ -264,6 +264,26 @@ async function main() {
     await page.screenshot({ path: `${OUT}/G2b-registration-files.png`, fullPage: true });
   }
 
+  // --- Regression: a registration with a BROKEN secondary provider (c97pd has an
+  //     osfstorage provider with real PDFs AND a github addon whose listing 404s).
+  //     Before the per-provider fail-soft fix, the github 404 aborted the whole
+  //     skeleton walk and collectResourceTree blanked EVERY file — the user saw an
+  //     empty tree on both /<reg> and /<reg>/files. Guard that osfstorage survives. ---
+  console.log("\n--- Registration with a broken secondary provider (c97pd) ---");
+  {
+    const REG = "c97pd";
+    const fresp = await page.goto(`${BASE}/${REG}/files`, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => null);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    const fstatus = String(fresp?.status() ?? "no-resp");
+    record("c97pd /files resolves (not 'Project not found')", fstatus === "200" && !(await visibleProjectNotFound()), `status=${fstatus}`);
+    // The osfstorage PDFs (ML2_-_Protocol.pdf, ML2_-_The_Effects.pdf) must auto-load
+    // despite the sibling github provider 404ing.
+    await page.waitForTimeout(5000);
+    const leafCount = await page.locator('[role="tree"] a[href*="/files/view/"]').count();
+    record("c97pd tree shows osfstorage files despite a broken sibling provider", leafCount > 0, `fileLeaves=${leafCount}`);
+    await page.screenshot({ path: `${OUT}/G2c-registration-broken-provider.png`, fullPage: true });
+  }
+
   // --- 3) Click a file in the tree → preview shows in right pane ---
   console.log("\n--- File-click-from-tree → right-pane preview ---");
   await page.goto(`${BASE}/${MANY_LABS_GUID}/files`, { waitUntil: "domcontentloaded" });

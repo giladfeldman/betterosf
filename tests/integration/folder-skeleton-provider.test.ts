@@ -72,6 +72,68 @@ describe("collectFolderSkeleton — provider propagation", () => {
     expect(l3.provider).toBe("googledrive");
   });
 
+  it("one provider's listing 404 does not blank the whole skeleton (regression: c97pd github addon 404)", async () => {
+    // Real-world repro: registration c97pd exposes an osfstorage provider with
+    // two PDFs AND a github provider whose listing 404s (deauthorized/empty
+    // addon). Before the fix, the github 404 threw out of the provider loop and
+    // collectResourceTree's `.catch(() => [])` blanked the ENTIRE tree, so the
+    // valid osfstorage files vanished too.
+    server.use(
+      http.get("https://api.osf.io/v2/registrations/c97pd/files/", () =>
+        HttpResponse.json({
+          data: [
+            { id: "osfstorage", type: "files", attributes: { name: "osfstorage", provider: "osfstorage", kind: "folder", path: "/" }, relationships: { files: { links: { related: { href: "https://api.osf.io/v2/registrations/c97pd/files/osfstorage/" } } } } },
+            { id: "github", type: "files", attributes: { name: "github", provider: "github", kind: "folder", path: "/" }, relationships: { files: { links: { related: { href: "https://api.osf.io/v2/registrations/c97pd/files/github/" } } } } },
+          ],
+          links: { next: null },
+        })
+      ),
+      http.get("https://api.osf.io/v2/registrations/c97pd/files/osfstorage/", () =>
+        HttpResponse.json({
+          data: [{ id: "P", type: "files", attributes: { name: "ML2_-_Protocol.pdf", kind: "file", size: 659858, materialized_path: "/ML2_-_Protocol.pdf" }, links: { download: "https://x/download" } }],
+          links: { next: null },
+        })
+      ),
+      http.get("https://api.osf.io/v2/registrations/c97pd/files/github/", () =>
+        HttpResponse.json({ errors: [{ detail: "Not found." }] }, { status: 404 })
+      ),
+    );
+
+    const skeleton = await collectFolderSkeleton("c97pd", { kind: "registration" });
+    const os = skeleton.find((s) => s.provider === "osfstorage");
+    expect(os).toBeDefined();
+    expect(os!.fileCount).toBe(1);
+    // The broken github provider must not have aborted the walk.
+    expect(skeleton.some((s) => s.provider === "osfstorage")).toBe(true);
+  });
+
+  it("a deep subfolder listing 404 yields an empty folder, not a lost provider", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/deepfail/files/", () =>
+        HttpResponse.json({
+          data: [{ id: "osfstorage", type: "files", attributes: { name: "osfstorage", provider: "osfstorage", kind: "folder", path: "/" }, relationships: { files: { links: { related: { href: "https://api.osf.io/v2/nodes/deepfail/files/osfstorage/" } } } } }],
+          links: { next: null },
+        })
+      ),
+      http.get("https://api.osf.io/v2/nodes/deepfail/files/osfstorage/", () =>
+        HttpResponse.json({
+          data: [{ id: "Sub", type: "files", attributes: { name: "broken", kind: "folder", materialized_path: "/broken/" }, relationships: { files: { links: { related: { href: "https://api.osf.io/v2/nodes/deepfail/files/osfstorage/Sub/" } } } } }],
+          links: { next: null },
+        })
+      ),
+      http.get("https://api.osf.io/v2/nodes/deepfail/files/osfstorage/Sub/", () =>
+        HttpResponse.json({ errors: [{ detail: "Not found." }] }, { status: 404 })
+      ),
+    );
+
+    const skeleton = await collectFolderSkeleton("deepfail", { maxDepth: 4 });
+    expect(skeleton).toHaveLength(1);
+    expect(skeleton[0]!.provider).toBe("osfstorage");
+    const broken = skeleton[0]!.children.find((c) => c.name === "broken");
+    expect(broken).toBeDefined();
+    expect(broken!.children).toEqual([]);
+  });
+
   it("each provider's subtree carries its own provider name (no leakage between providers)", async () => {
     server.use(
       http.get("https://api.osf.io/v2/nodes/mix/files/", () =>
