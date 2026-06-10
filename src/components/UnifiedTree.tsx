@@ -1237,6 +1237,7 @@ export function UnifiedTree({
                   selected={row.node.selection ? !!selected[selectionKey(row.node.selection)] : false}
                   onSelect={toggleSelected}
                   onUpload={openUploadDialog}
+                  onCreateFolder={refreshUploadTarget}
                   onDropUpload={handleDropUpload}
                   onRetry={
                     row.node.retry
