@@ -94,14 +94,15 @@ export function NewFolderControl({
         type="button"
         onClick={() => void submit()}
         disabled={!name.trim() || creating}
-        className="shrink-0 rounded border border-emerald-300 bg-emerald-50 px-1.5 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+        aria-busy={creating}
+        className="shrink-0 rounded border border-emerald-300 bg-emerald-50 px-1.5 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
       >
         {creating ? "..." : "Create"}
       </button>
       <button
         type="button"
         onClick={reset}
-        className="shrink-0 rounded border border-neutral-300 px-1.5 text-[11px] hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900"
+        className="shrink-0 rounded border border-neutral-300 px-1.5 text-[11px] hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-neutral-500 dark:border-neutral-700 dark:hover:bg-neutral-900"
       >
         Cancel
       </button>
