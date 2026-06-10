@@ -91,6 +91,7 @@ const PAGES = [
   { name: "14-registrations-compare", url: "/registrations/compare?a=m9w53&b=m9w53" },
   { name: "15-me-redirect", url: "/me" },
   { name: "16-about", url: "/about" },
+  { name: "16b-bookmarklet", url: "/bookmarklet" },
   { name: "17-privacy", url: "/privacy" },
   { name: "18-404", url: "/notarealroute/files" },
   ...GUID_TYPES.map((g) => ({ name: `19-guidtype-${g.kind}`, url: `/${g.guid}` })),
@@ -185,6 +186,32 @@ async function main() {
   } else {
     record("theme toggle radio present", false, "Light/Dark radios not found");
   }
+
+  // --- About/Info unification + bookmarklet + tree action group ---
+  console.log("\n--- About/Info unification + bookmarklet + tree action group ---");
+
+  // /information unifies into /about (server redirect).
+  await page.goto(`${BASE}/information`, { waitUntil: "domcontentloaded" });
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  record("/information redirects to /about", new URL(page.url()).pathname === "/about", page.url());
+
+  // /bookmarklet shows the draggable link.
+  await page.goto(`${BASE}/bookmarklet`, { waitUntil: "domcontentloaded" });
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  const draggable = page.getByText(/OSF\s*⇄\s*BetterOSF/i).first();
+  record("/bookmarklet shows draggable link", (await draggable.count()) > 0);
+
+  // Tree row shows Upload + ZIP + New folder WITHOUT hover (glitch regression).
+  await page.goto(`${BASE}/${MANY_LABS_GUID}/files`, { waitUntil: "domcontentloaded" });
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  const uploadBtn = page.getByRole("button", { name: /^Upload to /i }).first();
+  const zipLink = page.getByRole("link", { name: /as ZIP$/i }).first();
+  const folderBtn = page.getByRole("button", { name: /^New folder in /i }).first();
+  const actionsVisible =
+    (await uploadBtn.count()) > 0 && (await uploadBtn.isVisible()) &&
+    (await zipLink.count()) > 0 && (await zipLink.isVisible()) &&
+    (await folderBtn.count()) > 0 && (await folderBtn.isVisible());
+  record("tree row shows Upload + ZIP + New folder without hover", actionsVisible);
 
   // Helper: detect the "Project not found" route-level error VISIBLY, not via
   // bodyText.includes — Next.js embeds the dormant /<guid>/not-found.tsx
