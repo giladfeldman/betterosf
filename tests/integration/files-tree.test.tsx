@@ -10,6 +10,7 @@ vi.mock("@tanstack/react-virtual", () => ({
     getTotalSize: () => opts.count * 28,
     getVirtualItems: () =>
       Array.from({ length: opts.count }).map((_, i) => ({ index: i, start: i * 28, size: 28, key: i })),
+    measureElement: () => {},
   }),
 }));
 

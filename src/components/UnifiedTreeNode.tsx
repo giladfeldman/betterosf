@@ -245,7 +245,7 @@ export function UnifiedTreeNode({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className={`group flex items-center gap-1 py-0.5 px-1 text-sm font-mono-files hover:bg-neutral-100 dark:hover:bg-neutral-800 ${selected ? "bg-blue-50 dark:bg-blue-900/30" : ""} ${isDragOver ? "outline outline-2 outline-blue-500 bg-blue-50 dark:bg-blue-950" : ""}`}
+      className={`group flex min-h-[28px] items-center gap-1 py-0.5 px-1 text-sm font-mono-files hover:bg-neutral-100 dark:hover:bg-neutral-800 ${selected ? "bg-blue-50 dark:bg-blue-900/30" : ""} ${isDragOver ? "outline outline-2 outline-blue-500 bg-blue-50 dark:bg-blue-950" : ""}`}
       style={{ paddingLeft: `${depth * 0.75}rem` }}
     >
       {selectMode && node.selection && (
