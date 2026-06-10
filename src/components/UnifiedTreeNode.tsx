@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode, type DragEvent } from "react";
+import { NewFolderControl } from "./NewFolderControl";
 
 export type TreeNodeKind = "pinned-root" | "provider-root" | "components-root" | "linked-root" | "registrations-root" | "folder" | "file" | "component" | "linked" | "registration";
 
@@ -116,6 +117,7 @@ export function UnifiedTreeNode({
   selectMode = false,
   onSelect,
   onUpload,
+  onCreateFolder,
   onDropUpload,
   onRetry,
 }: {
@@ -128,6 +130,7 @@ export function UnifiedTreeNode({
   selectMode?: boolean;
   onSelect?: (payload: TreeSelectionPayload, checked: boolean) => void;
   onUpload?: (target: TreeUploadTarget) => void;
+  onCreateFolder?: (target: TreeUploadTarget) => void;
   onDropUpload?: (target: TreeUploadTarget, items: DataTransferItem[]) => void;
   onRetry?: () => void;
 }) {
@@ -199,7 +202,7 @@ export function UnifiedTreeNode({
       href={node.href}
       target={node.newTab ? "_blank" : undefined}
       rel={node.newTab ? "noopener" : undefined}
-      className="block truncate hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 rounded"
+      className="block min-w-0 truncate hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 rounded"
       onClick={(e) => {
         e.stopPropagation();
         // Toggle expand on left-click for container-ish nodes — only when the user
@@ -228,7 +231,7 @@ export function UnifiedTreeNode({
             }
           : undefined
       }
-      className={`block truncate ${interceptLeftClick && hasChildren ? "cursor-pointer hover:underline" : ""}`}
+      className={`block min-w-0 truncate ${interceptLeftClick && hasChildren ? "cursor-pointer hover:underline" : ""}`}
     >
       {inner}
     </span>
@@ -278,30 +281,37 @@ export function UnifiedTreeNode({
           ⟳ Retry
         </button>
       )}
-      {node.downloadHref && (
-        <a
-          href={node.downloadHref}
-          aria-label={`Download ${node.label} as ZIP`}
-          title={`Download ${node.label} as ZIP`}
-          onClick={(e) => e.stopPropagation()}
-          className="ml-auto hidden shrink-0 rounded border border-neutral-300 px-1.5 text-[11px] hover:bg-white focus:inline-block focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 group-hover:inline-block dark:border-neutral-700 dark:hover:bg-neutral-900"
-        >
-          ZIP
-        </a>
-      )}
-      {node.uploadTarget && (
-        <button
-          type="button"
-          aria-label={`Upload to ${node.label}`}
-          title={`Upload to ${node.label}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onUpload?.(node.uploadTarget!);
-          }}
-          className="ml-1 shrink-0 rounded border border-blue-300 bg-blue-50 px-1.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900"
-        >
-          Upload
-        </button>
+      {(node.uploadTarget || node.downloadHref) && (
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          {node.uploadTarget && (
+            <NewFolderControl target={node.uploadTarget} onCreated={onCreateFolder} />
+          )}
+          {node.uploadTarget && (
+            <button
+              type="button"
+              aria-label={`Upload to ${node.label}`}
+              title={`Upload to ${node.label}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onUpload?.(node.uploadTarget!);
+              }}
+              className="shrink-0 rounded border border-blue-300 bg-blue-50 px-1.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900"
+            >
+              Upload
+            </button>
+          )}
+          {node.downloadHref && (
+            <a
+              href={node.downloadHref}
+              aria-label={`Download ${node.label} as ZIP`}
+              title={`Download ${node.label} as ZIP`}
+              onClick={(e) => e.stopPropagation()}
+              className="shrink-0 rounded border border-neutral-300 px-1.5 text-[11px] hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 dark:border-neutral-700 dark:hover:bg-neutral-900"
+            >
+              ZIP
+            </a>
+          )}
+        </span>
       )}
     </div>
   );

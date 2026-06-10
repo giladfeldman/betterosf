@@ -30,15 +30,29 @@ export default function AboutPage() {
         <li>Registration detail pages with schema responses</li>
       </ul>
 
-      <h2>Part of Scirenity</h2>
+      <h2>Part of Scirenity — related apps &amp; links</h2>
       <p>
-        Explore the broader platform at{" "}
-        <a href="https://scirenity.com" className="text-blue-600 hover:underline">scirenity.com</a>.
-        Related apps include{" "}
-        <a href="https://scimeto.app" className="text-blue-600 hover:underline">SciMeto</a>{" "}
-        and{" "}
-        <a href="https://escimate.app" className="text-blue-600 hover:underline">ESCI Mate</a>.
+        BetterOSF is part of Scirenity: a family of focused research tools built around speed,
+        transparency, and researcher-friendly workflows.
       </p>
+      <div className="not-prose grid gap-4 sm:grid-cols-2">
+        {[
+          { title: "Scirenity", href: "https://scirenity.com", description: "The broader platform for focused research tools." },
+          { title: "SciMeto", href: "https://scimeto.app", description: "A related Scirenity app for manuscript and research-integrity workflows." },
+          { title: "ESCI Mate", href: "https://escimate.app", description: "A related Scirenity app for effect-size and evidence-synthesis workflows." },
+          { title: "OSF", href: "https://osf.io", description: "The Open Science Framework. BetterOSF displays OSF-hosted data." },
+          { title: "GitHub", href: "https://github.com/giladfeldman/betterosf", description: "Source code, issues, and contribution history." },
+        ].map((link) => (
+          <a
+            key={link.href}
+            href={link.href}
+            className="block rounded border border-neutral-200 p-4 hover:border-blue-400 hover:bg-blue-50/40 dark:border-neutral-800 dark:hover:border-blue-500 dark:hover:bg-blue-950/20"
+          >
+            <span className="block text-lg font-semibold text-blue-600">{link.title}</span>
+            <span className="mt-1 block text-sm text-neutral-700 dark:text-neutral-300">{link.description}</span>
+          </a>
+        ))}
+      </div>
 
       <h2>Not affiliated with COS</h2>
       <p>

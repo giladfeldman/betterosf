@@ -9,6 +9,7 @@ import { SplitPane } from "@/components/SplitPane";
 import { FileMissing } from "@/components/FileMissing";
 import { RecordView } from "@/components/RecordView";
 import { UploadFilesButton } from "@/components/UploadFilesButton";
+import { FolderViewNewFolder } from "@/components/FolderViewNewFolder";
 
 function safeDecode(s: string): string {
   try {
@@ -151,6 +152,7 @@ export default async function DeepFilesPage({
                 {provider}{folderSegments.length ? "/" + folderSegments.join("/") : ""}
               </h1>
               <div className="flex flex-wrap items-center gap-2">
+                {uploadTarget && <FolderViewNewFolder target={uploadTarget} />}
                 {uploadTarget && <UploadFilesButton guid={guid} target={uploadTarget}>Upload here</UploadFilesButton>}
                 <a href={zipHref} className="border rounded px-3 py-1 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-900">
                 ⬇ Download folder as ZIP

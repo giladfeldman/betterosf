@@ -33,7 +33,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <BetterOsfLogo variant="compact" className="h-8" />
               </a>
               <a href="/search" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">Search</a>
-              <a href="/information" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">Info</a>
+              <a href="/bookmarklet" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">Bookmarklet</a>
+              <a href="/about" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">About</a>
             </div>
             <div className="flex items-center gap-3">
               <ThemeToggle />
@@ -53,7 +54,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </span>
             <span className="flex gap-4">
               <a href="/about" className="hover:underline">About</a>
-              <a href="/information" className="hover:underline">Info</a>
+              <a href="/bookmarklet" className="hover:underline">Bookmarklet</a>
               <a href="/privacy" className="hover:underline">Privacy</a>
               <a href="https://scirenity.com" className="hover:underline">Scirenity</a>
               <a href="https://github.com/giladfeldman/betterosf" className="hover:underline">GitHub</a>
