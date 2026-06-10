@@ -202,7 +202,7 @@ export function UnifiedTreeNode({
       href={node.href}
       target={node.newTab ? "_blank" : undefined}
       rel={node.newTab ? "noopener" : undefined}
-      className="block truncate hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 rounded"
+      className="block min-w-0 truncate hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 rounded"
       onClick={(e) => {
         e.stopPropagation();
         // Toggle expand on left-click for container-ish nodes — only when the user
@@ -231,7 +231,7 @@ export function UnifiedTreeNode({
             }
           : undefined
       }
-      className={`block truncate ${interceptLeftClick && hasChildren ? "cursor-pointer hover:underline" : ""}`}
+      className={`block min-w-0 truncate ${interceptLeftClick && hasChildren ? "cursor-pointer hover:underline" : ""}`}
     >
       {inner}
     </span>
