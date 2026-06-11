@@ -26,8 +26,12 @@ export type BookmarkletLocation = {
  * - The guid segment is lowercased (OSF guids are case-insensitive; lowercase
  *   is the canonical form OSF itself resolves — `osf.io/3KMR9` 404s).
  * - OSF redirect/section suffixes (e.g. `/overview`, `/wiki`) collapse to the
- *   brief `/<guid>` URL; `/files` browser sub-paths are preserved (file names
- *   are case-sensitive, so only the guid is lowercased).
+ *   brief `/<guid>` URL.
+ * - File URLs: `/<guid>/files/<provider>/<path>` keeps the storage-provider
+ *   path (case preserved); `/<guid>/files/<fileGuid>` (a file referenced by its
+ *   OWN guid, not a provider) maps to the bare `/<fileGuid>` which both OSF and
+ *   BetterOSF resolve to the file. BetterOSF's `/files/view/` segment is dropped
+ *   when going back to OSF.
  * - Preprint URLs (`/preprints/<provider>/<guid>`) and other sectioned URLs
  *   resolve the guid that follows the section.
  *
@@ -45,6 +49,7 @@ export function bookmarkletTarget(loc: BookmarkletLocation): string | null {
   var segs = (loc.pathname || "/").split("/").filter(function (s) {
     return s.length > 0;
   });
+  if (segs.length === 0) return "https://" + dest + "/" + tail;
   var first = segs[0];
   if (first === undefined) return "https://" + dest + "/" + tail;
   // Leading path sections that are NOT a guid themselves (the guid follows).
@@ -57,8 +62,8 @@ export function bookmarkletTarget(loc: BookmarkletLocation): string | null {
     // The guid is the last guid-shaped segment after the section (preprints put
     // a provider, which may itself be guid-shaped, before the guid).
     for (var i = segs.length - 1; i >= 1; i--) {
-      var seg = segs[i];
-      if (seg !== undefined && guidRe.test(seg)) {
+      var sg = segs[i];
+      if (sg !== undefined && guidRe.test(sg)) {
         gi = i;
         break;
       }
@@ -70,13 +75,34 @@ export function bookmarkletTarget(loc: BookmarkletLocation): string | null {
   if (guidSeg === undefined) return "https://" + dest + loc.pathname + tail;
   var guid = guidSeg.toLowerCase();
   var after = segs.slice(gi + 1);
-  var firstAfter = after[0];
-  var section = (firstAfter === undefined ? "" : firstAfter).toLowerCase();
+  var section = (after[0] || "").toLowerCase();
+  // OSF storage providers (the segment after `/files/`). Anything else there is
+  // a file/folder guid, not a provider.
+  var providers =
+    " osfstorage github googledrive dropbox box s3 figshare onedrive owncloud gitlab bitbucket dataverse s3compat dropboxbusiness mendeley zotero weko ";
   var path;
   if (section === "files") {
-    // The file browser exists on both OSF and BetterOSF; keep the provider +
-    // folder sub-path, preserving case (file names are case-sensitive).
-    path = "/" + guid + "/" + after.join("/");
+    var sub = after.slice(1);
+    var sub0 = sub[0];
+    // BetterOSF's file-VIEW route inserts a "view" segment; drop it so the path
+    // matches OSF's `/files/<provider>/<path>` form.
+    if (sub0 !== undefined && sub0.toLowerCase() === "view") {
+      sub = sub.slice(1);
+      sub0 = sub[0];
+    }
+    if (sub0 === undefined) {
+      path = "/" + guid + "/files";
+    } else if (providers.indexOf(" " + sub0.toLowerCase() + " ") >= 0) {
+      // Storage-provider path (folder browser). Preserve case (file names are
+      // case-sensitive); only the guid was lowercased.
+      path = "/" + guid + "/files/" + sub.join("/");
+    } else if (guidRe.test(sub0)) {
+      // `/files/<fileGuid>` — OSF references a file by its own guid. The bare
+      // guid resolves to the file on both OSF and BetterOSF.
+      path = "/" + sub0.toLowerCase();
+    } else {
+      path = "/" + guid;
+    }
   } else {
     // Everything else collapses to the brief overview URL: OSF redirects
     // `/<guid>` to `/<guid>/overview` itself, and BetterOSF uses the brief form.
@@ -103,14 +129,42 @@ const STATIC_FIRST_SEGMENTS = new Set([
   "sitemap.xml",
 ]);
 
+// OSF storage providers — the valid segment after `/<guid>/files/`. BetterOSF
+// also uses a `view` segment there for its file viewer. Anything else is a
+// file/folder guid, not a provider.
+const STORAGE_PROVIDERS = new Set([
+  "osfstorage",
+  "github",
+  "googledrive",
+  "dropbox",
+  "box",
+  "s3",
+  "figshare",
+  "onedrive",
+  "owncloud",
+  "gitlab",
+  "bitbucket",
+  "dataverse",
+  "s3compat",
+  "dropboxbusiness",
+  "mendeley",
+  "zotero",
+  "weko",
+]);
+
 const CANON_GUID_RE = /^[A-Za-z0-9]{2,8}$/;
 
 /**
  * Canonical BetterOSF path for a project-style URL, or null when no change is
- * needed. Lowercases the leading guid segment and strips an OSF-style
- * `/overview` suffix so BetterOSF always serves brief, lowercase guid URLs
- * (matching OSF's canonical form). Real static routes and `/files` sub-path
- * case are left untouched.
+ * needed. Normalises to BetterOSF's brief, lowercase guid form (matching OSF's
+ * canonical URLs):
+ *  - lowercases the leading guid (`/3KMR9` -> `/3kmr9`),
+ *  - strips an OSF `/overview` suffix (`/3kmr9/overview` -> `/3kmr9`),
+ *  - rewrites a file referenced by its own guid (`/<guid>/files/<fileGuid>`,
+ *    which BetterOSF can't read as a storage provider) to the bare `/<fileGuid>`
+ *    route, which resolves the file.
+ * Real static routes, storage-provider paths, and the `/files/view/` route are
+ * left untouched.
  */
 export function canonicalGuidPath(pathname: string): string | null {
   const segs = pathname.split("/").filter((s) => s.length > 0);
@@ -118,6 +172,19 @@ export function canonicalGuidPath(pathname: string): string | null {
   if (first === undefined) return null;
   if (STATIC_FIRST_SEGMENTS.has(first.toLowerCase())) return null;
   if (!CANON_GUID_RE.test(first)) return null;
+
+  // `/<guid>/files/<fileGuid>` — OSF addresses a file by its own guid. BetterOSF
+  // reads the post-`files` segment as a storage provider, so resolve via the
+  // bare guid route instead.
+  const seg1 = segs[1];
+  const seg2 = segs[2];
+  if (seg1 !== undefined && seg1.toLowerCase() === "files" && seg2 !== undefined) {
+    const p = seg2.toLowerCase();
+    if (p !== "view" && !STORAGE_PROVIDERS.has(p) && CANON_GUID_RE.test(seg2)) {
+      return "/" + p;
+    }
+  }
+
   const lower = first.toLowerCase();
   let rest = segs.slice(1);
   const afterGuid = rest[0];

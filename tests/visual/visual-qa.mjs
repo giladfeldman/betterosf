@@ -42,6 +42,23 @@ const COLOR = (process.env.COLOR_SCHEME ?? "dark").toLowerCase();
 const STRICT = process.env.STRICT !== "0";
 const OUT = "./screenshots";
 
+// Be respectful of OSF's anonymous rate limits IN ADVANCE, not after a 429:
+// pace page navigations (each one fans out to several OSF API calls server-side)
+// and back off when throttled. Keeps a single run from bursting OSF. Tunable via
+// VQA_THROTTLE_MS (default 700ms between OSF-hitting navigations).
+const THROTTLE_MS = Number(process.env.VQA_THROTTLE_MS ?? 700);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Sleep after a navigation; if OSF (or our middleware) returned 429, honour Retry-After. */
+async function pace(resp) {
+  let ms = THROTTLE_MS;
+  if (resp && resp.status && resp.status() === 429) {
+    const ra = Number(resp.headers()["retry-after"]);
+    ms = Math.max(ms, (Number.isFinite(ra) ? ra : 60) * 1000);
+    console.log(`  …throttled (429), backing off ${Math.round(ms / 1000)}s`);
+  }
+  await sleep(ms);
+}
+
 // Well-known fixtures we lean on for click-through tests. If OSF removes any
 // of these the script needs an update — but using stable canonical projects
 // keeps the script useful without per-run hand-tuning.
@@ -136,6 +153,9 @@ async function main() {
       status = String(resp?.status() ?? "no-resp");
       await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
       await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: true });
+      // Pace OSF-hitting navigations (back off harder on 429) so a single run
+      // stays under OSF's anonymous rate limit instead of discovering it post-hoc.
+      await pace(resp);
     } catch (e) {
       status = `ERR ${e instanceof Error ? e.message.slice(0, 80) : e}`;
     }
@@ -252,6 +272,16 @@ async function main() {
   record(
     "/<guid>/overview canonicalises to brief /<guid>",
     new URL(page.url()).pathname === `/${HEAVY_GUID}`,
+    page.url()
+  );
+  // A file addressed by its own guid (`/<guid>/files/<fileGuid>`) — not a
+  // storage provider — must rewrite to the bare `/<fileGuid>` route (308),
+  // rather than hitting "Storage provider not found". Uses a synthetic guid so
+  // the assertion checks the redirect path only (independent of OSF).
+  await page.goto(`${BASE}/${HEAVY_GUID}/files/zzzz9`, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
+  record(
+    "/<guid>/files/<fileGuid> canonicalises to bare /<fileGuid>",
+    new URL(page.url()).pathname === "/zzzz9",
     page.url()
   );
 
