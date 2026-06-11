@@ -213,6 +213,31 @@ async function main() {
     (await folderBtn.count()) > 0 && (await folderBtn.isVisible());
   record("tree row shows Upload + ZIP + New folder without hover", actionsVisible);
 
+  // Clicking "+ Folder" expands an inline input that must NOT overlap adjacent
+  // virtualized rows (regression: fixed 28px rows + overflow:visible let the
+  // expanded control bleed over the row below). With virtualizer.measureElement
+  // the row grows, so the next row's top must sit at/after the expanded bottom.
+  if ((await folderBtn.count()) > 0) {
+    await folderBtn.click();
+    await page.waitForTimeout(350); // let ResizeObserver remeasure + rows reflow
+    const inputVisible = await page.getByRole("textbox", { name: /new folder name/i }).first().isVisible().catch(() => false);
+    const overlapPx = await page.evaluate(() => {
+      const items = Array.from(document.querySelectorAll('[role="treeitem"]'));
+      const idx = items.findIndex((it) => it.querySelector('input[aria-label="New folder name"]'));
+      if (idx < 0 || idx + 1 >= items.length) return null;
+      const a = items[idx].getBoundingClientRect();
+      const b = items[idx + 1].getBoundingClientRect();
+      return a.bottom - b.top; // <= ~1px means the rows don't overlap
+    });
+    record(
+      "new-folder inline expand does not overlap the next tree row",
+      inputVisible && overlapPx !== null && overlapPx <= 1,
+      `inputVisible=${inputVisible} overlapPx=${overlapPx}`
+    );
+  } else {
+    record("new-folder trigger present for overlap test", false, "no + Folder button found");
+  }
+
   // Helper: detect the "Project not found" route-level error VISIBLY, not via
   // bodyText.includes — Next.js embeds the dormant /<guid>/not-found.tsx
   // template inside the streaming RSC payload so a raw text search hits it
