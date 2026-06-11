@@ -233,6 +233,11 @@ async function main() {
     (await folderBtn.count()) > 0 && (await folderBtn.isVisible());
   record("tree row shows Upload + ZIP + New folder without hover", actionsVisible);
 
+  // Tree toolbar offers the Directory view (folders-only, the default) alongside
+  // Expand all / Collapse all.
+  const directoryBtn = page.getByRole("button", { name: /^Directory$/ }).first();
+  record("tree toolbar has a Directory (folders-only) control", (await directoryBtn.count()) > 0 && (await directoryBtn.isVisible()));
+
   // Clicking "+ Folder" expands an inline input that must NOT overlap adjacent
   // virtualized rows (regression: fixed 28px rows + overflow:visible let the
   // expanded control bleed over the row below). With virtualizer.measureElement
@@ -347,11 +352,18 @@ async function main() {
     const uploadButtons = await page.getByRole("button", { name: /upload/i }).count();
     record("registration shows NO upload buttons (immutable)", uploadButtons === 0, `uploadButtons=${uploadButtons}`);
 
-    // Progressive auto-load: deep folders/files appear WITHOUT the user clicking
-    // through each level (the reported annoyance). Allow the cascade a moment.
+    // Progressive auto-load: deep folders/files appear WITHOUT clicking through
+    // each level (the reported annoyance). The default "Directory" view hides
+    // file leaves, so switch to "Expand all" (a single toolbar click) to reveal
+    // the already-auto-loaded files. Allow the cascade a moment.
     await page.waitForTimeout(5000);
+    const regExpandAll = page.getByRole("button", { name: /^Expand all$/ }).first();
+    if (await regExpandAll.count()) {
+      await regExpandAll.click();
+      await page.waitForTimeout(1500);
+    }
     const leafCount = await page.locator('[role="tree"] a[href*="/files/view/"]').count();
-    record("registration tree auto-loads files (file leaf visible, no clicks)", leafCount > 0, `fileLeaves=${leafCount}`);
+    record("registration tree auto-loads files (file leaves visible after Expand all)", leafCount > 0, `fileLeaves=${leafCount}`);
 
     const fresp = await page.goto(`${BASE}/${REG}/files`, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => null);
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
@@ -376,8 +388,14 @@ async function main() {
     const fstatus = String(fresp?.status() ?? "no-resp");
     record("c97pd /files resolves (not 'Project not found')", fstatus === "200" && !(await visibleProjectNotFound()), `status=${fstatus}`);
     // The osfstorage PDFs (ML2_-_Protocol.pdf, ML2_-_The_Effects.pdf) must auto-load
-    // despite the sibling github provider 404ing.
+    // despite the sibling github provider 404ing. Reveal files via "Expand all"
+    // (the default Directory view hides file leaves).
     await page.waitForTimeout(5000);
+    const c97ExpandAll = page.getByRole("button", { name: /^Expand all$/ }).first();
+    if (await c97ExpandAll.count()) {
+      await c97ExpandAll.click();
+      await page.waitForTimeout(1500);
+    }
     const leafCount = await page.locator('[role="tree"] a[href*="/files/view/"]').count();
     record("c97pd tree shows osfstorage files despite a broken sibling provider", leafCount > 0, `fileLeaves=${leafCount}`);
     await page.screenshot({ path: `${OUT}/G2c-registration-broken-provider.png`, fullPage: true });
@@ -578,19 +596,22 @@ async function main() {
   }
   const regsRoot = page.locator('[role="treeitem"]', { hasText: /Registrations \(/i }).first();
   if (await regsRoot.count()) {
-    // The treeitem div has no click handler — the click target is the inner
-    // span[role="button"] (for kinds without an href like registrations-root)
-    // or the inner <a> (for kinds with an href). Click the inner role="button"
-    // span which is the toggle target for registrations-root.
-    const regsBtn = regsRoot.locator('[role="button"]').first();
-    if (await regsBtn.count()) {
-      await regsBtn.click();
-    } else {
-      // Fallback: click the explicit Expand button at the row's left edge
-      await regsRoot.locator('button[aria-label*="Expand" i], button[aria-label*="Collapse" i]').first().click();
+    // "Collapse all" collapses to provider-root level but keeps the Registrations
+    // group (and each registration node) expanded, so the registration rows are
+    // already visible. Only toggle the group open if they aren't.
+    let regCount = await page.locator('[role="treeitem"] a[href*="/registrations/"]').count();
+    if (regCount === 0) {
+      // The treeitem div has no click handler — the toggle target is the inner
+      // span[role="button"] (registrations-root has no href).
+      const regsBtn = regsRoot.locator('[role="button"]').first();
+      if (await regsBtn.count()) {
+        await regsBtn.click();
+      } else {
+        await regsRoot.locator('button[aria-label*="Expand" i], button[aria-label*="Collapse" i]').first().click();
+      }
+      await page.waitForTimeout(1200);
+      regCount = await page.locator('[role="treeitem"] a[href*="/registrations/"]').count();
     }
-    await page.waitForTimeout(1200);
-    const regCount = await page.locator('[role="treeitem"] a[href*="/registrations/"]').count();
     record(`registrations section expanded — N registration rows visible: ${regCount}`, regCount > 0);
 
     // Click the first registration row (anchor click; intercepted because

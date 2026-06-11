@@ -159,6 +159,7 @@ export function UnifiedTree({
     setHydrationPaused(false);
     setRunningHydrationId(null);
     setRateLimitedUntil(0);
+    setFilesHiddenState(getPref<boolean>(`tree.filesHidden.${guid}`, true));
   }, [guid, componentTrees, registrationTrees, linkedTrees]);
 
   // Initial expand state — all folder paths expanded (root + each component);
@@ -207,6 +208,19 @@ export function UnifiedTree({
     (next: Record<string, boolean>) => {
       setExpandedState(next);
       setPref(`tree.expand.${guid}`, next);
+    },
+    [guid]
+  );
+
+  // "Directory" view (default): show the whole folder tree, folders only — file
+  // leaves are hidden. "Expand all" shows files too. Remembered per project.
+  const [filesHidden, setFilesHiddenState] = useState<boolean>(() =>
+    getPref<boolean>(`tree.filesHidden.${guid}`, true)
+  );
+  const setFilesHidden = useCallback(
+    (next: boolean) => {
+      setFilesHiddenState(next);
+      setPref(`tree.filesHidden.${guid}`, next);
     },
     [guid]
   );
@@ -704,6 +718,7 @@ export function UnifiedTree({
             for (const sub of folder.children) emitFolder(sub, depth + 1, id);
             for (const sub of dynamicFolders) emitFolder(sub, depth + 1, id);
             for (const f of childFiles) {
+              if (filesHidden) break; // "Directory" view: folders only
               if (f.kind !== "file") continue;
               rows.push({
                 id: `${id}/${f.name}`,
@@ -748,7 +763,7 @@ export function UnifiedTree({
           if (staticRootFolderPaths.has(folder.materializedPath)) continue;
           emitFolder(skeletonFromFolder(folder, provider.provider), baseDepth + 1, providerId);
         }
-        const rootFiles = rootEntries.filter((e) => e.kind === "file");
+        const rootFiles = filesHidden ? [] : rootEntries.filter((e) => e.kind === "file");
         for (const f of rootFiles) {
           if (f.kind !== "file") continue;
           rows.push({
@@ -1009,7 +1024,7 @@ export function UnifiedTree({
     }
 
     return rows;
-  }, [expanded, loadedEntries, loadingKeys, folderFailures, readOnly, skeleton, components, componentTreeState, linkedNodes, linkedTreeState, registrations, registrationTreeState, pinned, rootTitle, guid, fetchFiles, setExpanded, queueHydrationTask, hydrationFailures, runningHydrationId]);
+  }, [expanded, filesHidden, loadedEntries, loadingKeys, folderFailures, readOnly, skeleton, components, componentTreeState, linkedNodes, linkedTreeState, registrations, registrationTreeState, pinned, rootTitle, guid, fetchFiles, setExpanded, queueHydrationTask, hydrationFailures, runningHydrationId]);
 
   const uploadTargets = useMemo(() => {
     const seen = new Set<string>();
@@ -1106,6 +1121,15 @@ export function UnifiedTree({
     return ids;
   }, [skeleton, componentTreeState, registrationTreeState, linkedTreeState]);
 
+  // "Directory" (default view): expand the whole folder tree but keep file
+  // leaves hidden — the structure-only overview.
+  const showDirectory = () => {
+    autoExpandEnabledRef.current = true;
+    const next: Record<string, boolean> = {};
+    for (const id of allExpandableIds) next[id] = true;
+    setExpanded(next);
+    setFilesHidden(true);
+  };
   const expandAll = () => {
     // Re-enable progressive auto-load so dynamically-discovered subfolders keep
     // expanding too (allExpandableIds only covers the static skeleton).
@@ -1113,11 +1137,25 @@ export function UnifiedTree({
     const next: Record<string, boolean> = {};
     for (const id of allExpandableIds) next[id] = true;
     setExpanded(next);
+    setFilesHidden(false); // Expand all reveals files too
   };
+  // "Collapse all": collapse down to the provider roots (e.g. osfstorage).
+  // Structural containers — the project, Components/Registrations/Linked roots,
+  // and each component/registration/linked node — stay expanded; provider roots
+  // and folders collapse. (Not a full collapse to the very top.)
   const collapseAll = () => {
-    // User explicitly collapsed — stop auto-expanding folders for this session.
     autoExpandEnabledRef.current = false;
-    setExpanded({});
+    const next: Record<string, boolean> = {
+      "pinned-root": true,
+      "providers-root": true,
+      "components-root": true,
+      "linked-root": true,
+      "registrations-root": true,
+    };
+    for (const c of componentTreeState) next[`component/${c.guid}`] = true;
+    for (const r of registrationTreeState) next[`registration/${r.guid}`] = true;
+    for (const l of linkedTreeState) next[`linked/${l.guid}`] = true;
+    setExpanded(next);
   };
   const selectedCount = Object.keys(selected).length;
   const rateLimitSeconds = Math.max(0, Math.ceil((rateLimitedUntil - hydrationNow) / 1000));
@@ -1156,7 +1194,15 @@ export function UnifiedTree({
   return (
     <div className="h-full flex flex-col">
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-white px-2 py-1 text-xs dark:border-neutral-800 dark:bg-neutral-950">
-        <button type="button" onClick={expandAll} className="hover:underline">Expand all</button>
+        <button
+          type="button"
+          onClick={showDirectory}
+          title="Show the whole folder tree, folders only (no files)"
+          className={`hover:underline ${filesHidden ? "font-semibold text-blue-700 dark:text-blue-300" : ""}`}
+        >
+          Directory
+        </button>
+        <button type="button" onClick={expandAll} className={`hover:underline ${!filesHidden ? "font-semibold text-blue-700 dark:text-blue-300" : ""}`}>Expand all</button>
         <button type="button" onClick={collapseAll} className="hover:underline">Collapse all</button>
         <button
           type="button"
