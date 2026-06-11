@@ -1,16 +1,28 @@
+import { bookmarkletTarget } from "@/lib/osf/url-bridge";
+
 export const metadata = { title: "Bookmarklet - BetterOSF" };
 
-// osf.io (and *.osf.io) <-> betterosf.vercel.app, preserving path + query + hash.
+// The bookmarklet embeds the tested `bookmarkletTarget` source verbatim, so the
+// redirect logic shipped to users is exactly what the unit tests exercise.
+// osf.io (and *.osf.io) <-> betterosf.vercel.app, lowercasing the guid and using
+// BetterOSF's brief URLs (OSF redirect suffixes like /overview are stripped).
 const BOOKMARKLET =
-  "javascript:(function(){var h=location.hostname,p=location.pathname+location.search+location.hash;" +
-  "if(/(^|\\.)osf\\.io$/.test(h)){location.href='https://betterosf.vercel.app'+p;}" +
-  "else if(h==='betterosf.vercel.app'){location.href='https://osf.io'+p;}" +
-  "else{alert('This bookmarklet only works on OSF or BetterOSF pages.');}})();";
+  "javascript:(function(){var t=(" +
+  bookmarkletTarget.toString() +
+  ")(window.location);if(t){window.location.href=t;}else{alert('This bookmarklet only works on OSF or BetterOSF pages.');}})();";
+
+function escapeHtmlAttr(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
 // Static, escaped anchor. onclick returns false so clicking it ON this page
 // (where location is betterosf) doesn't fire the redirect; users DRAG it.
 const draggableLinkHtml =
-  `<a href="${BOOKMARKLET}" onclick="return false" ` +
+  `<a href="${escapeHtmlAttr(BOOKMARKLET)}" onclick="return false" ` +
   `class="inline-block rounded border border-blue-400 bg-blue-50 px-4 py-2 font-semibold text-blue-700 ` +
   `dark:border-blue-700 dark:bg-blue-950 dark:text-blue-300" ` +
   `title="Drag me to your bookmarks bar">↔ OSF ⇄ BetterOSF</a>`;
@@ -31,8 +43,9 @@ export default function BookmarkletPage() {
         dangerouslySetInnerHTML={{ __html: draggableLinkHtml }}
       />
       <p className="text-sm text-neutral-500">
-        Tip: if your browser won&apos;t let you drag it, create a new bookmark manually and paste the code
-        below as the URL/location.
+        Already have an older version on your bookmarks bar? Replace it by dragging this button again — the
+        logic below was updated. If your browser won&apos;t let you drag it, create a new bookmark manually and
+        paste the code below as the URL/location.
       </p>
 
       <div>
@@ -44,9 +57,10 @@ export default function BookmarkletPage() {
 
       <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">How it works</h2>
       <ul className="list-inside list-disc space-y-1">
-        <li>On <code>osf.io</code> (or any <code>*.osf.io</code> subdomain) → opens <code>betterosf.vercel.app</code> with the same path.</li>
-        <li>On <code>betterosf.vercel.app</code> → opens <code>osf.io</code> with the same path.</li>
-        <li>Anywhere else → shows a short notice and does nothing.</li>
+        <li>Works on <code>osf.io</code> (and any <code>*.osf.io</code> subdomain) and on <code>betterosf.vercel.app</code>; anywhere else it shows a short notice and does nothing.</li>
+        <li>The project guid is lowercased, since OSF is case-sensitive (<code>osf.io/3KMR9</code> 404s, <code>osf.io/3kmr9</code> works).</li>
+        <li>OSF redirect suffixes such as <code>/overview</code> are dropped, so BetterOSF opens at its brief URL (<code>/&lt;guid&gt;</code>).</li>
+        <li>File-browser paths (<code>/&lt;guid&gt;/files/…</code>), preprint URLs, and registration URLs are mapped to their counterpart.</li>
       </ul>
     </article>
   );

@@ -238,6 +238,23 @@ async function main() {
     record("new-folder trigger present for overlap test", false, "no + Folder button found");
   }
 
+  // Guid URL canonicalisation: BetterOSF must serve brief, lowercase guid URLs
+  // (matching OSF's canonical form). Uppercase guid -> lowercase; /overview
+  // suffix (an OSF redirect) -> brief. These are 308 redirects in middleware,
+  // so the final URL is what matters (independent of OSF render latency).
+  await page.goto(`${BASE}/${HEAVY_GUID.toUpperCase()}`, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
+  record(
+    "uppercase guid canonicalises to lowercase brief URL",
+    new URL(page.url()).pathname === `/${HEAVY_GUID}`,
+    page.url()
+  );
+  await page.goto(`${BASE}/${HEAVY_GUID}/overview`, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
+  record(
+    "/<guid>/overview canonicalises to brief /<guid>",
+    new URL(page.url()).pathname === `/${HEAVY_GUID}`,
+    page.url()
+  );
+
   // Helper: detect the "Project not found" route-level error VISIBLY, not via
   // bodyText.includes — Next.js embeds the dormant /<guid>/not-found.tsx
   // template inside the streaming RSC payload so a raw text search hits it
