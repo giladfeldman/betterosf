@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { incrementWindow } from "@/lib/limits";
+import { canonicalGuidPath } from "@/lib/osf/url-bridge";
 
 const NAV_LIMIT_PER_MIN = 60;
 const API_LIMIT_PER_MIN = 240;
@@ -54,6 +55,19 @@ export async function middleware(req: NextRequest) {
     return textResponse("BetterOSF is for direct human use, not indexing or crawling.", 403);
   }
   if (CLI_BOT_RE.test(ua)) return textResponse("Automated clients are not allowed on BetterOSF.", 403);
+
+  // Canonicalise project URLs to BetterOSF's brief, lowercase form (matching
+  // OSF's canonical guid): `/3KMR9` -> `/3kmr9`, `/3kmr9/overview` -> `/3kmr9`.
+  // Applies to navigations only; API routes and static assets are handled
+  // elsewhere. Runs before the signed-in short-circuit so it applies uniformly.
+  if (!pathname.startsWith("/api/")) {
+    const canonical = canonicalGuidPath(pathname);
+    if (canonical && canonical !== pathname) {
+      const url = req.nextUrl.clone();
+      url.pathname = canonical;
+      return noIndexHeaders(NextResponse.redirect(url, 308));
+    }
+  }
 
   if (isSignedIn(req)) return noIndexHeaders(NextResponse.next());
 
