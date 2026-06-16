@@ -46,6 +46,8 @@ function requestIp(req: NextRequest): string {
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const host = req.nextUrl.hostname;
+  const isLocalHost = host === "localhost" || host === "127.0.0.1" || host === "::1";
   if (pathname.startsWith("/_next/") || STATIC_FILE_RE.test(pathname)) {
     return NextResponse.next();
   }
@@ -56,6 +58,7 @@ export async function middleware(req: NextRequest) {
     return textResponse("BetterOSF is for direct human use, not indexing or crawling.", 403);
   }
   if (CLI_BOT_RE.test(ua)) return textResponse("Automated clients are not allowed on BetterOSF.", 403);
+  if (isLocalHost) return noIndexHeaders(NextResponse.next());
 
   // Canonicalise project URLs to BetterOSF's brief, lowercase form (matching
   // OSF's canonical guid): `/3KMR9` -> `/3kmr9`, `/3kmr9/overview` -> `/3kmr9`.

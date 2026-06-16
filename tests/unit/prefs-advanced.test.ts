@@ -37,9 +37,9 @@ describe("prefs — arrays + nested objects", () => {
 
 describe("prefs — quota / write failures", () => {
   it("swallows setItem quota errors silently", () => {
-    const orig = Storage.prototype.setItem;
+    const orig = window.localStorage.setItem;
     let called = false;
-    Storage.prototype.setItem = function () {
+    window.localStorage.setItem = function () {
       called = true;
       throw new DOMException("Quota exceeded", "QuotaExceededError");
     };
@@ -49,31 +49,31 @@ describe("prefs — quota / write failures", () => {
       // And nothing was stored, since the write threw
       expect(window.localStorage.getItem("betterosf:big")).toBeNull();
     } finally {
-      Storage.prototype.setItem = orig;
+      window.localStorage.setItem = orig;
     }
   });
 
   it("swallows removeItem failures silently", () => {
-    const orig = Storage.prototype.removeItem;
-    Storage.prototype.removeItem = function () {
+    const orig = window.localStorage.removeItem;
+    window.localStorage.removeItem = function () {
       throw new Error("boom");
     };
     try {
       expect(() => removePref("foo")).not.toThrow();
     } finally {
-      Storage.prototype.removeItem = orig;
+      window.localStorage.removeItem = orig;
     }
   });
 
   it("swallows getItem failures and returns fallback", () => {
-    const orig = Storage.prototype.getItem;
-    Storage.prototype.getItem = function () {
+    const orig = window.localStorage.getItem;
+    window.localStorage.getItem = function () {
       throw new Error("boom");
     };
     try {
       expect(getPref("foo", "default")).toBe("default");
     } finally {
-      Storage.prototype.getItem = orig;
+      window.localStorage.getItem = orig;
     }
   });
 });
