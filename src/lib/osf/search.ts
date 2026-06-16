@@ -244,6 +244,26 @@ import { getAllChildren, getAllLinkedNodes } from "@/lib/osf/nodes";
 import { getNodeRegistrations } from "@/lib/osf/registrations";
 import { fetchAllProjectEntries } from "@/lib/osf/files-recursive";
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> {
+  const safeConcurrency = Math.max(1, Math.min(concurrency, items.length || 1));
+  const out: R[] = new Array(items.length);
+  let index = 0;
+  async function run(): Promise<void> {
+    while (true) {
+      const i = index;
+      index += 1;
+      if (i >= items.length) return;
+      out[i] = await worker(items[i] as T);
+    }
+  }
+  await Promise.all(Array.from({ length: safeConcurrency }, () => run()));
+  return out;
+}
+
 function buildIncludeFn(query: string, field: string): (text: string) => boolean {
   const ast = parseQuery(query);
   const plan = compileQuery(ast, field);
@@ -291,7 +311,7 @@ export async function searchInProjectScope(rootGuid: string, query: string): Pro
 export async function searchFilesInProjectScope(
   rootGuid: string,
   query: string,
-  opts?: { maxEntries?: number }
+  opts?: { maxEntries?: number; maxConcurrency?: number }
 ): Promise<SearchedFile[]> {
   const include = buildIncludeFn(query, "name");
   const [rootEntries, children] = await Promise.all([
@@ -312,8 +332,10 @@ export async function searchFilesInProjectScope(
       nodeId: rootGuid,
     }));
 
-  const componentResults = await Promise.all(
-    children.map(async (c) => {
+  const componentResults = await mapWithConcurrency(
+    children,
+    opts?.maxConcurrency ?? 4,
+    async (c) => {
       const entries = await fetchAllProjectEntries(c.id, { maxEntries: opts?.maxEntries ?? 5000 }).catch(() => []);
       return entries
         .filter((e) => e.kind === "file" && include(e.name))
@@ -327,7 +349,7 @@ export async function searchFilesInProjectScope(
           downloadUrl: e.downloadUrl ?? "",
           nodeId: c.id,
         }));
-    })
+    }
   );
 
   for (const list of componentResults) {
