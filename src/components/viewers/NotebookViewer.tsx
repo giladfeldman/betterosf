@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
+import DOMPurify from "dompurify";
 
 type NotebookOutput = {
   output_type: "stream" | "execute_result" | "display_data" | "error";
@@ -27,6 +28,14 @@ function joinSource(s: string | string[]): string {
   return Array.isArray(s) ? s.join("") : s;
 }
 
+function sanitizeNotebookHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true, svg: true, svgFilters: true },
+    FORBID_TAGS: ["script", "iframe", "object", "embed"],
+    FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover", "style"],
+  });
+}
+
 function CellOutputs({ outputs }: { outputs: NotebookOutput[] }) {
   return (
     <div className="space-y-1">
@@ -46,11 +55,11 @@ function CellOutputs({ outputs }: { outputs: NotebookOutput[] }) {
           }
           const svgXml = out.data["image/svg+xml"];
           if (svgXml) {
-            return <div key={i} dangerouslySetInnerHTML={{ __html: joinSource(svgXml) }} />;
+            return <div key={i} dangerouslySetInnerHTML={{ __html: sanitizeNotebookHtml(joinSource(svgXml)) }} />;
           }
           const htmlOut = out.data["text/html"];
           if (htmlOut) {
-            return <div key={i} className="overflow-auto" dangerouslySetInnerHTML={{ __html: joinSource(htmlOut) }} />;
+            return <div key={i} className="overflow-auto" dangerouslySetInnerHTML={{ __html: sanitizeNotebookHtml(joinSource(htmlOut)) }} />;
           }
           const txt = out.data["text/plain"];
           if (txt) {
