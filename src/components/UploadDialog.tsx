@@ -95,6 +95,7 @@ export function UploadDialog({
   onComplete: (target: TreeUploadTarget) => void;
 }) {
   const [status, setStatus] = useState<WriteStatus | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [items, setItems] = useState<UploadItem[]>([]);
   const [folderName, setFolderName] = useState("");
   const [folderState, setFolderState] = useState<"idle" | "creating" | "done" | "error">("idle");
@@ -194,10 +195,16 @@ export function UploadDialog({
     fetch("/api/osf/write-status")
       .then((res) => res.json())
       .then((data: WriteStatus) => {
-        if (alive) setStatus(data);
+        if (alive) {
+          setStatus(data);
+          setStatusError(null);
+        }
       })
       .catch(() => {
-        if (alive) setStatus({ signedIn: false, canWrite: false, writeScope: OSF_UPLOAD_SCOPE });
+        if (alive) {
+          setStatus(null);
+          setStatusError("Could not verify your upload session right now. You can still try signing in again.");
+        }
       });
     return () => {
       alive = false;
@@ -319,6 +326,12 @@ export function UploadDialog({
         </div>
 
         <div className="space-y-4 p-4">
+          {statusError && (
+            <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+              {statusError}
+            </div>
+          )}
+
           {targetOptions.length > 1 && (
             <label className="block text-sm">
               <span className="mb-1 block font-medium">Upload destination</span>
