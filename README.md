@@ -68,7 +68,7 @@ After this release, **provision Vercel KV** at https://vercel.com/your-team/bett
 - **Unified tree navigator** on /files pages — multi-root (OSF Storage, other providers, Components, Linked projects, Registrations), all folders expanded by default, lazy file load, virtualized.
 - **In-browser viewers for every common file format** — PDF (better than OSF's Google-Docs-viewer), DOCX (no conversion), XLSX, CSV, Markdown, code/text with syntax highlighting, JSON, images (including sanitized SVG), HTML, video, audio, Jupyter notebooks.
 - **Dark / light / system theme toggle** in the header, persisted across sessions.
-- **Right-click → "Open in new tab"** works on every link; clicking a file leaf in the tree opens in a new tab by default; folders + components + linked + registrations stay in same tab.
+- **Right-click → "Open in new tab"** works on every link; clicking a file leaf in the tree opens inline in the same tab by default; folders + components + linked + registrations also stay in same tab.
 - **Resizable split pane** on files pages (drag handle, width persisted).
 - **Breadcrumbs always show parent context** — sticky at top of right pane, truncates with `…` for very deep paths, every segment a real anchor.
 
