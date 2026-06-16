@@ -6,6 +6,7 @@ import { canonicalGuidPath } from "@/lib/osf/url-bridge";
 const NAV_LIMIT_PER_MIN = 60;
 const API_LIMIT_PER_MIN = 240;
 const EXPENSIVE_API_LIMIT_PER_MIN = 80;
+const SIGNED_IN_LIMIT_MULTIPLIER = 5;
 
 const STATIC_FILE_RE = /\.(svg|ico|png|jpe?g|gif|webp|woff2?|css|js|map|txt|xml)$/i;
 const SEARCH_BOT_RE =
@@ -69,7 +70,7 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  if (isSignedIn(req)) return noIndexHeaders(NextResponse.next());
+  const signedIn = isSignedIn(req);
 
   const ip = requestIp(req);
   if (pathname.startsWith("/api/")) {
@@ -78,8 +79,9 @@ export async function middleware(req: NextRequest) {
       pathname.includes("/download") ||
       pathname.includes("/folder") ||
       pathname.includes("/all");
-    const limit = expensive ? EXPENSIVE_API_LIMIT_PER_MIN : API_LIMIT_PER_MIN;
-    const key = `ip:${ip}:api:${expensive ? "expensive" : "general"}:1min`;
+    const baseLimit = expensive ? EXPENSIVE_API_LIMIT_PER_MIN : API_LIMIT_PER_MIN;
+    const limit = signedIn ? baseLimit * SIGNED_IN_LIMIT_MULTIPLIER : baseLimit;
+    const key = `ip:${ip}:api:${expensive ? "expensive" : "general"}:${signedIn ? "signedin" : "anon"}:1min`;
     const count = await incrementWindow(key, 60);
     if (count > limit) return textResponse("Too many requests. Please wait and try again.", 429, "60");
     return noIndexHeaders(NextResponse.next());
@@ -90,11 +92,14 @@ export async function middleware(req: NextRequest) {
     return noIndexHeaders(NextResponse.next());
   }
 
-  const key = `ip:${ip}:nav:1min`;
+  const navLimit = signedIn ? NAV_LIMIT_PER_MIN * SIGNED_IN_LIMIT_MULTIPLIER : NAV_LIMIT_PER_MIN;
+  const key = `ip:${ip}:nav:${signedIn ? "signedin" : "anon"}:1min`;
   const count = await incrementWindow(key, 60);
-  if (count > NAV_LIMIT_PER_MIN) {
+  if (count > navLimit) {
     return textResponse(
-      "Too many requests. BetterOSF rate-limits anonymous traffic to 60 page navigations per minute. Sign in or wait.",
+      signedIn
+        ? "Too many requests. Please wait and try again."
+        : "Too many requests. BetterOSF rate-limits anonymous traffic to 60 page navigations per minute. Sign in or wait.",
       429,
       "60"
     );
