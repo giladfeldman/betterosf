@@ -3,6 +3,8 @@ import { getRegistration } from "@/lib/osf/registrations";
 import { collectFolderSkeleton } from "@/lib/osf/folder-skeleton";
 import type { SkeletonNode } from "@/lib/osf/folder-skeleton";
 import { OsfError } from "@/lib/osf/types";
+import { osfBackpressureKind } from "@/lib/osf/backpressure";
+import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { PinButton } from "@/components/PinButton";
 import { RecordView } from "@/components/RecordView";
@@ -26,6 +28,8 @@ export async function RegistrationOverview({ guid }: { guid: string }) {
     reg = await getRegistration(guid);
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") notFound();
+    const bp = osfBackpressureKind(e);
+    if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="this registration" />;
     throw e;
   }
 

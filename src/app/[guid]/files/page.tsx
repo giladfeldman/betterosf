@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { isValidGuid } from "@/lib/osf/guid";
 import { collectResourceTree } from "@/lib/osf/resource-tree";
 import { OsfError } from "@/lib/osf/types";
+import { osfBackpressureKind } from "@/lib/osf/backpressure";
+import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { UnifiedTree } from "@/components/UnifiedTree";
 import { SplitPane } from "@/components/SplitPane";
@@ -19,6 +21,8 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
     resource = await collectResourceTree(guid);
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") notFound();
+    const bp = osfBackpressureKind(e);
+    if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="these files" />;
     throw e;
   }
   const { kind, title, fullTree, linked, registrations, components } = resource;

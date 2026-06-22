@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { getCurrentUser, getMyProjects } from "@/lib/osf/users";
 import { OsfError } from "@/lib/osf/types";
+import { osfBackpressureKind } from "@/lib/osf/backpressure";
+import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
 import { PinnedRecentPanels } from "@/components/PinnedRecentPanels";
 import { PaginatedSection, parsePagination } from "@/components/PaginatedSection";
 import type { NodeView } from "@/lib/osf/parse";
@@ -48,6 +50,8 @@ export default async function MyDashboard({
         </div>
       );
     }
+    const bp = osfBackpressureKind(e);
+    if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="your dashboard" />;
     throw e;
   }
 

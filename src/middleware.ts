@@ -58,7 +58,6 @@ export async function middleware(req: NextRequest) {
     return textResponse("BetterOSF is for direct human use, not indexing or crawling.", 403);
   }
   if (CLI_BOT_RE.test(ua)) return textResponse("Automated clients are not allowed on BetterOSF.", 403);
-  if (isLocalHost) return noIndexHeaders(NextResponse.next());
 
   // Canonicalise project URLs to BetterOSF's brief, lowercase form (matching
   // OSF's canonical guid): `/3KMR9` -> `/3kmr9`, `/3kmr9/overview` -> `/3kmr9`.
@@ -72,6 +71,11 @@ export async function middleware(req: NextRequest) {
       return noIndexHeaders(NextResponse.redirect(url, 308));
     }
   }
+
+  // Localhost bypasses per-IP rate limiting so full QA runs stay repeatable
+  // without false 429s — placed AFTER canonicalisation (which is pure string
+  // logic with no OSF call) so localhost behavior stays identical to prod.
+  if (isLocalHost) return noIndexHeaders(NextResponse.next());
 
   const signedIn = isSignedIn(req);
 

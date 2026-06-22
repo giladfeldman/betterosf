@@ -164,7 +164,10 @@ export default async function FileViewerPage({
       if (!f || f.kind !== "file") return { kind: "fail", reason: "missing-file" };
       return { kind: "ok", file: f, listingUrl, uploadUrl, newFolderUrl };
     } catch (e) {
-      if (e instanceof OsfError && (e.code === "not_found" || e.code === "forbidden")) {
+      if (
+        e instanceof OsfError &&
+        (e.code === "not_found" || e.code === "forbidden" || e.code === "rate_limited" || e.code === "upstream")
+      ) {
         return { kind: "fail", reason: "upstream-error" };
       }
       throw e;

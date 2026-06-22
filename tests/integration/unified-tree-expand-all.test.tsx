@@ -108,13 +108,13 @@ describe("UnifiedTree expand-all / collapse-all", () => {
         />
       );
 
-      // Wait a tick for useEffect to run
-      await new Promise((r) => setTimeout(r, 50));
-
-      // Expect at least one call to /api/files/r1/folder for the auto-expanded sub-folder.
-      // (Provider root + sub-folder = 2 separate fetches.)
+      // Poll until the auto-fetch useEffect has issued both folder fetches.
+      // (Provider root + sub-folder = 2 separate fetches.) A fixed setTimeout
+      // is flaky under parallel test load, so wait on the actual condition.
+      await waitFor(() =>
+        expect(calls.filter((u) => u.includes("/api/files/r1/folder")).length).toBeGreaterThanOrEqual(2)
+      );
       expect(calls.some((u) => u.includes("/api/files/r1/folder"))).toBe(true);
-      expect(calls.filter((u) => u.includes("/api/files/r1/folder")).length).toBeGreaterThanOrEqual(2);
     } finally {
       fetchSpy.mockRestore();
     }

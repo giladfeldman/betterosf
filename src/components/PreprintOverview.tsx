@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { getPreprint } from "@/lib/osf/preprints";
 import { OsfError } from "@/lib/osf/types";
+import { osfBackpressureKind } from "@/lib/osf/backpressure";
+import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { PinButton } from "@/components/PinButton";
 import { RecordView } from "@/components/RecordView";
@@ -18,6 +20,8 @@ export async function PreprintOverview({ guid }: { guid: string }) {
     pp = await getPreprint(guid);
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") notFound();
+    const bp = osfBackpressureKind(e);
+    if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="this preprint" />;
     throw e;
   }
 

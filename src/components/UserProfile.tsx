@@ -3,6 +3,8 @@ import { getUser, getUserNodes } from "@/lib/osf/users";
 import { getUserRegistrations } from "@/lib/osf/registrations";
 import { getUserPreprints } from "@/lib/osf/preprints";
 import { OsfError } from "@/lib/osf/types";
+import { osfBackpressureKind } from "@/lib/osf/backpressure";
+import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
 import type { NodeView } from "@/lib/osf/parse";
 import type { RegistrationView } from "@/lib/osf/registrations";
 import type { PreprintListItem } from "@/lib/osf/preprints";
@@ -30,6 +32,8 @@ export async function UserProfile({
     user = await getUser(guid);
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") notFound();
+    const bp = osfBackpressureKind(e);
+    if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="this profile" />;
     throw e;
   }
 

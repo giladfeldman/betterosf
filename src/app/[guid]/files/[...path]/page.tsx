@@ -3,6 +3,8 @@ import { isValidGuid } from "@/lib/osf/guid";
 import { getFolderContents, type FileEntry } from "@/lib/osf/files";
 import { collectResourceTree } from "@/lib/osf/resource-tree";
 import { OsfError } from "@/lib/osf/types";
+import { osfBackpressureKind } from "@/lib/osf/backpressure";
+import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { UnifiedTree } from "@/components/UnifiedTree";
 import { SplitPane } from "@/components/SplitPane";
@@ -53,6 +55,8 @@ export default async function DeepFilesPage({
     resource = await collectResourceTree(guid);
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") notFound();
+    const bp = osfBackpressureKind(e);
+    if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="these files" />;
     throw e;
   }
   const { kind, title, fullTree, linked, registrations, components } = resource;
@@ -89,7 +93,10 @@ export default async function DeepFilesPage({
       }
       return { kind: "ok", entries, listingUrl, uploadUrl, newFolderUrl };
     } catch (e) {
-      if (e instanceof OsfError && (e.code === "not_found" || e.code === "forbidden")) {
+      if (
+        e instanceof OsfError &&
+        (e.code === "not_found" || e.code === "forbidden" || e.code === "rate_limited" || e.code === "upstream")
+      ) {
         return { kind: "fail", reason: "upstream-error" };
       }
       throw e;

@@ -12,6 +12,8 @@ import { UserProfile } from "@/components/UserProfile";
 import { UnsupportedGuid } from "@/components/UnsupportedGuid";
 import { collectFullTree } from "@/lib/osf/full-tree";
 import { OsfError } from "@/lib/osf/types";
+import { osfBackpressureKind } from "@/lib/osf/backpressure";
+import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { PinButton } from "@/components/PinButton";
 import { RecordView } from "@/components/RecordView";
@@ -142,6 +144,8 @@ async function renderNonNode(
     resolved = await resolveGuidType(guid);
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") notFound();
+    const bp = osfBackpressureKind(e);
+    if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="this project" />;
     throw e;
   }
   switch (resolved.kind) {
@@ -182,6 +186,8 @@ export default async function ProjectPage({
     // Not a project. OSF guids are a flat namespace — dispatch to the real type
     // (registration/preprint/user/file) instead of a dead-end "not found".
     if (e instanceof OsfError && e.code === "not_found") return await renderNonNode(guid, sp);
+    const bp = osfBackpressureKind(e);
+    if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="this project" />;
     throw e;
   }
   const [fullTree, linked, regs]: [

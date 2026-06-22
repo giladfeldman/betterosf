@@ -1,6 +1,5 @@
 import { GuidEntryForm } from "@/components/GuidEntryForm";
 import { PinnedRecentPanels } from "@/components/PinnedRecentPanels";
-import { BetterOsfLogo } from "@/components/BetterOsfLogo";
 
 export default function Landing() {
   return (
