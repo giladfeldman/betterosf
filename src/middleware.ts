@@ -23,6 +23,50 @@ function noIndexHeaders(res: NextResponse): NextResponse {
   return res;
 }
 
+// Content-Security-Policy is built per-request here (not in next.config) so each
+// document gets a fresh script nonce. The OSF access token lives briefly in browser
+// memory during direct-to-OSF uploads, so a strong CSP is the key exfil defense.
+const CSP_BASE_DIRECTIVES = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'self'",
+  "form-action 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' https: data: blob:",
+  "font-src 'self' data:",
+  "frame-src 'self' blob: data:",
+  "worker-src 'self' blob:",
+  // The token can only ever be sent to same-origin or OSF — never an attacker origin.
+  "connect-src 'self' https://*.osf.io",
+];
+
+function buildCsp(nonce: string): string {
+  // Modern browsers honor `nonce` + `strict-dynamic` and IGNORE the trailing
+  // `'unsafe-inline' https:` (kept only as a fallback for browsers without
+  // strict-dynamic). `'wasm-unsafe-eval'` is orthogonal to strict-dynamic and keeps
+  // the Shiki code-viewer's WebAssembly highlighter working.
+  const scriptSrc = `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval' 'unsafe-inline' https:`;
+  return [scriptSrc, ...CSP_BASE_DIRECTIVES].join("; ");
+}
+
+/**
+ * Final navigation passthrough with a per-request nonce CSP. The nonce is placed on
+ * the forwarded request's CSP header so Next.js applies it to its own bootstrap
+ * scripts, and on the `x-nonce` header so the root layout can hand it to next-themes'
+ * inline script. The same CSP is set on the response.
+ */
+function navPassthrough(req: NextRequest): NextResponse {
+  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+  const csp = buildCsp(nonce);
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("content-security-policy", csp);
+  const res = NextResponse.next({ request: { headers: requestHeaders } });
+  res.headers.set("Content-Security-Policy", csp);
+  return noIndexHeaders(res);
+}
+
 function textResponse(body: string, status: number, retryAfter?: string): NextResponse {
   const res = new NextResponse(body, {
     status,
@@ -75,7 +119,7 @@ export async function middleware(req: NextRequest) {
   // Localhost bypasses per-IP rate limiting so full QA runs stay repeatable
   // without false 429s — placed AFTER canonicalisation (which is pure string
   // logic with no OSF call) so localhost behavior stays identical to prod.
-  if (isLocalHost) return noIndexHeaders(NextResponse.next());
+  if (isLocalHost) return navPassthrough(req);
 
   const signedIn = isSignedIn(req);
 
@@ -96,7 +140,7 @@ export async function middleware(req: NextRequest) {
 
   const secFetchMode = req.headers.get("sec-fetch-mode");
   if (secFetchMode && secFetchMode !== "navigate" && secFetchMode !== "cors") {
-    return noIndexHeaders(NextResponse.next());
+    return navPassthrough(req);
   }
 
   const navLimit = signedIn ? NAV_LIMIT_PER_MIN * SIGNED_IN_LIMIT_MULTIPLIER : NAV_LIMIT_PER_MIN;
@@ -112,7 +156,7 @@ export async function middleware(req: NextRequest) {
     );
   }
 
-  return noIndexHeaders(NextResponse.next());
+  return navPassthrough(req);
 }
 
 export const config = {

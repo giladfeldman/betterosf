@@ -5,8 +5,11 @@ import { signIn } from "next-auth/react";
 import { OSF_UPLOAD_SCOPE } from "@/lib/auth/osf-provider";
 import type { TreeUploadTarget } from "./UnifiedTreeNode";
 import type { DroppedNode, FileOutcome, ConflictChoice } from "@/lib/upload/types";
+import { droppedFileSize } from "@/lib/upload/types";
 import { runUploadPlan, type UploadIO } from "@/lib/upload/orchestrate";
 import { countDropped } from "@/lib/upload/entries";
+import { uploadFileDirect, clearUploadToken } from "@/lib/upload/direct";
+import { zipToDroppedNodes } from "@/lib/upload/zip";
 import { appendActivity, patchActivity } from "@/lib/upload/log";
 import type { FileEntry } from "@/lib/osf/files";
 
@@ -51,7 +54,7 @@ function flattenDropped(nodes: DroppedNode[], base = ""): FlatFile[] {
   const out: FlatFile[] = [];
   for (const n of nodes) {
     const p = `${base}${n.name}`;
-    if (n.kind === "file") out.push({ path: p, name: n.name, size: n.file.size });
+    if (n.kind === "file") out.push({ path: p, name: n.name, size: droppedFileSize(n) });
     else out.push(...flattenDropped(n.children, `${p}/`));
   }
   return out;
@@ -65,7 +68,7 @@ function pruneSkipped(nodes: DroppedNode[], skip: Set<string>, base = ""): { kep
   for (const n of nodes) {
     const p = `${base}${n.name}`;
     if (n.kind === "file") {
-      if (skip.has(p)) skipped.push({ path: p, name: n.name, size: n.file.size });
+      if (skip.has(p)) skipped.push({ path: p, name: n.name, size: droppedFileSize(n) });
       else kept.push(n);
     } else {
       const r = pruneSkipped(n.children, skip, `${p}/`);
@@ -109,8 +112,56 @@ export function UploadDialog({
   const [acknowledged, setAcknowledged] = useState(false);
   const [reconciled, setReconciled] = useState<null | { confirmed: number; skipped: number; failed: number }>(null);
 
-  const droppedSummary = useMemo(() => (initialNodes ? countDropped(initialNodes) : null), [initialNodes]);
-  const payloadFiles = useMemo(() => (initialNodes ? flattenDropped(initialNodes) : []), [initialNodes]);
+  // ---- Tabs (manual picker only; drag-drop payload mode bypasses tabs) ----
+  const [tab, setTab] = useState<"files" | "zip">("files");
+  const [zipNodes, setZipNodes] = useState<DroppedNode[] | null>(null);
+  const [zipMeta, setZipMeta] = useState<{ name: string; totalFiles: number; totalBytes: number; skipped: string[] } | null>(null);
+  const [zipBusy, setZipBusy] = useState(false);
+  const [zipError, setZipError] = useState<string | null>(null);
+
+  // The confirmation/preview UI runs on whichever payload we have: a drag-drop drop
+  // (initialNodes) or a ZIP the user just extracted (zipNodes).
+  const payloadNodes = initialNodes ?? zipNodes;
+
+  const droppedSummary = useMemo(() => (payloadNodes ? countDropped(payloadNodes) : null), [payloadNodes]);
+  const payloadFiles = useMemo(() => (payloadNodes ? flattenDropped(payloadNodes) : []), [payloadNodes]);
+
+  const resetRunState = useCallback(() => {
+    setSkip(new Set());
+    setOutcomes([]);
+    setReconciled(null);
+    setAcknowledged(false);
+  }, []);
+
+  async function onZipChosen(zipFile: File) {
+    setZipBusy(true);
+    setZipError(null);
+    resetRunState();
+    try {
+      const { nodes, totalFiles, totalBytes, skipped } = await zipToDroppedNodes(zipFile);
+      if (totalFiles === 0) {
+        setZipError(skipped.length > 0 ? "That ZIP only contained system/junk files — nothing to upload." : "That ZIP is empty.");
+        setZipNodes(null);
+        setZipMeta(null);
+        return;
+      }
+      setZipNodes(nodes);
+      setZipMeta({ name: zipFile.name, totalFiles, totalBytes, skipped });
+    } catch {
+      setZipError("BetterOSF could not read that file as a ZIP archive. Make sure it's a valid .zip.");
+      setZipNodes(null);
+      setZipMeta(null);
+    } finally {
+      setZipBusy(false);
+    }
+  }
+
+  function clearZip() {
+    setZipNodes(null);
+    setZipMeta(null);
+    setZipError(null);
+    resetRunState();
+  }
 
   // Live HTTP IO over the existing folder / folder-create / upload routes.
   const makeIO = useCallback((guid: string): UploadIO => ({
@@ -128,18 +179,11 @@ export function UploadDialog({
       // 409 = the folder already exists → merge into it, not an error.
       if (!res.ok && res.status !== 409) { const b = await res.json().catch(() => ({})); const e = new Error(String(b.error ?? "Folder creation failed")) as Error & { status?: number; code?: string }; e.status = res.status; e.code = b.code; throw e; }
     },
-    uploadFile: async (t, file, { overwrite }) => {
-      const form = new FormData();
-      form.set("file", file);
-      form.set("provider", t.provider);
-      form.set("path", t.path);
-      form.set("listingUrl", t.listingUrl);
-      if (t.uploadUrl) form.set("uploadUrl", t.uploadUrl);
-      if (t.newFolderUrl) form.set("newFolderUrl", t.newFolderUrl);
-      if (overwrite) form.set("overwrite", "true");
-      const res = await fetch(`/api/files/${guid}/upload`, { method: "POST", body: form });
-      if (!res.ok) { const b = await res.json().catch(() => ({})); const e = new Error(String(b.error ?? "Upload failed")) as Error & { status?: number; code?: string }; e.status = res.status; e.code = b.code; throw e; }
-    },
+    // File bytes go straight from the browser to OSF Waterbutler (bypassing Vercel's
+    // 4.5 MB function-body limit so any size up to OSF's 5 GB/file works and never
+    // silently fails). Listing + folder-create above stay on the server routes, so the
+    // OSF token is only needed in the browser for this PUT.
+    uploadFile: (t, file, { overwrite }) => uploadFileDirect(t, file, { overwrite }),
   }), []);
 
   const execute = useCallback(async (nodesToRun: DroppedNode[], carry: FileOutcome[]) => {
@@ -154,12 +198,18 @@ export function UploadDialog({
 
     const live: FileOutcome[] = [...carry];
     setOutcomes([...live]);
-    const result = await runUploadPlan(
-      target, nodesToRun,
-      { resolve: () => "new_version" as ConflictChoice },
-      makeIO(target.guid),
-      { onProgress: (o) => { live.push(o); setOutcomes([...live]); } }
-    );
+    let result;
+    try {
+      result = await runUploadPlan(
+        target, nodesToRun,
+        { resolve: () => "new_version" as ConflictChoice },
+        makeIO(target.guid),
+        { onProgress: (o) => { live.push(o); setOutcomes([...live]); } }
+      );
+    } finally {
+      // Drop the in-memory OSF token as soon as the batch ends (success or failure).
+      clearUploadToken();
+    }
     const all = [...carry, ...result.outcomes];
     const confirmed = all.filter((o) => o.status === "confirmed").length;
     const skippedCount = all.filter((o) => o.status === "skipped").length;
@@ -172,21 +222,21 @@ export function UploadDialog({
   }, [target, droppedSummary, makeIO, onComplete]);
 
   const runDropped = useCallback(() => {
-    if (!initialNodes) return;
-    const { kept, skipped } = pruneSkipped(initialNodes, skip);
+    if (!payloadNodes) return;
+    const { kept, skipped } = pruneSkipped(payloadNodes, skip);
     const skippedOutcomes: FileOutcome[] = skipped.map((s) => ({ path: s.path, name: s.name, size: s.size, status: "skipped", attempts: 0 }));
     void execute(kept, skippedOutcomes);
-  }, [initialNodes, skip, execute]);
+  }, [payloadNodes, skip, execute]);
 
   const retryFailed = useCallback(() => {
-    if (!initialNodes) return;
+    if (!payloadNodes) return;
     const failedPaths = new Set(outcomes.filter((o) => o.status === "failed").map((o) => o.path));
     const carry = outcomes.filter((o) => o.status !== "failed"); // keep confirmed + skipped
     const retrySkip = new Set<string>();
     for (const f of payloadFiles) if (!failedPaths.has(f.path)) retrySkip.add(f.path);
-    const { kept } = pruneSkipped(initialNodes, retrySkip);
+    const { kept } = pruneSkipped(payloadNodes, retrySkip);
     void execute(kept, carry);
-  }, [initialNodes, outcomes, payloadFiles, execute]);
+  }, [payloadNodes, outcomes, payloadFiles, execute]);
 
   const selectedToUpload = payloadFiles.length - skip.size;
 
@@ -247,21 +297,16 @@ export function UploadDialog({
   async function uploadOne(item: UploadItem) {
     if (!target) return;
     setItems((prev) => prev.map((x) => x.id === item.id ? { ...x, state: "uploading", error: undefined } : x));
-    const form = new FormData();
-    form.set("file", item.file);
-    form.set("provider", target.provider);
-    form.set("path", target.path);
-    form.set("listingUrl", target.listingUrl);
-    if (target.uploadUrl) form.set("uploadUrl", target.uploadUrl);
-    if (target.newFolderUrl) form.set("newFolderUrl", target.newFolderUrl);
-    const res = await fetch(`/api/files/${target.guid}/upload`, { method: "POST", body: form });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: "Upload failed", code: "upstream" }));
+    try {
+      // Direct browser → OSF upload (bypasses Vercel's 4.5 MB limit so large files work).
+      await uploadFileDirect(target, item.file, {});
+    } catch (e) {
+      const err = e as { message?: string; code?: string };
       setItems((prev) => prev.map((x) => x.id === item.id ? {
         ...x,
         state: "error",
-        error: String(body.error ?? "Upload failed"),
-        errorCode: typeof body.code === "string" ? body.code : undefined,
+        error: String(err.message ?? "Upload failed"),
+        errorCode: typeof err.code === "string" ? err.code : undefined,
       } : x));
       return;
     }
@@ -271,8 +316,12 @@ export function UploadDialog({
 
   async function uploadAll() {
     const retryable = items.filter((item) => item.state === "pending" || item.state === "error");
-    for (const item of retryable) {
-      await uploadOne(item);
+    try {
+      for (const item of retryable) {
+        await uploadOne(item);
+      }
+    } finally {
+      clearUploadToken();
     }
   }
 
@@ -396,8 +445,23 @@ export function UploadDialog({
             </div>
           )}
 
-          {status?.canWrite && target && initialNodes && (
+          {status?.canWrite && target && payloadNodes && (
             <div className="space-y-3">
+              {zipMeta && !running && !reconciled && (
+                <div className="flex items-start justify-between gap-3 rounded border border-blue-200 bg-blue-50 p-3 text-sm dark:border-blue-900 dark:bg-blue-950">
+                  <div>
+                    <p className="font-medium">Extracted <span className="break-all">{zipMeta.name}</span></p>
+                    <p className="mt-0.5 text-neutral-600 dark:text-neutral-300">
+                      {zipMeta.totalFiles} file{zipMeta.totalFiles === 1 ? "" : "s"} · {formatBytes(zipMeta.totalBytes)}
+                      {zipMeta.skipped.length > 0 ? ` · ${zipMeta.skipped.length} system file${zipMeta.skipped.length === 1 ? "" : "s"} skipped` : ""}
+                    </p>
+                    <p className="mt-1 text-xs text-neutral-500">Confirm the folder tree below, then upload — the hierarchy is recreated on OSF exactly as in the ZIP.</p>
+                  </div>
+                  <button type="button" onClick={clearZip} className="shrink-0 rounded border border-blue-300 bg-white px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200">
+                    Choose a different ZIP
+                  </button>
+                </div>
+              )}
               <div className="rounded border border-neutral-200 p-3 text-sm dark:border-neutral-800">
                 <p className="font-medium">
                   Ready to upload {droppedSummary?.files} file{droppedSummary?.files === 1 ? "" : "s"}
@@ -485,8 +549,25 @@ export function UploadDialog({
             </div>
           )}
 
-          {status?.canWrite && target && !initialNodes && (
+          {status?.canWrite && target && !payloadNodes && (
             <>
+              <div role="tablist" aria-label="Upload method" className="flex gap-1 border-b border-neutral-200 dark:border-neutral-800">
+                {(["files", "zip"] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === t}
+                    onClick={() => setTab(t)}
+                    className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${tab === t ? "border-blue-500 text-blue-700 dark:text-blue-300" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"}`}
+                  >
+                    {t === "files" ? "Files & folders" : "Upload a ZIP"}
+                  </button>
+                ))}
+              </div>
+
+              {tab === "files" && (
+              <>
               <div
                 onDragOver={(e) => {
                   e.preventDefault();
@@ -559,6 +640,31 @@ export function UploadDialog({
                       </li>
                     ))}
                   </ul>
+                </div>
+              )}
+              </>
+              )}
+
+              {tab === "zip" && (
+                <div className="space-y-3">
+                  <div className="rounded border border-dashed border-neutral-300 p-5 text-center dark:border-neutral-700">
+                    <p className="text-sm font-medium">Upload a ZIP archive</p>
+                    <p className="mt-1 text-xs text-neutral-500">
+                      BetterOSF reads the folder structure inside the ZIP and recreates it on OSF — exactly like pushing a directory. You confirm the tree before anything uploads.
+                    </p>
+                    <label className="mt-3 inline-block cursor-pointer rounded border border-neutral-300 px-3 py-1 text-sm hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900">
+                      {zipBusy ? "Reading ZIP…" : "Choose a .zip file"}
+                      <input
+                        type="file"
+                        aria-label="Choose a ZIP file"
+                        accept=".zip,application/zip,application/x-zip-compressed"
+                        className="sr-only"
+                        disabled={zipBusy}
+                        onChange={(e) => { const f = e.currentTarget.files?.[0]; if (f) void onZipChosen(f); e.currentTarget.value = ""; }}
+                      />
+                    </label>
+                  </div>
+                  {zipError && <p className="text-sm text-red-600 dark:text-red-400">{zipError}</p>}
                 </div>
               )}
             </>

@@ -97,6 +97,33 @@ describe("runUploadPlan", () => {
     expect(io.uploadFile).toHaveBeenCalledTimes(2);
   });
 
+  it("materializes lazy (ZIP) file nodes only when uploading, after a skip decision", async () => {
+    const { io } = makeIO({ "https://api.osf.io/v2/nodes/ezcuj/files/osfstorage/": [{ name: "kept.txt", size: 5, kind: "file" }] });
+    const getKept = vi.fn(async () => new File(["xxxxx"], "kept.txt"));
+    const getNew = vi.fn(async () => new File(["yyyyy"], "new.txt"));
+    const nodes: DroppedNode[] = [
+      { kind: "file", name: "kept.txt", size: 5, getFile: getKept }, // will be skipped
+      { kind: "file", name: "new.txt", size: 5, getFile: getNew },
+    ];
+    const result = await runUploadPlan(ROOT, nodes, { resolve: () => "skip" }, io);
+    expect(result.skipped).toBe(1);
+    expect(result.confirmed).toBe(1);
+    // The skipped file is never decompressed; the uploaded one is materialized once.
+    expect(getKept).not.toHaveBeenCalled();
+    expect(getNew).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails a lazy file gracefully when its bytes can't be read from the archive", async () => {
+    const { io } = makeIO();
+    const nodes: DroppedNode[] = [
+      { kind: "file", name: "corrupt.txt", size: 5, getFile: vi.fn(async () => { throw new Error("bad CRC"); }) },
+    ];
+    const result = await runUploadPlan(ROOT, nodes, { resolve: () => "new_version" }, io);
+    expect(result.failed).toBe(1);
+    expect(io.uploadFile).not.toHaveBeenCalled();
+    expect(result.outcomes[0]!.detail).toMatch(/archive/i);
+  });
+
   it("marks descendants FAILED when their parent folder cannot be created", async () => {
     const { io } = makeIO();
     io.createFolder = vi.fn(async () => { const e = new Error("403"); (e as { status?: number }).status = 403; throw e; });

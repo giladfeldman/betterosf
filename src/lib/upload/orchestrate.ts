@@ -1,5 +1,6 @@
 import type { FileEntry } from "@/lib/osf/files";
-import type { DroppedNode, FileOutcome, TreeUploadTarget, UploadPlanResult, ConflictChoice } from "./types";
+import type { DroppedNode, DroppedFileNode, FileOutcome, TreeUploadTarget, UploadPlanResult, ConflictChoice } from "./types";
+import { droppedFileSize, materializeDroppedFile } from "./types";
 import { classifyUploadError, type ClassifyInput } from "./classify";
 import { withRetry } from "./retry";
 
@@ -60,7 +61,7 @@ export async function runUploadPlan(
     for (const child of children) {
       const relPath = `${relBase}${child.name}`;
       if (child.kind === "file") {
-        emit({ path: relPath, name: child.name, size: child.file.size, status: "failed", cause, detail, attempts: 0 });
+        emit({ path: relPath, name: child.name, size: droppedFileSize(child), status: "failed", cause, detail, attempts: 0 });
       } else {
         failSubtree(child.children, `${relPath}/`, detail, cause);
       }
@@ -78,18 +79,29 @@ export async function runUploadPlan(
 
   async function processFile(
     target: TreeUploadTarget,
-    file: File,
+    node: DroppedFileNode,
     relPath: string,
     existing: FileEntry | undefined
   ): Promise<void> {
+    const size = droppedFileSize(node);
     let overwrite = false;
     if (existing && existing.kind === "file") {
-      const choice = policy.resolve({ path: relPath, name: file.name, size: file.size, existingSize: existing.size });
+      const choice = policy.resolve({ path: relPath, name: node.name, size, existingSize: existing.size });
       if (choice === "skip") {
-        emit({ path: relPath, name: file.name, size: file.size, status: "skipped", attempts: 0 });
+        emit({ path: relPath, name: node.name, size, status: "skipped", attempts: 0 });
         return;
       }
       overwrite = true;
+    }
+    // Materialize the bytes only now that we are actually uploading this file — for a
+    // ZIP this decompresses just this entry, so a large archive never sits fully in memory.
+    let file: File;
+    try {
+      file = await materializeDroppedFile(node);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      emit({ path: relPath, name: node.name, size, status: "failed", cause: "betterosf", detail: `Could not read "${node.name}" from the archive: ${detail}`, attempts: 0 });
+      return;
     }
     let attempts = 0;
     try {
@@ -104,13 +116,13 @@ export async function runUploadPlan(
       );
     } catch (error) {
       const c = classifyUploadError(toClassifyInput(error));
-      emit({ path: relPath, name: file.name, size: file.size, status: "failed", cause: c.cause, detail: c.message, attempts });
+      emit({ path: relPath, name: node.name, size, status: "failed", cause: c.cause, detail: c.message, attempts });
       return;
     }
     // VERIFY by re-list: the file must now exist with matching byte-size.
     const ok = await verifyPresent(target, file);
-    if (ok) emit({ path: relPath, name: file.name, size: file.size, status: "confirmed", attempts });
-    else emit({ path: relPath, name: file.name, size: file.size, status: "failed", cause: "unknown", detail: "Upload reported success but verification (re-list) could not confirm the file on OSF.", attempts });
+    if (ok) emit({ path: relPath, name: node.name, size, status: "confirmed", attempts });
+    else emit({ path: relPath, name: node.name, size, status: "failed", cause: "unknown", detail: "Upload reported success but verification (re-list) could not confirm the file on OSF.", attempts });
   }
 
   async function processFolder(
@@ -167,7 +179,7 @@ export async function runUploadPlan(
     for (const child of children) {
       const relPath = `${relBase}${child.name}`;
       if (child.kind === "file") {
-        await processFile(target, child.file, relPath, byName.get(child.name));
+        await processFile(target, child, relPath, byName.get(child.name));
       } else {
         await processFolder(target, child, relPath, byName.get(child.name));
       }

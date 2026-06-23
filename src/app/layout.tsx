@@ -1,5 +1,6 @@
 import "@/styles/globals.css";
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { ThemeProvider } from "next-themes";
 import { UserMenu } from "@/components/UserMenu";
 import { QuotaBanner } from "@/components/QuotaBanner";
@@ -11,7 +12,10 @@ export const metadata: Metadata = {
   description: "A better interface to the Open Science Framework.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // The middleware sets a per-request CSP nonce; hand it to next-themes so its
+  // inline anti-FOUC script carries the nonce (strict-dynamic blocks it otherwise).
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -26,7 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           Skip to content
         </a>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem nonce={nonce}>
           <header className="border-b border-neutral-200 dark:border-neutral-800 px-4 sm:px-6 py-3 flex flex-wrap justify-between items-center gap-2">
             <div className="flex items-center gap-4">
               <a href="/" className="font-semibold" aria-label="BetterOSF home">

@@ -1,9 +1,33 @@
 import type { TreeUploadTarget } from "@/components/UnifiedTreeNode";
 
-/** A file or folder captured from a browser drag-drop, with nested structure. */
+/** A file in a dropped/extracted tree.
+ *  - Drag-drop sets `file` eagerly (disk-backed FileSystemEntry handle, cheap to hold).
+ *  - ZIP sets `size` + a lazy `getFile` so the archive entry is only decompressed at
+ *    upload time (keeps a GB archive from being fully materialized in memory). */
+export type DroppedFileNode = {
+  kind: "file";
+  name: string;
+  file?: File;
+  size?: number;
+  getFile?: () => Promise<File>;
+};
+
+/** A file or folder captured from a drag-drop or extracted from a ZIP, nested. */
 export type DroppedNode =
-  | { kind: "file"; name: string; file: File }
+  | DroppedFileNode
   | { kind: "folder"; name: string; children: DroppedNode[] };
+
+/** Byte size of a dropped file node, whether eager (drag-drop) or lazy (ZIP). */
+export function droppedFileSize(node: DroppedFileNode): number {
+  return node.size ?? node.file?.size ?? 0;
+}
+
+/** Materialize a dropped file node's bytes (decompresses a ZIP entry on demand). */
+export function materializeDroppedFile(node: DroppedFileNode): Promise<File> {
+  if (node.getFile) return node.getFile();
+  if (node.file) return Promise.resolve(node.file);
+  throw new Error(`Dropped file "${node.name}" has no bytes (neither file nor getFile).`);
+}
 
 /** Plain-language classification of why an upload failed. */
 export type UploadCause =

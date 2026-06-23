@@ -90,6 +90,12 @@ After this release, **provision Vercel KV** at https://vercel.com/your-team/bett
 - **Accessibility polish:** skip-to-content link, reduced-motion + high-contrast media queries, focus-visible rings everywhere.
 - **Perf:** preconnect to `api.osf.io` + `files.osf.io` to speed up first contentful paint.
 
+## v1.2.0 (Recursive ZIP upload + direct large-file uploads) — what's new
+
+- **Upload a ZIP** tab in the upload dialog: pick a `.zip`, BetterOSF extracts its folder structure, shows the full tree for confirmation (per-file deselect, OS junk like `__MACOSX`/`.DS_Store` filtered), then recreates that exact hierarchy of folders + files inside the chosen OSF Storage folder — like pushing a directory.
+- **Direct browser → OSF uploads for everything** (single files, dropped folders, ZIPs). File bytes `PUT` straight from the browser to OSF Waterbutler, bypassing Vercel's 4.5 MB serverless body limit — so uploads up to OSF's 5 GB/file work and **never silently fail**. ZIP entries are decompressed lazily (one at a time) so a multi-GB archive never sits fully in memory. The OSF access token is fetched on demand (`/api/osf/upload-token`), kept in memory only, pinned to `*.osf.io`, and cleared after each batch.
+- **Hardened Content-Security-Policy:** the CSP is now enforced (not report-only) and built per-request in `src/middleware.ts` with a script `nonce` + `strict-dynamic` (no `'unsafe-inline'` for scripts on modern browsers). A tight `connect-src 'self' https://*.osf.io` ensures the in-browser upload token can only ever be sent to OSF.
+
 ## Not yet — possible future work
 
 - Full-text search inside file contents

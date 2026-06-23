@@ -12,11 +12,9 @@ const config: NextConfig = {
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "X-Frame-Options", value: "SAMEORIGIN" },
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
-          // Start with report-only to observe CSP violations before enforcing.
-          {
-            key: "Content-Security-Policy-Report-Only",
-            value: "default-src 'self' https: data: blob:; base-uri 'self'; frame-ancestors 'self'; object-src 'none'",
-          },
+          // Content-Security-Policy is set per-request in src/middleware.ts so each
+          // document gets a fresh script nonce (strict-dynamic + nonce, no static
+          // 'unsafe-inline'). See buildCsp()/navPassthrough() there.
         ],
       },
     ];
