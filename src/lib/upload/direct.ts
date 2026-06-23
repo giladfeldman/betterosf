@@ -20,6 +20,7 @@ import {
   type UploadTarget,
 } from "@/lib/osf/waterbutler-url";
 import type { FileEntry } from "@/lib/osf/files";
+import { readErrorResponse, throwFromResponse, parseRetryAfter, type HttpError } from "@/lib/http/read-error";
 
 type CachedToken = { token: string; expiresAt: number | null };
 
@@ -37,10 +38,17 @@ function tokenStillFresh(c: CachedToken): boolean {
 async function fetchUploadToken(): Promise<CachedToken> {
   const res = await fetch("/api/osf/upload-token", { cache: "no-store" });
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
-    const code = body.code === "unauthorized" ? "unauthorized" : "forbidden";
-    const status = res.status === 401 ? 401 : 403;
-    throw new OsfWriteError(status, code, String(body.error ?? "Could not authorize this upload."));
+    const { status, message } = await readErrorResponse(res);
+    // 401/403 are genuine permission states; anything else (e.g. a middleware 429
+    // text response) keeps its real status so the classifier labels it correctly.
+    if (status === 401 || status === 403) {
+      throw new OsfWriteError(status, status === 401 ? "unauthorized" : "forbidden", message);
+    }
+    const e = new Error(message) as HttpError;
+    e.status = status;
+    const ra = parseRetryAfter(res);
+    if (ra !== undefined) e.retryAfterMs = ra;
+    throw e;
   }
   const data = (await res.json()) as { token: string; expiresAt: number | null };
   return { token: data.token, expiresAt: data.expiresAt ?? null };
@@ -70,11 +78,7 @@ export function clearUploadToken(): void {
 
 async function existingNames(guid: string, listingUrl: string): Promise<Set<string>> {
   const res = await fetch(`/api/files/${guid}/folder?` + new URLSearchParams({ listingUrl, fresh: "1" }), { cache: "no-store" });
-  if (!res.ok) {
-    const e = new Error(await res.text().catch(() => "Could not read folder")) as Error & { status?: number };
-    e.status = res.status;
-    throw e;
-  }
+  if (!res.ok) await throwFromResponse(res, "Could not read folder");
   const data = (await res.json()) as { entries: FileEntry[] };
   return new Set(data.entries.map((entry) => entry.name));
 }
@@ -93,7 +97,13 @@ async function putBytes(url: string, file: File): Promise<void> {
   }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw mapUploadStatus(res.status, body.slice(0, 500));
+    const err = mapUploadStatus(res.status, body.slice(0, 500)) as OsfWriteError & { retryAfterMs?: number };
+    // Honor OSF's Retry-After on a 429 so the retry waits exactly long enough.
+    if (res.status === 429) {
+      const ra = parseRetryAfter(res);
+      if (ra !== undefined) err.retryAfterMs = ra;
+    }
+    throw err;
   }
 }
 
@@ -105,7 +115,7 @@ async function putBytes(url: string, file: File): Promise<void> {
 export async function uploadFileDirect(
   target: UploadTarget,
   file: File,
-  opts: { overwrite?: boolean } = {}
+  opts: { overwrite?: boolean; skipDuplicateCheck?: boolean } = {}
 ): Promise<void> {
   const checked = validateUploadTarget(target);
   const name = cleanName(file.name);
@@ -113,8 +123,10 @@ export async function uploadFileDirect(
     throw new OsfWriteError(413, "too_large", "OSF limits uploads to 5 GB per file.");
   }
   // Mirror the server's duplicate guard so a manual upload never silently overwrites.
-  // The orchestrated path passes overwrite=true once it has resolved the conflict.
-  if (!opts.overwrite) {
+  // The orchestrated path already listed the folder and resolved conflicts, so it sets
+  // skipDuplicateCheck to avoid a redundant per-file list (which doubled API calls and
+  // made rate-limiting far more likely).
+  if (!opts.overwrite && !opts.skipDuplicateCheck) {
     const names = await existingNames(checked.guid, checked.listingUrl);
     if (names.has(name)) {
       throw new OsfWriteError(409, "conflict", `"${name}" already exists in this folder.`);

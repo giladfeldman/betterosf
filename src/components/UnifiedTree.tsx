@@ -14,6 +14,7 @@ import { OPEN_UPLOAD_EVENT } from "./UploadFilesButton";
 import type { DroppedNode } from "@/lib/upload/types";
 import { getPref, setPref } from "@/lib/prefs";
 import { listPins, type FavoriteRef } from "@/lib/favorites";
+import { readErrorResponse } from "@/lib/http/read-error";
 
 type FlatRow = {
   id: string;
@@ -268,23 +269,30 @@ export function UnifiedTree({
   // In-flight de-dupe — keep a separate set of keys currently being fetched so
   // mass expand-all doesn't fire the same URL N times.
   const inFlightRef = useRef<Set<string>>(new Set());
+  // Records the params each folder was fetched with, so a manual "Refresh" can replay
+  // them with fresh=1 (the listing key alone doesn't carry the listingUrl).
+  const folderParamsRef = useRef<Map<string, { nodeGuid: string; provider: string; materializedPath: string; listingUrl: string }>>(new Map());
 
   // Fetch files for a folder when expanded. Files are keyed by node guid because
   // the same materializedPath can occur in multiple nodes (root + each component).
+  // `force` re-fetches even if cached AND bypasses the server cache (fresh=1) — used
+  // after an upload/folder-create and by the manual Refresh button so the tree reflects
+  // OSF immediately instead of a stale ≤5-min cached listing.
   const fetchFiles = useCallback(
-    async (nodeGuid: string, provider: string, materializedPath: string, listingUrl: string) => {
+    async (nodeGuid: string, provider: string, materializedPath: string, listingUrl: string, force = false) => {
       const key = `${nodeGuid}|${provider}:${materializedPath}`;
-      if (loadedEntries[key]) return;
+      folderParamsRef.current.set(key, { nodeGuid, provider, materializedPath, listingUrl });
+      if (!force && loadedEntries[key]) return;
       if (inFlightRef.current.has(key)) return;
       inFlightRef.current.add(key);
       setLoadingKeys((prev) => ({ ...prev, [key]: true }));
       try {
-        const res = await fetch(
-          `/api/files/${nodeGuid}/folder?` + new URLSearchParams({ provider, listingUrl })
-        );
+        const params = new URLSearchParams({ provider, listingUrl });
+        if (force) params.set("fresh", "1");
+        const res = await fetch(`/api/files/${nodeGuid}/folder?` + params);
         if (!res.ok) {
-          const body = await res.text().catch(() => "");
-          throw new Error(body || `OSF returned ${res.status}`);
+          const { message } = await readErrorResponse(res);
+          throw new Error(message);
         }
         const data: { entries: FileEntry[] } = await res.json();
         setLoadedEntries((prev) => ({ ...prev, [key]: data.entries }));
@@ -298,7 +306,7 @@ export function UnifiedTree({
       } catch (e) {
         setFolderFailures((prev) => ({
           ...prev,
-          [key]: e instanceof Error ? e.message.slice(0, 160) : "Couldn't load this folder",
+          [key]: e instanceof Error ? e.message.slice(0, 200) : "Couldn't load this folder",
         }));
       } finally {
         inFlightRef.current.delete(key);
@@ -538,16 +546,28 @@ export function UnifiedTree({
 
   const refreshUploadTarget = useCallback(
     (target: TreeUploadTarget) => {
-      const key = folderKey(target.guid, target.provider, target.path);
-      setLoadedEntries((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
-      void fetchFiles(target.guid, target.provider, target.path, target.listingUrl);
+      // force=true bypasses both the stale-closure early-return and the server cache,
+      // so a just-created folder / uploaded file shows up immediately (no page reload).
+      void fetchFiles(target.guid, target.provider, target.path, target.listingUrl, true);
     },
     [fetchFiles]
   );
+
+  // Manual "Refresh" — re-fetch every already-loaded folder with fresh OSF data.
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshAll = useCallback(async () => {
+    const params = Array.from(folderParamsRef.current.values());
+    setFolderFailures({});
+    setLoadedEntries({});
+    setRefreshing(true);
+    try {
+      await Promise.all(
+        params.map((p) => fetchFiles(p.nodeGuid, p.provider, p.materializedPath, p.listingUrl, true))
+      );
+    } finally {
+      setRefreshing(false);
+    }
+  }, [fetchFiles]);
 
   const downloadSelection = useCallback(async () => {
     const items = Object.values(selected);
@@ -1206,6 +1226,16 @@ export function UnifiedTree({
         <button type="button" onClick={collapseAll} className="hover:underline">Collapse all</button>
         <button
           type="button"
+          onClick={() => void refreshAll()}
+          disabled={refreshing}
+          title="Re-fetch every loaded folder from OSF (bypasses cache)"
+          className="inline-flex items-center gap-1 hover:underline disabled:text-neutral-400 disabled:no-underline"
+        >
+          <span className={refreshing ? "inline-block animate-spin" : "inline-block"} aria-hidden="true">⟳</span>
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
+        <button
+          type="button"
           onClick={() => {
             setSelectMode((on) => !on);
             if (selectMode) clearSelection();
@@ -1297,7 +1327,7 @@ export function UnifiedTree({
                             delete next[folderKey(r.guid, r.provider, r.path)];
                             return next;
                           });
-                          void fetchFiles(r.guid, r.provider, r.path, r.listingUrl);
+                          void fetchFiles(r.guid, r.provider, r.path, r.listingUrl, true);
                         }
                       : undefined
                   }

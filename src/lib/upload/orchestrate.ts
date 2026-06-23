@@ -7,7 +7,7 @@ import { withRetry } from "./retry";
 export type UploadIO = {
   list: (target: TreeUploadTarget) => Promise<FileEntry[]>;
   createFolder: (target: TreeUploadTarget, name: string) => Promise<void>;
-  uploadFile: (target: TreeUploadTarget, file: File, opts: { overwrite: boolean }) => Promise<void>;
+  uploadFile: (target: TreeUploadTarget, file: File, opts: { overwrite: boolean; skipDuplicateCheck?: boolean }) => Promise<void>;
 };
 
 export type ConflictContext = { path: string; name: string; size: number; existingSize: number | null };
@@ -17,7 +17,18 @@ export type RunOpts = {
   maxAttempts?: number;
   sleep?: (ms: number) => Promise<void>;
   onProgress?: (outcome: FileOutcome) => void;
+  /** Fired when a file's upload begins (for a live "uploading…" row). */
+  onFileStart?: (info: { path: string; name: string; size: number }) => void;
 };
+
+/** Read a server `Retry-After` (ms) attached to a thrown upload error, if any. */
+function errorRetryAfterMs(error: unknown): number | undefined {
+  if (error && typeof error === "object") {
+    const ms = (error as { retryAfterMs?: unknown }).retryAfterMs;
+    if (typeof ms === "number") return ms;
+  }
+  return undefined;
+}
 
 function toClassifyInput(error: unknown): ClassifyInput {
   if (error && typeof error === "object") {
@@ -52,7 +63,7 @@ export async function runUploadPlan(
   io: UploadIO,
   opts: RunOpts = {}
 ): Promise<UploadPlanResult> {
-  const { maxAttempts = 4, sleep, onProgress } = opts;
+  const { maxAttempts = 4, sleep, onProgress, onFileStart } = opts;
   const outcomes: FileOutcome[] = [];
 
   const emit = (o: FileOutcome) => { outcomes.push(o); onProgress?.(o); };
@@ -93,6 +104,7 @@ export async function runUploadPlan(
       }
       overwrite = true;
     }
+    onFileStart?.({ path: relPath, name: node.name, size });
     // Materialize the bytes only now that we are actually uploading this file — for a
     // ZIP this decompresses just this entry, so a large archive never sits fully in memory.
     let file: File;
@@ -106,10 +118,13 @@ export async function runUploadPlan(
     let attempts = 0;
     try {
       await withRetry(
-        () => io.uploadFile(target, file, { overwrite }),
+        // The orchestrator already listed this folder and resolved the conflict, so the
+        // direct uploader can skip its own per-file duplicate list (cuts API calls ~in half).
+        () => io.uploadFile(target, file, { overwrite, skipDuplicateCheck: true }),
         {
           maxAttempts,
           shouldRetry: (e) => classifyUploadError(toClassifyInput(e)).retryable,
+          retryAfterMs: errorRetryAfterMs,
           sleep,
           onAttempt: (n) => { attempts = n; },
         }

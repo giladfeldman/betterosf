@@ -32,7 +32,8 @@ export function materializeDroppedFile(node: DroppedFileNode): Promise<File> {
 /** Plain-language classification of why an upload failed. */
 export type UploadCause =
   | "connectivity"   // network/offline; fetch threw
-  | "osf_down"       // OSF 5xx or repeated 429 after retries
+  | "rate_limited"   // 429 — OSF or BetterOSF throttling; retried with Retry-After
+  | "osf_down"       // OSF 5xx after retries
   | "permission"     // 401/403 — session expired or no write access
   | "betterosf"      // our 400/validation/unexpected — our bug
   | "unknown";

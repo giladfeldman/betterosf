@@ -14,9 +14,9 @@ describe("classifyUploadError", () => {
     expect(r.retryable).toBe(true);
   });
 
-  it("treats 429 as retryable osf_down", () => {
+  it("treats 429 as retryable rate_limited (distinct from 5xx)", () => {
     const r = classifyUploadError({ status: 429 });
-    expect(r.cause).toBe("osf_down");
+    expect(r.cause).toBe("rate_limited");
     expect(r.retryable).toBe(true);
   });
 

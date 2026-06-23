@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TreeUploadTarget } from "./UnifiedTreeNode";
+import { readErrorResponse } from "@/lib/http/read-error";
 
 export function NewFolderControl({
   target,
@@ -14,11 +15,17 @@ export function NewFolderControl({
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  const [done, setDone] = useState("");
+  const doneTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (doneTimer.current) clearTimeout(doneTimer.current); }, []);
 
   function reset() {
+    if (doneTimer.current) clearTimeout(doneTimer.current);
     setOpen(false);
     setName("");
     setError("");
+    setDone("");
     setCreating(false);
   }
 
@@ -41,13 +48,17 @@ export function NewFolderControl({
         }),
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => ({ error: "Folder creation failed" }));
-        setError(String(body.error ?? "Folder creation failed"));
+        // Surface the REAL server/OSF message (incl. non-JSON 429 text), not a generic string.
+        const { message } = await readErrorResponse(res);
+        setError(message || "Folder creation failed");
         setCreating(false);
         return;
       }
-      reset();
+      // Success: confirm explicitly, refresh the tree so the folder appears, then close.
+      setCreating(false);
+      setDone(`✓ Created "${folderName}"`);
       onCreated?.(target);
+      doneTimer.current = setTimeout(reset, 1600);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Folder creation failed");
       setCreating(false);
@@ -71,8 +82,16 @@ export function NewFolderControl({
     );
   }
 
+  if (done) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300" onClick={(e) => e.stopPropagation()}>
+        {done}
+      </span>
+    );
+  }
+
   return (
-    <span className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+    <span className="inline-flex flex-wrap items-center gap-1" onClick={(e) => e.stopPropagation()}>
       <input
         autoFocus
         value={name}
@@ -97,7 +116,7 @@ export function NewFolderControl({
         aria-busy={creating}
         className="shrink-0 rounded border border-emerald-300 bg-emerald-50 px-1.5 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
       >
-        {creating ? "..." : "Create"}
+        {creating ? "Creating…" : error ? "Retry" : "Create"}
       </button>
       <button
         type="button"
@@ -107,8 +126,8 @@ export function NewFolderControl({
         Cancel
       </button>
       {error && (
-        <span className="text-[11px] text-red-600 dark:text-red-400" title={error}>
-          {error.length > 48 ? `${error.slice(0, 48)}…` : error}
+        <span className="basis-full break-words text-[11px] text-red-600 dark:text-red-400">
+          {error}
         </span>
       )}
     </span>

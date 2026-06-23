@@ -96,6 +96,14 @@ After this release, **provision Vercel KV** at https://vercel.com/your-team/bett
 - **Direct browser → OSF uploads for everything** (single files, dropped folders, ZIPs). File bytes `PUT` straight from the browser to OSF Waterbutler, bypassing Vercel's 4.5 MB serverless body limit — so uploads up to OSF's 5 GB/file work and **never silently fail**. ZIP entries are decompressed lazily (one at a time) so a multi-GB archive never sits fully in memory. The OSF access token is fetched on demand (`/api/osf/upload-token`), kept in memory only, pinned to `*.osf.io`, and cleared after each batch.
 - **Hardened Content-Security-Policy:** the CSP is now enforced (not report-only) and built per-request in `src/middleware.ts` with a script `nonce` + `strict-dynamic` (no `'unsafe-inline'` for scripts on modern browsers). A tight `connect-src 'self' https://*.osf.io` ensures the in-browser upload token can only ever be sent to OSF.
 
+## v1.2.1 (Upload reliability + recovery UX) — what's new
+
+- **Clear, real error messages.** Upload/folder failures now show the *actual* OSF/server response (with HTTP status) instead of a generic "Upload failed" — client code reads the raw response body, so a rate-limit or server error is no longer masked.
+- **Self-recovering uploads.** Directory uploads issue ~half as many OSF calls (no redundant per-file folder check) and honor `Retry-After` on a 429, so transient rate-limits retry and recover instead of failing the batch.
+- **Live upload status + retry.** The dialog shows an `⤴ uploading…` row for the in-flight file and the real error inline per failed file, with a Retry.
+- **Folder create gives feedback + refreshes.** Creating a folder now shows an explicit `✓ Created` (or the full error + a Retry) and the new folder appears immediately — no page reload.
+- **⟳ Refresh button** in the file/directory navigator re-fetches every loaded folder from OSF, bypassing the cache (fixes stale listings after changes made elsewhere).
+
 ## Not yet — possible future work
 
 - Full-text search inside file contents

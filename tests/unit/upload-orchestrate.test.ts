@@ -69,7 +69,7 @@ describe("runUploadPlan", () => {
   it("overwrites a conflicting file (new version) when the policy says new_version", async () => {
     const { io } = makeIO({ "https://api.osf.io/v2/nodes/ezcuj/files/osfstorage/": [{ name: "a.txt", size: 5, kind: "file" }] });
     const result = await runUploadPlan(ROOT, [fileNode("a.txt")], { resolve: () => "new_version" }, io);
-    expect(io.uploadFile).toHaveBeenCalledWith(expect.anything(), expect.anything(), { overwrite: true });
+    expect(io.uploadFile).toHaveBeenCalledWith(expect.anything(), expect.anything(), { overwrite: true, skipDuplicateCheck: true });
     expect(result.confirmed).toBe(1);
   });
 

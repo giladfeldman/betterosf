@@ -12,6 +12,7 @@ import { uploadFileDirect, clearUploadToken } from "@/lib/upload/direct";
 import { zipToDroppedNodes } from "@/lib/upload/zip";
 import { appendActivity, patchActivity } from "@/lib/upload/log";
 import type { FileEntry } from "@/lib/osf/files";
+import { readErrorResponse, throwFromResponse } from "@/lib/http/read-error";
 
 type WriteStatus = {
   signedIn: boolean;
@@ -107,6 +108,7 @@ export function UploadDialog({
 
   // ---- Drag-drop payload mode (integrity-first upload of dropped files/folders) ----
   const [running, setRunning] = useState(false);
+  const [uploadingPath, setUploadingPath] = useState<string | null>(null);
   const [outcomes, setOutcomes] = useState<FileOutcome[]>([]);
   const [skip, setSkip] = useState<Set<string>>(new Set());
   const [acknowledged, setAcknowledged] = useState(false);
@@ -167,7 +169,7 @@ export function UploadDialog({
   const makeIO = useCallback((guid: string): UploadIO => ({
     list: async (t) => {
       const res = await fetch(`/api/files/${guid}/folder?` + new URLSearchParams({ listingUrl: t.listingUrl, fresh: "1" }), { cache: "no-store" });
-      if (!res.ok) { const e = new Error(await res.text().catch(() => "Could not read folder")) as Error & { status?: number }; e.status = res.status; throw e; }
+      if (!res.ok) await throwFromResponse(res, "Could not read folder");
       const data: { entries: FileEntry[] } = await res.json();
       return data.entries;
     },
@@ -177,13 +179,14 @@ export function UploadDialog({
         body: JSON.stringify({ provider: t.provider, path: t.path, listingUrl: t.listingUrl, uploadUrl: t.uploadUrl, newFolderUrl: t.newFolderUrl, name }),
       });
       // 409 = the folder already exists → merge into it, not an error.
-      if (!res.ok && res.status !== 409) { const b = await res.json().catch(() => ({})); const e = new Error(String(b.error ?? "Folder creation failed")) as Error & { status?: number; code?: string }; e.status = res.status; e.code = b.code; throw e; }
+      if (!res.ok && res.status !== 409) await throwFromResponse(res, "Folder creation failed");
     },
     // File bytes go straight from the browser to OSF Waterbutler (bypassing Vercel's
     // 4.5 MB function-body limit so any size up to OSF's 5 GB/file works and never
     // silently fails). Listing + folder-create above stay on the server routes, so the
-    // OSF token is only needed in the browser for this PUT.
-    uploadFile: (t, file, { overwrite }) => uploadFileDirect(t, file, { overwrite }),
+    // OSF token is only needed in the browser for this PUT. Forward opts verbatim so the
+    // orchestrator's skipDuplicateCheck reaches direct.ts (halves the per-file API calls).
+    uploadFile: (t, file, opts) => uploadFileDirect(t, file, opts),
   }), []);
 
   const execute = useCallback(async (nodesToRun: DroppedNode[], carry: FileOutcome[]) => {
@@ -198,15 +201,20 @@ export function UploadDialog({
 
     const live: FileOutcome[] = [...carry];
     setOutcomes([...live]);
+    setUploadingPath(null);
     let result;
     try {
       result = await runUploadPlan(
         target, nodesToRun,
         { resolve: () => "new_version" as ConflictChoice },
         makeIO(target.guid),
-        { onProgress: (o) => { live.push(o); setOutcomes([...live]); } }
+        {
+          onFileStart: (info) => setUploadingPath(info.path),
+          onProgress: (o) => { live.push(o); setUploadingPath((p) => (p === o.path ? null : p)); setOutcomes([...live]); },
+        }
       );
     } finally {
+      setUploadingPath(null);
       // Drop the in-memory OSF token as soon as the batch ends (success or failure).
       clearUploadToken();
     }
@@ -344,14 +352,15 @@ export function UploadDialog({
       }),
     });
     if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: "Folder creation failed" }));
-      setFolderError(String(body.error ?? "Folder creation failed"));
+      // Surface the REAL message (incl. non-JSON 429 text); keep the name for one-click retry.
+      const { message } = await readErrorResponse(res);
+      setFolderError(message || "Folder creation failed");
       setFolderState("error");
       return;
     }
     setFolderName("");
     setFolderState("done");
-    onComplete(target);
+    onComplete(target); // forced tree refresh → the new folder appears immediately
   }
 
   return (
@@ -511,17 +520,32 @@ export function UploadDialog({
               {(running || outcomes.length > 0) && (
                 <ul className="max-h-72 overflow-auto rounded border border-neutral-200 text-sm dark:border-neutral-800">
                   {outcomes.map((o) => (
-                    <li key={o.path} className="flex items-center gap-3 border-b border-neutral-100 px-3 py-1.5 last:border-b-0 dark:border-neutral-900">
-                      <span className="min-w-0 flex-1 truncate" title={o.detail ? `${o.path} — ${o.detail}` : o.path}>{o.path}</span>
-                      <span className={`shrink-0 text-xs ${o.status === "failed" ? "text-red-600 dark:text-red-400" : o.status === "confirmed" ? "text-green-700 dark:text-green-400" : "text-neutral-500"}`}>
-                        {o.status === "confirmed" ? "✓ on OSF" : o.status === "skipped" ? "skipped" : `✗ ${o.cause}`}
-                      </span>
+                    <li key={o.path} className="border-b border-neutral-100 px-3 py-1.5 last:border-b-0 dark:border-neutral-900">
+                      <div className="flex items-center gap-3">
+                        <span className="min-w-0 flex-1 truncate" title={o.detail ? `${o.path} — ${o.detail}` : o.path}>{o.path}</span>
+                        <span className={`shrink-0 text-xs ${o.status === "failed" ? "text-red-600 dark:text-red-400" : o.status === "confirmed" ? "text-green-700 dark:text-green-400" : "text-neutral-500"}`}>
+                          {o.status === "confirmed" ? "✓ on OSF" : o.status === "skipped" ? "skipped" : `✗ ${o.cause}`}
+                        </span>
+                      </div>
+                      {o.status === "failed" && o.detail && (
+                        <div className="mt-1 break-words text-xs text-red-600 dark:text-red-400">{o.detail}</div>
+                      )}
                     </li>
                   ))}
+                  {running && uploadingPath && !outcomes.some((o) => o.path === uploadingPath) && (
+                    <li className="flex items-center gap-3 px-3 py-1.5">
+                      <span className="min-w-0 flex-1 truncate text-neutral-600 dark:text-neutral-300" title={uploadingPath}>{uploadingPath}</span>
+                      <span className="shrink-0 text-xs text-blue-600 dark:text-blue-400">⤴ uploading…</span>
+                    </li>
+                  )}
                 </ul>
               )}
 
-              {running && <p className="text-xs text-neutral-500">Uploading and verifying each file on OSF…</p>}
+              {running && (
+                <p className="text-xs text-neutral-500">
+                  {uploadingPath ? `Uploading ${uploadingPath}…` : "Uploading and verifying each file on OSF…"}
+                </p>
+              )}
 
               {reconciled && reconciled.failed === 0 && (
                 <div className="rounded border border-green-300 bg-green-50 p-3 text-sm text-green-900 dark:border-green-800 dark:bg-green-950 dark:text-green-100">
@@ -597,11 +621,11 @@ export function UploadDialog({
                   disabled={!folderName.trim() || folderState === "creating"}
                   className="rounded border border-neutral-300 px-3 py-1 text-sm hover:bg-neutral-50 disabled:text-neutral-500 dark:border-neutral-700 dark:hover:bg-neutral-900"
                 >
-                  {folderState === "creating" ? "Creating..." : "Create folder"}
+                  {folderState === "creating" ? "Creating…" : folderState === "error" ? "Retry" : "Create folder"}
                 </button>
-                {folderState === "done" && <span className="text-sm text-green-700 dark:text-green-400">Created</span>}
+                {folderState === "done" && <span className="text-sm font-medium text-green-700 dark:text-green-400">✓ Created</span>}
               </div>
-              {folderError && <p className="text-sm text-red-600 dark:text-red-400">{folderError}</p>}
+              {folderError && <p className="break-words text-sm text-red-600 dark:text-red-400">{folderError}</p>}
 
               {items.length > 0 && (
                 <div className="rounded border border-neutral-200 dark:border-neutral-800">

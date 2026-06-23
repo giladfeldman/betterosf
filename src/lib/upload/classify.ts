@@ -19,7 +19,10 @@ export function classifyUploadError(input: ClassifyInput): Classification {
     return { cause: "connectivity", retryable: true, message: detail || "Network error — could not reach OSF." };
   }
   const status = input.status ?? 0;
-  if (status === 429 || (status >= 500 && status <= 599)) {
+  if (status === 429) {
+    return { cause: "rate_limited", retryable: true, message: detail || "Rate-limited (HTTP 429) — retrying shortly." };
+  }
+  if (status >= 500 && status <= 599) {
     return { cause: "osf_down", retryable: true, message: detail || `OSF is unavailable (status ${status}).` };
   }
   if (status === 401 || status === 403) {

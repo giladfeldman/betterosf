@@ -65,6 +65,26 @@ describe("uploadFileDirect", () => {
     expect(calls.some((c) => c.url.includes("files.osf.io"))).toBe(true);
   });
 
+  it("skips the per-file list when skipDuplicateCheck is set (cuts the API burst)", async () => {
+    const { calls } = makeFetch({});
+    await uploadFileDirect(TARGET, file(), { skipDuplicateCheck: true });
+    expect(calls.some((c) => c.url.includes("/folder"))).toBe(false);
+    expect(calls.some((c) => c.url.includes("files.osf.io"))).toBe(true);
+  });
+
+  it("surfaces the REAL body on a non-JSON 429 from the folder-list call", async () => {
+    makeFetch({ list: () => new Response("Too many requests. Please wait and try again.", { status: 429, headers: { "Content-Type": "text/plain" } }) });
+    await expect(uploadFileDirect(TARGET, file())).rejects.toMatchObject({
+      status: 429,
+      message: expect.stringContaining("Too many requests"),
+    });
+  });
+
+  it("attaches Retry-After (ms) when Waterbutler returns 429 on the PUT", async () => {
+    makeFetch({ put: () => new Response("slow down", { status: 429, headers: { "Retry-After": "7" } }) });
+    await expect(uploadFileDirect(TARGET, file(), { skipDuplicateCheck: true })).rejects.toMatchObject({ status: 429, retryAfterMs: 7000 });
+  });
+
   it("rejects files over OSF's 5 GB limit before any network call", async () => {
     const { fn } = makeFetch({});
     await expect(uploadFileDirect(TARGET, file("big.bin", OSF_MAX_FILE_SIZE + 1))).rejects.toMatchObject({ status: 413, code: "too_large" });
