@@ -21,3 +21,7 @@ public/pdf.worker.min.mjs
 .claude/skills/_project/deep-review-report-*.md
 .claude/skills/_project/deep-review-state.json
 .claude/skills/_project/deep-review-tmp/
+
+# post-deploy-verify run artifacts
+post-deploy-report.json
+test-results/

@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:post-deploy": "playwright test --config tests/post-deploy/playwright.config.ts tests/post-deploy/anon-probes.spec.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [],
