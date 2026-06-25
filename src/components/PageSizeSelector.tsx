@@ -26,16 +26,27 @@ export function PageSizeSelector({
   const params = useSearchParams();
 
   const fromUrl = params.get(paramName);
-  const [size, setSize] = useState<SizeOption>(50);
-
-  useEffect(() => {
-    const stored = getPref<SizeOption>(`pageSize.${prefKey}`, 50);
-    let initial: SizeOption = stored;
+  // Lazy initializer: derive the initial size from the URL param synchronously so
+  // the <select> renders the correct value on the first paint instead of flashing
+  // 50 and then correcting in an effect. The URL is the authoritative source for a
+  // paginated view; the localStorage pref only fills in when the URL omits size.
+  const [size, setSize] = useState<SizeOption>(() => {
     if (fromUrl !== null) {
       const parsed: number | string = isNaN(Number(fromUrl)) ? fromUrl : Number(fromUrl);
-      if (isValidOption(parsed)) initial = parsed;
+      if (isValidOption(parsed)) return parsed;
     }
-    setSize(initial);
+    return 50;
+  });
+
+  useEffect(() => {
+    // localStorage isn't available during SSR/first paint, so fold the stored
+    // pref in here — but only when the URL didn't already pin a size.
+    if (fromUrl !== null) {
+      const parsed: number | string = isNaN(Number(fromUrl)) ? fromUrl : Number(fromUrl);
+      if (isValidOption(parsed)) { setSize(parsed); return; }
+    }
+    const stored = getPref<SizeOption>(`pageSize.${prefKey}`, 50);
+    setSize(stored);
   }, [fromUrl, prefKey]);
 
   const onChange = (v: SizeOption) => {

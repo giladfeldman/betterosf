@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { TreeUploadTarget } from "./UnifiedTreeNode";
+import type { TreeUploadTarget } from "./tree-types";
 import { readErrorResponse } from "@/lib/http/read-error";
 
 export function NewFolderControl({

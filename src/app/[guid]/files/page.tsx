@@ -53,6 +53,7 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
             registrationTrees={fullTree.registrationTrees}
             linkedTrees={fullTree.linkedTrees}
             readOnly={isRegistration}
+            degraded={fullTree.degraded}
           />
         }
         right={

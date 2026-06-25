@@ -3,7 +3,8 @@ import { osfGet, osfGetUrl } from "./client";
 import { parseNode, type NodeView } from "./parse";
 import { collectAll } from "./paginate";
 import { parseQuery } from "@/lib/search/parser";
-import { compileQuery } from "@/lib/search/compile";
+import { compileQuery, MAX_QUERY_BRANCHES } from "@/lib/search/compile";
+import { sanitizeSort } from "./sort";
 
 export type UserView = {
   id: string;
@@ -72,11 +73,11 @@ export async function searchUserNodes(
   const plan = compileQuery(ast, "title");
   const page = opts?.page ?? 1;
   const size = opts?.perPage ?? 20;
-  const sort = opts?.sort;
+  const sort = sanitizeSort(opts?.sort);
 
   // OR-union across branches, single user's nodes endpoint
   const userPath = userId === "me" ? "users/me" : `users/${userId}`;
-  const branches = plan.requests.slice(0, 5);
+  const branches = plan.requests.slice(0, MAX_QUERY_BRANCHES);
 
   const responses = await Promise.all(branches.map(async (req) => {
     const qs = new URLSearchParams();

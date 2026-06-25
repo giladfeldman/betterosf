@@ -4,6 +4,12 @@ import { useEffect, useState } from "react";
 
 type Sheet = { name: string; rows: (string | number | boolean | null)[][] };
 
+// SheetJS Community (xlsx) parses untrusted public-OSF spreadsheets here, so cap
+// the input size to bound the blast radius of any parser-side ReDoS/prototype-
+// pollution path on a maliciously crafted file. 50 MB comfortably covers real
+// research spreadsheets; bigger files fall back to a download prompt.
+const MAX_XLSX_BYTES = 50 * 1024 * 1024;
+
 export function XlsxViewer({ url }: { url: string }) {
   const [sheets, setSheets] = useState<Sheet[] | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
@@ -16,7 +22,12 @@ export function XlsxViewer({ url }: { url: string }) {
         const [XLSX, res] = await Promise.all([import("xlsx"), fetch(url)]);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const buf = await res.arrayBuffer();
-        const wb = XLSX.read(buf, { type: "array" });
+        if (buf.byteLength > MAX_XLSX_BYTES) {
+          throw new Error(`Spreadsheet is too large to preview safely (${Math.round(buf.byteLength / 1024 / 1024)} MB). Download it to open in a spreadsheet app.`);
+        }
+        // Disable formula + HTML parsing: we only render cell values, and both are
+        // unnecessary attack surface for an untrusted file.
+        const wb = XLSX.read(buf, { type: "array", cellFormula: false, cellHTML: false });
         const out: Sheet[] = wb.SheetNames.map((name) => {
           const ws = wb.Sheets[name];
           if (!ws) return { name, rows: [] };

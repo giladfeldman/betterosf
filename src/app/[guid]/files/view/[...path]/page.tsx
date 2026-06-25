@@ -4,7 +4,7 @@ import { getProviderRootsAuto, getFolderContents, type FileEntry, type ProviderR
 import { collectFolderSkeleton } from "@/lib/osf/folder-skeleton";
 import { getNode, getAllLinkedNodes } from "@/lib/osf/nodes";
 import { getNodeRegistrations, getRegistration, type RegistrationView } from "@/lib/osf/registrations";
-import { collectFullTree, type FullProjectTree } from "@/lib/osf/full-tree";
+import { collectFullTree, EMPTY_TREE, type FullProjectTree } from "@/lib/osf/full-tree";
 import { OsfError } from "@/lib/osf/types";
 import type { NodeView } from "@/lib/osf/parse";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -15,8 +15,7 @@ import { PinButton } from "@/components/PinButton";
 import { RecordView } from "@/components/RecordView";
 import { FileMissing } from "@/components/FileMissing";
 import { UploadFilesButton } from "@/components/UploadFilesButton";
-
-const EMPTY_TREE: FullProjectTree = { rootSkeleton: [], components: [], totalComponents: 0, registrationTrees: [], totalRegistrations: 0, linkedTrees: [], totalLinked: 0 };
+import { encodePathSegments } from "@/lib/url";
 
 function safeDecode(s: string): string {
   try {
@@ -88,14 +87,14 @@ export default async function FileViewerPage({
     resourceKind === "registration"
       ? collectFolderSkeleton(guid, { kind: "registration" })
           .then((rootSkeleton): FullProjectTree => ({ ...EMPTY_TREE, rootSkeleton }))
-          .catch((): FullProjectTree => EMPTY_TREE)
+          .catch((): FullProjectTree => ({ ...EMPTY_TREE, degraded: true }))
       : collectFullTree(guid, {
           maxComponentsToRecurse: 3,
           maxRegistrationsToRecurse: 1,
           maxLinkedToRecurse: 1,
           componentTimeoutMs: 5_000,
           rootTimeoutMs: 10_000,
-        }).catch((): FullProjectTree => EMPTY_TREE),
+        }).catch((): FullProjectTree => ({ ...EMPTY_TREE, degraded: true })),
     resourceKind === "registration"
       ? Promise.resolve<NodeView[]>([])
       : getAllLinkedNodes(guid).catch((): NodeView[] => []),
@@ -201,12 +200,12 @@ export default async function FileViewerPage({
           ...(resourceKind === "registration"
             ? []
             : [{ label: "Files", href: `/${guid}/files` }]),
-          { label: provider, href: `/${guid}/files/${provider}` },
+          { label: provider, href: `/${guid}/files/${encodeURIComponent(provider)}` },
           ...folderSegments.map((seg, i) => ({
             label: seg,
-            href: `/${guid}/files/${provider}/${folderSegments.slice(0, i + 1).join("/")}`,
+            href: `/${guid}/files/${encodeURIComponent(provider)}/${encodePathSegments(folderSegments.slice(0, i + 1))}`,
           })),
-          { label: filename, href: `/${guid}/files/view/${provider}/${rest.join("/")}` },
+          { label: filename, href: `/${guid}/files/view/${encodeURIComponent(provider)}/${encodePathSegments(rest)}` },
         ]}
       />
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
@@ -237,6 +236,7 @@ export default async function FileViewerPage({
             registrationTrees={fullTree.registrationTrees}
             linkedTrees={fullTree.linkedTrees}
             readOnly={resourceKind === "registration"}
+            degraded={fullTree.degraded}
           />
         }
         right={

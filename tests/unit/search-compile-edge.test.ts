@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { compileQuery } from "@/lib/search/compile";
+import { compileQuery, MAX_QUERY_BRANCHES } from "@/lib/search/compile";
 import { parseQuery } from "@/lib/search/parser";
 
 describe("compileQuery edge cases", () => {
@@ -73,5 +73,16 @@ describe("compileQuery edge cases", () => {
     expect(plan.requests).toHaveLength(1);
     expect(plan.requests[0]?.filters).toEqual([]);
     expect(plan.exclusions).toEqual([]);
+  });
+
+  it("caps the OR-in-AND cross-product at MAX_QUERY_BRANCHES (no 2^k blowup)", () => {
+    // (a OR b) AND (c OR d) AND (e OR f) AND (g OR h) = 2^4 = 16 branches unbounded.
+    const plan = compileQuery(parseQuery("(a OR b) AND (c OR d) AND (e OR f) AND (g OR h)"), "title");
+    expect(plan.requests.length).toBeLessThanOrEqual(MAX_QUERY_BRANCHES);
+  });
+
+  it("caps a wide flat OR at MAX_QUERY_BRANCHES", () => {
+    const plan = compileQuery(parseQuery("a OR b OR c OR d OR e OR f OR g OR h"), "title");
+    expect(plan.requests.length).toBeLessThanOrEqual(MAX_QUERY_BRANCHES);
   });
 });

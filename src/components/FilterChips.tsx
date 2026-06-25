@@ -20,15 +20,18 @@ export function FilterChips({ paramName, chips, defaultValue = "" }: { paramName
 
   const active = current || "all";
 
+  // Single-select filter → radiogroup semantics (aria-pressed was wrong: it
+  // implies an independent on/off toggle per chip, but exactly one is active).
   return (
-    <div role="group" aria-label={`Filter by ${paramName}`} className="flex flex-wrap gap-2">
+    <div role="radiogroup" aria-label={`Filter by ${paramName}`} className="flex flex-wrap gap-2">
       {chips.map((c) => (
         <button
           key={c.value}
           type="button"
+          role="radio"
           onClick={() => setValue(c.value)}
           className={`text-sm px-3 py-1 rounded border ${active === c.value ? "bg-blue-600 text-white border-blue-600" : "border-neutral-300 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-900"}`}
-          aria-pressed={active === c.value}
+          aria-checked={active === c.value}
         >
           {c.label}
         </button>

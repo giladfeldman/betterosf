@@ -2,61 +2,12 @@
 
 import { useState, type ReactNode, type DragEvent } from "react";
 import { NewFolderControl } from "./NewFolderControl";
+import type { TreeNodeKind, TreeSelectionPayload, TreeUploadTarget, TreeNodeData } from "./tree-types";
 
-export type TreeNodeKind = "pinned-root" | "provider-root" | "components-root" | "linked-root" | "registrations-root" | "folder" | "file" | "component" | "linked" | "registration";
-
-export type TreeSelectionPayload =
-  | {
-      kind: "file";
-      guid: string;
-      provider: string;
-      path: string;
-      name: string;
-      downloadUrl: string;
-    }
-  | {
-      kind: "folder";
-      guid: string;
-      provider: string;
-      path: string;
-      name: string;
-    };
-
-export type TreeUploadTarget = {
-  guid: string;
-  provider: string;
-  path: string;
-  name: string;
-  listingUrl: string;
-  uploadUrl?: string;
-  newFolderUrl?: string;
-  nodeTitle?: string;
-  sourceKind?: "project" | "component" | "linked";
-};
-
-export type TreeNodeData = {
-  id: string;
-  label: string;
-  kind: TreeNodeKind;
-  href?: string;       // for file/component/linked/registration leaves and headed roots
-  newTab?: boolean;    // file leaves and linked-project leaves open in new tab
-  badge?: string;      // private | shared | embargoed | withdrawn
-  size?: number | null;
-  modified?: string;
-  provider?: string;   // for color/icon
-  guid?: string;       // for components / linked / registrations
-  fileCount?: number;  // # files directly under this folder, shown as "(N)" badge
-  downloadHref?: string;
-  selection?: TreeSelectionPayload;
-  uploadTarget?: TreeUploadTarget;
-  loading?: boolean;
-  /** This folder's last fetch failed; show a retry affordance. */
-  failed?: boolean;
-  /** Error message for the failed fetch (tooltip on the retry control). */
-  failedMessage?: string;
-  /** Params to re-fetch this folder's contents (used by the retry control). */
-  retry?: { guid: string; provider: string; path: string; listingUrl: string };
-};
+// Re-export the tree types so existing `from "./UnifiedTreeNode"` imports keep
+// working. The definitions live in ./tree-types to break the UnifiedTreeNode ↔
+// NewFolderControl circular import (NewFolderControl needs TreeUploadTarget).
+export type { TreeNodeKind, TreeSelectionPayload, TreeUploadTarget, TreeNodeData };
 
 function kindIcon(kind: TreeNodeKind, provider?: string): ReactNode {
   if (kind === "pinned-root") return <span aria-hidden="true">⭐</span>;
@@ -120,6 +71,9 @@ export function UnifiedTreeNode({
   onCreateFolder,
   onDropUpload,
   onRetry,
+  treeIndex,
+  tabIndex = -1,
+  onFocusRow,
 }: {
   node: TreeNodeData;
   depth: number;
@@ -133,6 +87,12 @@ export function UnifiedTreeNode({
   onCreateFolder?: (target: TreeUploadTarget) => void;
   onDropUpload?: (target: TreeUploadTarget, items: DataTransferItem[]) => void;
   onRetry?: () => void;
+  /** Index of this row in the flattened tree — drives roving-tabindex focus. */
+  treeIndex?: number;
+  /** 0 when this is the active (focusable) treeitem, -1 otherwise. */
+  tabIndex?: number;
+  /** Called when the treeitem receives focus, so the parent can sync the active row. */
+  onFocusRow?: () => void;
 }) {
   const displayLabel = node.kind === "file" ? middleTruncateFilename(node.label) : node.label;
 
@@ -242,10 +202,14 @@ export function UnifiedTreeNode({
       role="treeitem"
       aria-expanded={hasChildren ? expanded : undefined}
       aria-selected={selected}
+      aria-level={depth + 1}
+      data-tree-index={treeIndex}
+      tabIndex={tabIndex}
+      onFocus={onFocusRow}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className={`group flex min-h-[28px] items-center gap-1 py-0.5 px-1 text-sm font-mono-files hover:bg-neutral-100 dark:hover:bg-neutral-800 ${selected ? "bg-blue-50 dark:bg-blue-900/30" : ""} ${isDragOver ? "outline outline-2 outline-blue-500 bg-blue-50 dark:bg-blue-950" : ""}`}
+      className={`group flex min-h-[28px] items-center gap-1 py-0.5 px-1 text-sm font-mono-files hover:bg-neutral-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:hover:bg-neutral-800 ${selected ? "bg-blue-50 dark:bg-blue-900/30" : ""} ${isDragOver ? "outline outline-2 outline-blue-500 bg-blue-50 dark:bg-blue-950" : ""}`}
       style={{ paddingLeft: `${depth * 0.75}rem` }}
     >
       {selectMode && node.selection && (

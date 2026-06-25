@@ -19,7 +19,7 @@ export async function GET(
     });
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") return new Response("Not found", { status: 404 });
-    const msg = e instanceof Error ? e.message : String(e);
-    return new Response(msg, { status: 500 });
+    console.error(`[files/${guid}/all] error:`, e);
+    return new Response("Could not load this project's files. Please try again later.", { status: 500 });
   }
 }

@@ -5,9 +5,16 @@ import { OsfError } from "@/lib/osf/types";
 import { collectNodeTree, type TreeNode } from "@/lib/osf/tree";
 import { getProviderRoots } from "@/lib/osf/files";
 import { fetchProviderZip } from "@/lib/waterbutler/zip";
+import { contentDisposition } from "@/lib/http/content-disposition";
+import { mapWithConcurrency } from "@/lib/util/concurrency";
 
 export const runtime = "nodejs";
 export const maxDuration = 600; // 10 minutes
+
+// Bounded fan-out for the per-node provider-list lookups (the N+1 metadata phase).
+// The archive stream itself is consumed serially by archiver, so this only
+// parallelizes the OSF round-trips that decide WHAT to append.
+const PROVIDER_LIST_CONCURRENCY = 6;
 
 function safeFolderName(s: string): string {
   // Strip path separators and trim
@@ -15,7 +22,7 @@ function safeFolderName(s: string): string {
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ guid: string }> }
 ): Promise<Response> {
   const { guid } = await params;
@@ -23,12 +30,22 @@ export async function GET(
 
   // Anonymous whole-tree ZIPs: cap at 5 per IP per hour to protect against abuse.
   // Signed-in users have OSF's own 10k/day per-token limit, which is self-throttling.
-  const cookies = _req.headers.get("cookie") ?? "";
-  const isSignedIn = cookies.includes("authjs.session-token");
+  // "Signed in" is verified via a real session (auth()), NOT cookie-name presence —
+  // a forged `authjs.session-token` cookie must not buy a higher tier on the shared app token.
+  // Dynamic import mirrors selectToken(): keeps NextAuth out of non-request contexts.
+  const isSignedIn = await (async () => {
+    try {
+      const { auth } = await import("@/auth");
+      const session = await auth();
+      return Boolean(session?.accessToken);
+    } catch {
+      return false;
+    }
+  })();
   if (!isSignedIn) {
     const ip =
-      _req.headers.get("x-real-ip") ??
-      _req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+      req.headers.get("x-real-ip") ??
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
       "unknown";
     const { incrementWindow } = await import("@/lib/limits");
     const count = await incrementWindow(`ip:${ip}:wholetree-zip:1hr`, 3600);
@@ -47,27 +64,49 @@ export async function GET(
     if (e instanceof OsfError && e.code === "not_found") {
       return new Response("Project not found", { status: 404 });
     }
-    const msg = e instanceof Error ? e.message : String(e);
-    return new Response(`Failed to walk node tree: ${msg}`, { status: 500 });
+    // Don't leak internal exception text to the client; log it server-side.
+    console.error(`[zip/${guid}] failed to walk node tree:`, e);
+    return new Response("Failed to assemble this project's ZIP. Please try again later.", { status: 500 });
   }
 
   const rootTitle = safeFolderName(tree[0]?.title ?? guid);
+
+  // N+1 fix: fetch every node's provider list concurrently up front, preserving
+  // tree (DFS) order, instead of one node at a time inside the append loop.
+  const nodeProviders = await mapWithConcurrency(tree, PROVIDER_LIST_CONCURRENCY, async (node) => {
+    try {
+      return { node, providers: await getProviderRoots(node.guid), error: null as string | null };
+    } catch (e) {
+      return {
+        node,
+        providers: [] as Awaited<ReturnType<typeof getProviderRoots>>,
+        error: `could not list providers: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
+  });
+
   const archive = archiver("zip", { zlib: { level: 0 } }); // pre-compressed content
   const errors: string[] = [];
+  // L13: an archiver-level stream error (e.g. a source stream aborts) would
+  // otherwise reject unhandled and truncate/crash the worker. Capture it.
+  archive.on("error", (err) => {
+    console.error(`[zip/${guid}] archiver error:`, err);
+    errors.push(`archiver error: ${err instanceof Error ? err.message : String(err)}`);
+  });
+  archive.on("warning", (err) => {
+    console.warn(`[zip/${guid}] archiver warning:`, err);
+  });
 
   // Kick off the work in the background; archiver.finalize() will close the stream when done.
   (async () => {
     try {
-      for (const node of tree) {
+      for (const { node, providers, error } of nodeProviders) {
         const folder = node.guid === guid
           ? rootTitle
           : `${rootTitle}/${node.linked ? "linked_" : ""}${safeFolderName(node.title)}_${node.guid}`;
 
-        let providers;
-        try {
-          providers = await getProviderRoots(node.guid);
-        } catch (e) {
-          errors.push(`[${node.guid} "${node.title}"] could not list providers: ${e instanceof Error ? e.message : e}`);
+        if (error) {
+          errors.push(`[${node.guid} "${node.title}"] ${error}`);
           continue;
         }
 
@@ -84,16 +123,19 @@ export async function GET(
       }
 
       if (errors.length > 0) {
+        console.warn(`[zip/${guid}] completed with ${errors.length} partial failure(s)`);
         archive.append(
           `BetterOSF whole-tree ZIP — partial failures\n` +
           `Generated for OSF project ${guid} at ${new Date().toISOString()}\n\n` +
           errors.map((e) => `- ${e}`).join("\n") + "\n",
           { name: `${rootTitle}/_BETTEROSF_ERRORS.txt` }
         );
+      } else {
+        console.info(`[zip/${guid}] assembled ${tree.length} node(s) cleanly`);
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      archive.append(`Fatal error while assembling ZIP: ${msg}\n`, { name: `_BETTEROSF_FATAL.txt` });
+      console.error(`[zip/${guid}] fatal error while assembling ZIP:`, e);
+      archive.append(`Fatal error while assembling ZIP.\n`, { name: `_BETTEROSF_FATAL.txt` });
     } finally {
       await archive.finalize();
     }
@@ -106,7 +148,7 @@ export async function GET(
     status: 200,
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="${rootTitle}_${guid}.zip"`,
+      "Content-Disposition": contentDisposition(`${rootTitle}_${guid}.zip`),
       "Cache-Control": "private, no-store",
     },
   });

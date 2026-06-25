@@ -1,20 +1,10 @@
 import "server-only";
-import { collectFullTree, type FullProjectTree } from "./full-tree";
+import { collectFullTree, EMPTY_TREE, type FullProjectTree } from "./full-tree";
 import { collectFolderSkeleton } from "./folder-skeleton";
 import { getNode, getAllLinkedNodes } from "./nodes";
 import { getRegistration, getNodeRegistrations, type RegistrationView } from "./registrations";
 import { OsfError } from "./types";
 import type { NodeView } from "./parse";
-
-export const EMPTY_TREE: FullProjectTree = {
-  rootSkeleton: [],
-  components: [],
-  totalComponents: 0,
-  registrationTrees: [],
-  totalRegistrations: 0,
-  linkedTrees: [],
-  totalLinked: 0,
-};
 
 const TREE_OPTS = {
   maxComponentsToRecurse: 3,
@@ -37,7 +27,7 @@ export type ResourceTree = {
 };
 
 /** Map full-tree ComponentTree entries to the NodeView shape the tree/lists use. */
-export function componentsFromTree(fullTree: FullProjectTree): NodeView[] {
+function componentsFromTree(fullTree: FullProjectTree): NodeView[] {
   return fullTree.components.map((c) => ({
     id: c.guid,
     title: c.title,
@@ -74,7 +64,8 @@ export async function collectResourceTree(guid: string): Promise<ResourceTree> {
     const node = await getNode(guid);
     const [fullTree, linked, registrations]: [FullProjectTree, NodeView[], RegistrationView[]] =
       await Promise.all([
-        collectFullTree(guid, TREE_OPTS).catch((): FullProjectTree => EMPTY_TREE),
+        // A total failure here (not just per-provider) is itself a degraded tree.
+        collectFullTree(guid, TREE_OPTS).catch((): FullProjectTree => ({ ...EMPTY_TREE, degraded: true })),
         getAllLinkedNodes(guid).catch((): NodeView[] => []),
         getNodeRegistrations(guid).catch((): RegistrationView[] => []),
       ]);
@@ -91,11 +82,15 @@ export async function collectResourceTree(guid: string): Promise<ResourceTree> {
     // Registration path. getRegistration re-throws not_found if the guid is
     // neither a node nor a registration.
     const reg = await getRegistration(guid);
-    const rootSkeleton = await collectFolderSkeleton(guid, { kind: "registration" }).catch(() => []);
+    let degraded = false;
+    const rootSkeleton = await collectFolderSkeleton(guid, { kind: "registration" }).catch(() => {
+      degraded = true;
+      return [];
+    });
     return {
       kind: "registration",
       title: reg.title || guid,
-      fullTree: { ...EMPTY_TREE, rootSkeleton },
+      fullTree: { ...EMPTY_TREE, rootSkeleton, degraded },
       linked: [],
       registrations: [],
       components: [],

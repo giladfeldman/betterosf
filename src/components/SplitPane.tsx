@@ -101,6 +101,9 @@ export function SplitPane({
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize tree pane"
+        aria-valuenow={Math.round(width)}
+        aria-valuemin={minLeft}
+        aria-valuemax={Math.round(maxLeftRef.current)}
         tabIndex={0}
         onMouseDown={onDown}
         onKeyDown={(e) => {

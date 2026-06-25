@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import DOMPurify from "dompurify";
 
 // A structurally valid .docx renders into the container as real content —
 // paragraphs/headings/tables/images carrying text or media. An EMPTY render —
@@ -49,6 +50,15 @@ export function DocxViewer({ url }: { url: string }) {
           renderChanges: true,
         });
         if (cancelled || !ref.current) return;
+        // docx-preview writes HTML straight into the live DOM from an UNTRUSTED
+        // OSF file. Every other untrusted-content viewer routes through DOMPurify;
+        // this one didn't. Scrub in place after render — the CSP blocks inline
+        // handlers, but `javascript:` hrefs aren't covered by script-src, so this
+        // is the layer that removes them. Keep svg/tables/images (real document
+        // content); DOMPurify strips scripts, event handlers, and javascript: URIs.
+        ref.current.innerHTML = DOMPurify.sanitize(ref.current.innerHTML, {
+          USE_PROFILES: { html: true, svg: true, svgFilters: true },
+        });
         // renderAsync resolves even when it silently rendered nothing (e.g. a
         // malformed multi-body .docx). Treat a blank result as a failure so we
         // show a clear message instead of an empty gray page.

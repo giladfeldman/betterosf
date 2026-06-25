@@ -56,8 +56,8 @@ export function ViewerDispatcher({
     case "image": return <Image url={url} alt={filename} />;
     case "svg": return <Svg url={url} alt={filename} />;
     case "html": return <Html url={url} />;
-    case "video": return <Video url={url} />;
-    case "audio": return <Audio url={url} />;
+    case "video": return <Video url={url} filename={filename} />;
+    case "audio": return <Audio url={url} filename={filename} />;
     case "notebook": return <Notebook url={url} />;
     default:
       return <DownloadFallback filename={filename} downloadUrl={url} sizeBytes={sizeBytes} reason="unknown-format" />;

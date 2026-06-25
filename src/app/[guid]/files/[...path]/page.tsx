@@ -12,6 +12,7 @@ import { FileMissing } from "@/components/FileMissing";
 import { RecordView } from "@/components/RecordView";
 import { UploadFilesButton } from "@/components/UploadFilesButton";
 import { FolderViewNewFolder } from "@/components/FolderViewNewFolder";
+import { encodePathSegments } from "@/lib/url";
 
 function safeDecode(s: string): string {
   try {
@@ -128,10 +129,10 @@ export default async function DeepFilesPage({
           { label: "Home", href: "/" },
           { label: node.title || guid, href: `/${guid}` },
           { label: "Files", href: `/${guid}/files` },
-          { label: provider!, href: `/${guid}/files/${provider}` },
+          { label: provider!, href: `/${guid}/files/${encodeURIComponent(provider!)}` },
           ...folderSegments.map((seg, i) => ({
             label: seg,
-            href: `/${guid}/files/${provider}/${folderSegments.slice(0, i + 1).join("/")}`,
+            href: `/${guid}/files/${encodeURIComponent(provider!)}/${encodePathSegments(folderSegments.slice(0, i + 1))}`,
           })),
         ]}
       />
@@ -150,6 +151,7 @@ export default async function DeepFilesPage({
             registrationTrees={fullTree.registrationTrees}
             linkedTrees={fullTree.linkedTrees}
             readOnly={kind === "registration"}
+            degraded={fullTree.degraded}
           />
         }
         right={
@@ -176,14 +178,14 @@ export default async function DeepFilesPage({
                   <li key={entry.id} className="py-1.5 flex items-center justify-between">
                     {entry.kind === "folder" ? (
                       <a
-                        href={`/${guid}/files/${provider}/${[...folderSegments, entry.name].join("/")}`}
+                        href={`/${guid}/files/${encodeURIComponent(provider!)}/${encodePathSegments([...folderSegments, entry.name])}`}
                         className="text-blue-600 hover:underline"
                       >
                         <span aria-hidden="true">📁</span> <span title={entry.name}>{entry.name}/</span>
                       </a>
                     ) : (
                       <a
-                        href={`/${guid}/files/view/${provider}/${[...folderSegments, entry.name].join("/")}`}
+                        href={`/${guid}/files/view/${encodeURIComponent(provider!)}/${encodePathSegments([...folderSegments, entry.name])}`}
                         className="hover:underline"
                       >
                         <span aria-hidden="true">📄</span> <span title={entry.name}>{entry.name}</span>

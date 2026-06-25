@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import type { Session } from "next-auth";
 import { hasOsfWriteScope, osfProvider } from "@/lib/auth/osf-provider";
+import { authEnv } from "@/lib/env";
 
 declare module "next-auth" {
   interface Session {
@@ -31,11 +32,12 @@ async function refreshOsfAccessToken(token: JWT): Promise<JWT> {
   }
 
   try {
+    const { AUTH_OSF_ID, AUTH_OSF_SECRET } = authEnv();
     const body = new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: token.refreshToken,
-      client_id: process.env.AUTH_OSF_ID ?? "",
-      client_secret: process.env.AUTH_OSF_SECRET ?? "",
+      client_id: AUTH_OSF_ID,
+      client_secret: AUTH_OSF_SECRET,
     });
     const res = await fetch("https://accounts.osf.io/oauth2/token", {
       method: "POST",
@@ -62,6 +64,18 @@ async function refreshOsfAccessToken(token: JWT): Promise<JWT> {
   } catch {
     return { ...token, osfAuthError: "RefreshAccessTokenError" };
   }
+}
+
+// Fail fast at server startup if the OSF OAuth credentials are missing, so the
+// failure is one clear message instead of a cryptic upstream OAuth error later.
+// Skipped during `next build` (which never runs the OAuth flow and may not have
+// the secrets in its env) and in tests (which mock `@/auth` and never load this).
+if (
+  process.env.NEXT_PHASE !== "phase-production-build" &&
+  process.env.NODE_ENV !== "test" &&
+  process.env.VITEST === undefined
+) {
+  authEnv();
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -92,10 +106,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return token;
       }
       if (token.accessToken) {
+        // Access token expired (or within 60s of doing so) — refresh it.
         return refreshOsfAccessToken(token);
       }
-      // Subsequent calls — return as-is. Refresh logic is not wired in v1 of Plan 3
-      // because OSF refresh-token TTL semantics aren't documented; users re-auth after expiry.
+      // No access token at all (e.g. a stale/empty JWT) — nothing to refresh.
       return token;
     },
     async session({ session, token }: { session: Session; token: JWT }) {

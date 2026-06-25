@@ -24,7 +24,7 @@ export async function GET(
     if (e instanceof OsfError && e.code === "rate_limited") return new Response("OSF rate limit exceeded", { status: 429, headers: { "Retry-After": "60" } });
     if (e instanceof OsfError && e.code === "unauthorized") return new Response("OSF session expired. Reconnect OSF.", { status: 401 });
     if (e instanceof OsfError && e.code === "forbidden") return new Response("OSF permission denied or session expired", { status: e.status });
-    const msg = e instanceof Error ? e.message : String(e);
-    return new Response(msg, { status: 500 });
+    console.error(`[files/${guid}/skeleton] error:`, e);
+    return new Response("Could not load this project's folder structure. Please try again later.", { status: 500 });
   }
 }

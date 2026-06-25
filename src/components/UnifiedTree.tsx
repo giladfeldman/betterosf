@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { SkeletonNode } from "@/lib/osf/folder-skeleton";
 import type { ComponentTree, RegistrationTree, LinkedTree } from "@/lib/osf/full-tree";
 import type { NodeView } from "@/lib/osf/parse";
 import type { RegistrationView } from "@/lib/osf/registrations";
 import type { FileEntry } from "@/lib/osf/files";
-import { UnifiedTreeNode, type TreeNodeData, type TreeSelectionPayload, type TreeUploadTarget } from "./UnifiedTreeNode";
+import { UnifiedTreeNode } from "./UnifiedTreeNode";
+import type { TreeNodeData, TreeNodeKind, TreeSelectionPayload, TreeUploadTarget } from "./tree-types";
 import { UploadDialog } from "./UploadDialog";
 import { UploadActivityDrawer } from "./UploadActivityDrawer";
 import { OPEN_UPLOAD_EVENT } from "./UploadFilesButton";
@@ -37,6 +38,13 @@ const AUTO_LOAD_MAX_FOLDERS = 400;
 // bursting OSF's anonymous rate limit (429); the pipeline refills as fetches
 // settle. User-initiated clicks bypass this and fetch immediately.
 const MAX_CONCURRENT_AUTOLOAD = 4;
+// Highest numeric "Levels" the depth stepper exposes before "All" (Infinity).
+// Most OSF projects are shallow; the cap discourages accidental deep fetches.
+const MAX_LEVEL = 5;
+// Default depth: show one level under each provider root (osfstorage). Keeps the
+// initial render — and OSF folder-listing calls — to a single level until the
+// user asks for more via the Levels stepper / "Expand all".
+const DEFAULT_MAX_DEPTH = 1;
 
 type HydrationKind = "component" | "linked" | "registration";
 
@@ -85,6 +93,27 @@ function uploadTargetKey(target: TreeUploadTarget): string {
   return `${target.guid}|${target.provider}|${target.path}|${target.listingUrl}|${target.uploadUrl ?? ""}`;
 }
 
+// Pinned items carry a FavoriteKind ("project" | "file" | "registration" | …);
+// map it to the TreeNodeKind that drives the row icon, so a pinned file shows a
+// 📄 and a pinned registration a 🔒 instead of everything showing the component
+// glyph. (L8)
+function favoriteKindToTreeKind(kind: FavoriteRef["kind"]): TreeNodeKind {
+  switch (kind) {
+    case "file":
+      return "file";
+    case "folder":
+      return "folder";
+    case "registration":
+      return "registration";
+    case "component":
+      return "component";
+    // project / preprint / user have no dedicated tree glyph — render as a
+    // generic component-style node (the closest existing "navigable resource").
+    default:
+      return "component";
+  }
+}
+
 function collectExpandedProviderIds(task: HydrationTask, skeleton: SkeletonNode[]): string[] {
   const basePrefix = task.kind === "component" ? `component/${task.guid}` : task.kind === "linked" ? `linked/${task.guid}` : `registration/${task.guid}`;
   return skeleton.map((provider) => `${basePrefix}/provider:${provider.provider}`);
@@ -103,6 +132,14 @@ function skeletonFromFolder(entry: Extract<FileEntry, { kind: "folder" }>, provi
   };
 }
 
+// Read the persisted "Levels" pref for a project. Stored as a number, or the
+// string "all" for unlimited — Infinity is not JSON-serializable, so the "All"
+// sentinel round-trips as "all" and rehydrates here.
+function readMaxDepthPref(guid: string): number {
+  const v = getPref<number | "all">(`tree.maxDepth.${guid}`, DEFAULT_MAX_DEPTH);
+  return v === "all" ? Infinity : v;
+}
+
 export function UnifiedTree({
   guid,
   rootTitle,
@@ -114,6 +151,7 @@ export function UnifiedTree({
   registrationTrees,
   linkedTrees,
   readOnly = false,
+  degraded = false,
 }: {
   guid: string;
   rootTitle: string;
@@ -132,6 +170,9 @@ export function UnifiedTree({
   /** When provided, each linked project is rendered as an expandable sub-tree
    *  (parallel to registrationTrees). Falls back to flat leaf-link rendering. */
   linkedTrees?: LinkedTree[];
+  /** The server-rendered tree was degraded (OSF backpressure during the skeleton
+   *  walk) and may be missing folders — show a "partially loaded, refresh" notice. */
+  degraded?: boolean;
 }) {
   const [pinned, setPinned] = useState<FavoriteRef[]>([]);
   useEffect(() => {
@@ -161,6 +202,8 @@ export function UnifiedTree({
     setRunningHydrationId(null);
     setRateLimitedUntil(0);
     setFilesHiddenState(getPref<boolean>(`tree.filesHidden.${guid}`, true));
+    setMaxDepthState(readMaxDepthPref(guid));
+    setForcedOpen(new Set());
   }, [guid, componentTrees, registrationTrees, linkedTrees]);
 
   // Initial expand state — all folder paths expanded (root + each component);
@@ -226,6 +269,23 @@ export function UnifiedTree({
     [guid]
   );
 
+  // "Levels": how many folder levels to show/fetch under each provider root
+  // (provider root = level 0, its direct children = level 1 = default). Caps both
+  // the rendered rows AND the progressive auto-load fetches, so deep trees don't
+  // burn OSF calls on levels the user hasn't asked for. Infinity = "All".
+  // Remembered per project.
+  const [maxDepth, setMaxDepthState] = useState<number>(() => readMaxDepthPref(guid));
+  const setMaxDepth = useCallback(
+    (next: number) => {
+      setMaxDepthState(next);
+      setPref(`tree.maxDepth.${guid}`, Number.isFinite(next) ? next : "all");
+    },
+    [guid]
+  );
+  // Row ids the user manually opened past the current ceiling — drills a single
+  // branch deeper without raising the global level. Cleared by "Expand all".
+  const [forcedOpen, setForcedOpen] = useState<Set<string>>(() => new Set());
+
   const [loadedEntries, setLoadedEntries] = useState<LoadedEntries>({});
   const [loadingKeys, setLoadingKeys] = useState<Record<string, boolean>>({});
   // Per-folder fetch failures (key → message). Surfaced as a retry affordance.
@@ -239,6 +299,7 @@ export function UnifiedTree({
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Record<string, TreeSelectionPayload>>({});
   const [downloadingSelection, setDownloadingSelection] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [uploadTarget, setUploadTarget] = useState<TreeUploadTarget | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [droppedNodes, setDroppedNodes] = useState<DroppedNode[] | null>(null);
@@ -272,6 +333,12 @@ export function UnifiedTree({
   // Records the params each folder was fetched with, so a manual "Refresh" can replay
   // them with fresh=1 (the listing key alone doesn't carry the listingUrl).
   const folderParamsRef = useRef<Map<string, { nodeGuid: string; provider: string; materializedPath: string; listingUrl: string }>>(new Map());
+  // Mirror of loadedEntries read inside fetchFiles' cache-check. Using a ref keeps
+  // fetchFiles' identity STABLE across folder loads — otherwise its dep on
+  // loadedEntries made it (and every memo/effect that depends on it, incl. flatRows
+  // and the auto-load pipeline) churn on every fetch. (L6)
+  const loadedEntriesRef = useRef<LoadedEntries>({});
+  useEffect(() => { loadedEntriesRef.current = loadedEntries; }, [loadedEntries]);
 
   // Fetch files for a folder when expanded. Files are keyed by node guid because
   // the same materializedPath can occur in multiple nodes (root + each component).
@@ -282,7 +349,7 @@ export function UnifiedTree({
     async (nodeGuid: string, provider: string, materializedPath: string, listingUrl: string, force = false) => {
       const key = `${nodeGuid}|${provider}:${materializedPath}`;
       folderParamsRef.current.set(key, { nodeGuid, provider, materializedPath, listingUrl });
-      if (!force && loadedEntries[key]) return;
+      if (!force && loadedEntriesRef.current[key]) return;
       if (inFlightRef.current.has(key)) return;
       inFlightRef.current.add(key);
       setLoadingKeys((prev) => ({ ...prev, [key]: true }));
@@ -317,7 +384,7 @@ export function UnifiedTree({
         });
       }
     },
-    [loadedEntries]
+    []
   );
 
   const hydrationTasks = useMemo<HydrationTask[]>(() => {
@@ -461,12 +528,18 @@ export function UnifiedTree({
     const targets: Target[] = [];
     const toExpand: Record<string, boolean> = {};
 
-    const visitFolder = (nodeGuid: string, folder: SkeletonNode, rowId: string) => {
+    // `level` = depth below the provider root (provider's direct children = 1).
+    const visitFolder = (nodeGuid: string, folder: SkeletonNode, rowId: string, level: number) => {
       // Auto-expand the first time we encounter a folder (undefined = never
       // decided). A user's explicit collapse leaves `false`, which we respect.
       if (autoExpandEnabledRef.current && expanded[rowId] === undefined) toExpand[rowId] = true;
       const open = expanded[rowId] === true || toExpand[rowId] === true;
       if (!open) return;
+      // Depth ceiling: never fetch/recurse past the user's "Levels" setting,
+      // unless this branch was manually drilled (forcedOpen). Strict `>` so the
+      // ceiling level's OWN listing is still fetched — its children are the rows
+      // shown at the limit; only the level *below* it is skipped.
+      if (level > maxDepth && !forcedOpen.has(rowId)) return;
       const key = folderKey(nodeGuid, folder.provider, folder.materializedPath);
       const entries = loadedEntries[key];
       if (entries === undefined) {
@@ -474,10 +547,10 @@ export function UnifiedTree({
         return; // children unknown until this loads; a later pass recurses
       }
       const staticPaths = new Set(folder.children.map((c) => c.materializedPath));
-      for (const c of folder.children) visitFolder(nodeGuid, c, `${rowId}/${c.name}`);
+      for (const c of folder.children) visitFolder(nodeGuid, c, `${rowId}/${c.name}`, level + 1);
       for (const e of entries) {
         if (e.kind === "folder" && !staticPaths.has(e.materializedPath)) {
-          visitFolder(nodeGuid, skeletonFromFolder(e, folder.provider), `${rowId}/${e.name}`);
+          visitFolder(nodeGuid, skeletonFromFolder(e, folder.provider), `${rowId}/${e.name}`, level + 1);
         }
       }
     };
@@ -493,10 +566,10 @@ export function UnifiedTree({
           continue;
         }
         const staticPaths = new Set(p.children.map((c) => c.materializedPath));
-        for (const folder of p.children) visitFolder(nodeGuid, folder, `${providerId}/${folder.name}`);
+        for (const folder of p.children) visitFolder(nodeGuid, folder, `${providerId}/${folder.name}`, 1);
         for (const e of entries) {
           if (e.kind === "folder" && !staticPaths.has(e.materializedPath)) {
-            visitFolder(nodeGuid, skeletonFromFolder(e, p.provider), `${providerId}/${e.name}`);
+            visitFolder(nodeGuid, skeletonFromFolder(e, p.provider), `${providerId}/${e.name}`, 1);
           }
         }
       }
@@ -530,7 +603,7 @@ export function UnifiedTree({
         void fetchFiles(t.nodeGuid, t.provider, t.materializedPath, t.listingUrl);
       }
     }
-  }, [expanded, loadedEntries, loadingKeys, skeleton, componentTreeState, registrationTreeState, linkedTreeState, guid, fetchFiles, setExpanded, retryNonce]);
+  }, [expanded, loadedEntries, loadingKeys, skeleton, componentTreeState, registrationTreeState, linkedTreeState, guid, fetchFiles, setExpanded, retryNonce, maxDepth, forcedOpen]);
 
   const toggleSelected = useCallback((payload: TreeSelectionPayload, checked: boolean) => {
     const key = selectionKey(payload);
@@ -573,13 +646,17 @@ export function UnifiedTree({
     const items = Object.values(selected);
     if (items.length === 0) return;
     setDownloadingSelection(true);
+    setDownloadError(null);
     try {
       const res = await fetch(`/api/zip/${guid}/selection`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const { message } = await readErrorResponse(res);
+        throw new Error(message || `Download failed (HTTP ${res.status})`);
+      }
       const blob = await res.blob();
       const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -588,7 +665,12 @@ export function UnifiedTree({
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(objectUrl);
+      // Defer revoke: revoking synchronously after click() can abort the download
+      // in Safari (and occasionally Chrome) before the browser reads the blob.
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (e) {
+      // Surface the error instead of silently swallowing it.
+      setDownloadError(e instanceof Error ? e.message : "Download failed");
     } finally {
       setDownloadingSelection(false);
     }
@@ -691,15 +773,40 @@ export function UnifiedTree({
             .filter((child) => !staticFolderPaths.has(child.materializedPath))
             .map((child) => skeletonFromFolder(child, folder.provider));
           const hasKids = folder.children.length > 0 || childEntries === undefined || childEntries.length > 0;
+          // This folder sits at/over the "Levels" ceiling: its child FOLDERS are
+          // hidden until the user drills this branch (forcedOpen). Files of an
+          // in-bounds open folder still render — only deeper folders are gated.
+          const atDepthLimit = depth - baseDepth >= maxDepth && !forcedOpen.has(id);
+          const hasHiddenChildFolders =
+            atDepthLimit && (folder.children.length > 0 || dynamicFolders.length > 0);
           rows.push({
             id,
             depth,
-            expanded: !!expanded[id],
+            // Render as collapsed when a depth-limited folder still has hidden
+            // child folders, so the chevron reads "click to drill deeper" (▶)
+            // rather than "click to collapse" (▼) — the per-subtree drill cue.
+            expanded: !!expanded[id] && !hasHiddenChildFolders,
             hasChildren: hasKids,
             onToggle: () => {
-              const next = { ...expanded, [id]: !expanded[id] };
-              setExpanded(next);
-              if (!expanded[id]) fetchFiles(nodeGuid, folder.provider, folder.materializedPath, folder.listingUrl);
+              // Drill: an expanded folder with depth-hidden child folders reveals
+              // just this branch one level deeper (forcedOpen) without raising the
+              // global "Levels" setting — instead of collapsing.
+              if (hasHiddenChildFolders) {
+                setForcedOpen((prev) => new Set(prev).add(id));
+                if (!expanded[id]) setExpanded({ ...expanded, [id]: true });
+                fetchFiles(nodeGuid, folder.provider, folder.materializedPath, folder.listingUrl);
+                return;
+              }
+              const willOpen = !expanded[id];
+              setExpanded({ ...expanded, [id]: willOpen });
+              if (willOpen) {
+                // Opening a collapsed folder that is itself past the ceiling also
+                // drills this branch (e.g. one the user previously collapsed).
+                if (depth - baseDepth >= maxDepth) {
+                  setForcedOpen((prev) => new Set(prev).add(id));
+                }
+                fetchFiles(nodeGuid, folder.provider, folder.materializedPath, folder.listingUrl);
+              }
             },
             node: {
               id,
@@ -735,8 +842,14 @@ export function UnifiedTree({
             },
           });
           if (expanded[id]) {
-            for (const sub of folder.children) emitFolder(sub, depth + 1, id);
-            for (const sub of dynamicFolders) emitFolder(sub, depth + 1, id);
+            // Depth ceiling (atDepthLimit computed above): stop emitting child
+            // FOLDERS at/over the limit unless this branch was manually drilled.
+            // Child FILES of an open, in-bounds folder always render — they're
+            // the leaf content the user opened this folder to see.
+            if (!atDepthLimit) {
+              for (const sub of folder.children) emitFolder(sub, depth + 1, id);
+              for (const sub of dynamicFolders) emitFolder(sub, depth + 1, id);
+            }
             for (const f of childFiles) {
               if (filesHidden) break; // "Directory" view: folders only
               if (f.kind !== "file") continue;
@@ -842,7 +955,7 @@ export function UnifiedTree({
             expanded: false,
             hasChildren: false,
             onToggle: () => {},
-            node: { id: p.id, label: p.title, kind: "component", href },
+            node: { id: p.id, label: p.title, kind: favoriteKindToTreeKind(p.kind), href },
           });
         }
       }
@@ -1044,7 +1157,7 @@ export function UnifiedTree({
     }
 
     return rows;
-  }, [expanded, filesHidden, loadedEntries, loadingKeys, folderFailures, readOnly, skeleton, components, componentTreeState, linkedNodes, linkedTreeState, registrations, registrationTreeState, pinned, rootTitle, guid, fetchFiles, setExpanded, queueHydrationTask, hydrationFailures, runningHydrationId]);
+  }, [expanded, filesHidden, maxDepth, forcedOpen, setForcedOpen, loadedEntries, loadingKeys, folderFailures, readOnly, skeleton, components, componentTreeState, linkedNodes, linkedTreeState, registrations, registrationTreeState, pinned, rootTitle, guid, fetchFiles, setExpanded, queueHydrationTask, hydrationFailures, runningHydrationId]);
 
   const uploadTargets = useMemo(() => {
     const seen = new Set<string>();
@@ -1085,6 +1198,78 @@ export function UnifiedTree({
     estimateSize: () => 28,
     overscan: 10,
   });
+
+  // ---- Keyboard navigation (WAI-ARIA tree pattern) ----
+  // Roving tabindex: exactly one treeitem is in the tab order at a time; Arrow
+  // keys move the active row, Left/Right collapse/expand (or hop to parent/child),
+  // Home/End jump to the ends, Enter/Space activate. The active row is scrolled
+  // into view (it may be virtualized out) and then focused via its data-index.
+  const [activeRowIndex, setActiveRowIndex] = useState(0);
+  // Clamp the active index if the row set shrinks (collapse/refresh).
+  useEffect(() => {
+    setActiveRowIndex((i) => Math.min(Math.max(0, i), Math.max(0, flatRows.length - 1)));
+  }, [flatRows.length]);
+
+  const focusRow = useCallback((index: number, scroll = true) => {
+    const clamped = Math.min(Math.max(0, index), flatRows.length - 1);
+    if (clamped < 0) return;
+    setActiveRowIndex(clamped);
+    if (scroll) virtualizer.scrollToIndex(clamped, { align: "auto" });
+    // The node may need a tick to mount after scrollToIndex; focus on next frame.
+    requestAnimationFrame(() => {
+      const el = parentRef.current?.querySelector<HTMLElement>(`[data-tree-index="${clamped}"]`);
+      el?.focus();
+    });
+  }, [flatRows.length, virtualizer]);
+
+  const handleTreeKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const row = flatRows[activeRowIndex];
+    if (!row) return;
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        focusRow(activeRowIndex + 1);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        focusRow(activeRowIndex - 1);
+        break;
+      case "Home":
+        e.preventDefault();
+        focusRow(0);
+        break;
+      case "End":
+        e.preventDefault();
+        focusRow(flatRows.length - 1);
+        break;
+      case "ArrowRight":
+        e.preventDefault();
+        if (row.hasChildren && !row.expanded) {
+          row.onToggle();
+        } else if (row.hasChildren && row.expanded) {
+          focusRow(activeRowIndex + 1); // into first child
+        }
+        break;
+      case "ArrowLeft":
+        e.preventDefault();
+        if (row.hasChildren && row.expanded) {
+          row.onToggle(); // collapse
+        } else {
+          // Hop to the nearest shallower ancestor row.
+          for (let i = activeRowIndex - 1; i >= 0; i -= 1) {
+            if (flatRows[i]!.depth < row.depth) { focusRow(i); break; }
+          }
+        }
+        break;
+      case "Enter":
+      case " ":
+        e.preventDefault();
+        if (row.hasChildren) row.onToggle();
+        break;
+      default:
+        break;
+    }
+  }, [activeRowIndex, flatRows, focusRow]);
 
   // Recursively collect every expandable id from the full skeleton + componentTrees.
   // This makes "Expand all" actually expand ALL levels in one click instead of one level.
@@ -1149,6 +1334,8 @@ export function UnifiedTree({
     for (const id of allExpandableIds) next[id] = true;
     setExpanded(next);
     setFilesHidden(true);
+    setMaxDepth(Infinity); // "Directory" means the whole tree — lift the ceiling
+    setForcedOpen(new Set()); // global "All" supersedes per-branch overrides
   };
   const expandAll = () => {
     // Re-enable progressive auto-load so dynamically-discovered subfolders keep
@@ -1158,6 +1345,8 @@ export function UnifiedTree({
     for (const id of allExpandableIds) next[id] = true;
     setExpanded(next);
     setFilesHidden(false); // Expand all reveals files too
+    setMaxDepth(Infinity); // "Expand all" means every level — lift the ceiling
+    setForcedOpen(new Set()); // global "All" supersedes per-branch overrides
   };
   // "Collapse all": collapse down to the provider roots (e.g. osfstorage).
   // Structural containers — the project, Components/Registrations/Linked roots,
@@ -1198,6 +1387,9 @@ export function UnifiedTree({
   // sub-tree hydration widget above).
   const loadingFolderCount = Object.keys(loadingKeys).length;
   const failedFolderCount = Object.keys(folderFailures).length;
+  // Folder listings fetched from OSF so far (one OSF listing per loaded folder).
+  // Surfaced read-only so the cost of expanding the tree is visible.
+  const loadedFolderCount = Object.keys(loadedEntries).length;
   const folderStatus =
     failedFolderCount > 0
       ? `Couldn't load ${failedFolderCount} folder${failedFolderCount === 1 ? "" : "s"} — retry below.`
@@ -1224,6 +1416,55 @@ export function UnifiedTree({
         </button>
         <button type="button" onClick={expandAll} className={`hover:underline ${!filesHidden ? "font-semibold text-blue-700 dark:text-blue-300" : ""}`}>Expand all</button>
         <button type="button" onClick={collapseAll} className="hover:underline">Collapse all</button>
+
+        {/* Depth control: how many folder levels to show/fetch under each
+            storage root. Default 1 keeps the tree shallow and OSF calls low. */}
+        <div
+          className="inline-flex items-center gap-1 border-l border-neutral-200 pl-2 dark:border-neutral-800"
+          title="How many folder levels to show under each storage root (osfstorage). Higher = more OSF requests."
+        >
+          <span className="text-neutral-500 dark:text-neutral-400">Levels</span>
+          <button
+            type="button"
+            aria-label="Show fewer levels"
+            disabled={Number.isFinite(maxDepth) && maxDepth <= 1}
+            onClick={() => setMaxDepth(Number.isFinite(maxDepth) ? Math.max(1, maxDepth - 1) : MAX_LEVEL)}
+            className="rounded border border-neutral-300 px-1.5 py-0.5 leading-none hover:bg-neutral-50 disabled:text-neutral-300 disabled:hover:bg-transparent dark:border-neutral-700 dark:hover:bg-neutral-900 dark:disabled:text-neutral-600"
+          >
+            −
+          </button>
+          <span className="min-w-[2.5ch] text-center tabular-nums" aria-live="polite">
+            {Number.isFinite(maxDepth) ? maxDepth : "All"}
+          </span>
+          <button
+            type="button"
+            aria-label="Show more levels"
+            disabled={!Number.isFinite(maxDepth)}
+            onClick={() => setMaxDepth(Number.isFinite(maxDepth) ? (maxDepth >= MAX_LEVEL ? Infinity : maxDepth + 1) : Infinity)}
+            className="rounded border border-neutral-300 px-1.5 py-0.5 leading-none hover:bg-neutral-50 disabled:text-neutral-300 disabled:hover:bg-transparent dark:border-neutral-700 dark:hover:bg-neutral-900 dark:disabled:text-neutral-600"
+          >
+            +
+          </button>
+        </div>
+
+        {/* Explicit files toggle (the same flag Directory/Expand all set). */}
+        <button
+          type="button"
+          onClick={() => setFilesHidden(!filesHidden)}
+          aria-pressed={!filesHidden}
+          title={filesHidden ? "Currently hiding files (folders only) — click to show files" : "Currently showing files — click to hide them"}
+          className={`rounded border px-2 py-0.5 ${!filesHidden ? "border-blue-500 bg-blue-50 dark:bg-blue-950" : "border-neutral-300 dark:border-neutral-700"}`}
+        >
+          {filesHidden ? "Show files" : "Hide files"}
+        </button>
+
+        {/* Read-only: folder listings fetched from OSF this session. */}
+        {loadedFolderCount > 0 && (
+          <span className="tabular-nums text-neutral-400 dark:text-neutral-500" title="Folder listings fetched from OSF this session">
+            {loadedFolderCount} loaded
+          </span>
+        )}
+
         <button
           type="button"
           onClick={() => void refreshAll()}
@@ -1270,6 +1511,29 @@ export function UnifiedTree({
           </>
         )}
       </div>
+      {degraded && (
+        <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200" role="status">
+          <span className="truncate">
+            OSF was busy while loading this project, so the tree may be incomplete.
+          </span>
+          <button
+            type="button"
+            onClick={() => void refreshAll()}
+            disabled={refreshing}
+            className="ml-auto shrink-0 rounded border border-amber-300 px-1.5 py-0.5 font-medium hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:hover:bg-amber-900"
+          >
+            {refreshing ? "Refreshing…" : "⟳ Reload"}
+          </button>
+        </div>
+      )}
+      {downloadError && (
+        <div className="flex items-center gap-2 border-b border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300" role="alert">
+          <span className="truncate">Download failed: {downloadError}</span>
+          <button type="button" onClick={() => setDownloadError(null)} className="ml-auto shrink-0 rounded border border-red-300 px-1.5 py-0.5 font-medium hover:bg-red-100 dark:border-red-800 dark:hover:bg-red-900">
+            Dismiss
+          </button>
+        </div>
+      )}
       {folderStatus && (
         <div
           className={`flex items-center gap-2 border-b px-2 py-1 text-xs ${
@@ -1293,7 +1557,14 @@ export function UnifiedTree({
           )}
         </div>
       )}
-      <div ref={parentRef} role="tree" className="flex-1 overflow-auto">
+      <div
+        ref={parentRef}
+        role="tree"
+        aria-label={`${rootTitle} file tree`}
+        tabIndex={-1}
+        onKeyDown={handleTreeKeyDown}
+        className="flex-1 overflow-auto focus:outline-none"
+      >
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {virtualizer.getVirtualItems().map((vi) => {
             const row = flatRows[vi.index];
@@ -1311,6 +1582,9 @@ export function UnifiedTree({
                   expanded={row.expanded}
                   hasChildren={row.hasChildren}
                   onToggle={row.onToggle}
+                  treeIndex={vi.index}
+                  tabIndex={vi.index === activeRowIndex ? 0 : -1}
+                  onFocusRow={() => setActiveRowIndex(vi.index)}
                   selectMode={selectMode}
                   selected={row.node.selection ? !!selected[selectionKey(row.node.selection)] : false}
                   onSelect={toggleSelected}

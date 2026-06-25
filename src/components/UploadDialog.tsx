@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { signIn } from "next-auth/react";
 import { OSF_UPLOAD_SCOPE } from "@/lib/auth/osf-provider";
-import type { TreeUploadTarget } from "./UnifiedTreeNode";
+import type { TreeUploadTarget } from "./tree-types";
+import { useFocusTrap } from "./useFocusTrap";
 import type { DroppedNode, FileOutcome, ConflictChoice } from "@/lib/upload/types";
 import { droppedFileSize } from "@/lib/upload/types";
 import { runUploadPlan, type UploadIO } from "@/lib/upload/orchestrate";
@@ -105,6 +106,9 @@ export function UploadDialog({
   const [folderState, setFolderState] = useState<"idle" | "creating" | "done" | "error">("idle");
   const [folderError, setFolderError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
+  // Re-entrancy guard for the manual-picker "Upload pending" batch (a double-click
+  // would otherwise fire duplicate uploads and N tree refreshes).
+  const [uploadingAll, setUploadingAll] = useState(false);
 
   // ---- Drag-drop payload mode (integrity-first upload of dropped files/folders) ----
   const [running, setRunning] = useState(false);
@@ -302,8 +306,10 @@ export function UploadDialog({
     if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
   }
 
-  async function uploadOne(item: UploadItem) {
-    if (!target) return;
+  // Upload a single picked file. Returns true on success. Does NOT call
+  // onComplete itself — the caller refreshes the tree once after the whole batch.
+  async function uploadOne(item: UploadItem): Promise<boolean> {
+    if (!target) return false;
     setItems((prev) => prev.map((x) => x.id === item.id ? { ...x, state: "uploading", error: undefined } : x));
     try {
       // Direct browser → OSF upload (bypasses Vercel's 4.5 MB limit so large files work).
@@ -316,20 +322,28 @@ export function UploadDialog({
         error: String(err.message ?? "Upload failed"),
         errorCode: typeof err.code === "string" ? err.code : undefined,
       } : x));
-      return;
+      return false;
     }
     setItems((prev) => prev.map((x) => x.id === item.id ? { ...x, state: "done" } : x));
-    onComplete(target);
+    return true;
   }
 
   async function uploadAll() {
+    if (uploadingAll || !target) return; // re-entrancy guard
     const retryable = items.filter((item) => item.state === "pending" || item.state === "error");
+    if (retryable.length === 0) return;
+    setUploadingAll(true);
+    let anySucceeded = false;
     try {
       for (const item of retryable) {
-        await uploadOne(item);
+        const ok = await uploadOne(item);
+        anySucceeded = anySucceeded || ok;
       }
     } finally {
       clearUploadToken();
+      setUploadingAll(false);
+      // Refresh the tree ONCE after the batch instead of per file.
+      if (anySucceeded) onComplete(target);
     }
   }
 
@@ -363,9 +377,19 @@ export function UploadDialog({
     onComplete(target); // forced tree refresh → the new folder appears immediately
   }
 
+  // Don't let the user abandon an in-flight upload or an unacknowledged failure
+  // (same gate as the Close button) — applies to the Close button AND Escape.
+  const canClose = !running && !uploadingAll && !(reconciled && reconciled.failed > 0 && !acknowledged);
+  const attemptClose = useCallback(() => {
+    if (canClose) onClose();
+  }, [canClose, onClose]);
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, true, attemptClose);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="upload-dialog-title">
-      <div className="w-full max-w-2xl rounded border border-neutral-200 bg-white shadow-xl dark:border-neutral-800 dark:bg-neutral-950">
+      <div ref={dialogRef} className="w-full max-w-2xl rounded border border-neutral-200 bg-white shadow-xl dark:border-neutral-800 dark:bg-neutral-950">
         <div className="flex items-start justify-between gap-3 border-b border-neutral-200 p-4 dark:border-neutral-800">
           <div>
             <h2 id="upload-dialog-title" className="text-lg font-semibold">Upload to OSF Storage</h2>
@@ -375,8 +399,8 @@ export function UploadDialog({
           </div>
           <button
             type="button"
-            onClick={onClose}
-            disabled={running || (!!reconciled && reconciled.failed > 0 && !acknowledged)}
+            onClick={attemptClose}
+            disabled={!canClose}
             className="rounded border border-neutral-300 px-2 py-1 text-sm hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-900"
           >
             Close
@@ -634,10 +658,11 @@ export function UploadDialog({
                     <button
                       type="button"
                       onClick={uploadAll}
-                      disabled={pendingCount === 0}
+                      disabled={pendingCount === 0 || uploadingAll}
+                      aria-busy={uploadingAll}
                       className="rounded border border-blue-300 px-3 py-1 text-blue-700 hover:bg-blue-50 disabled:border-neutral-300 disabled:text-neutral-500 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950"
                     >
-                      Upload pending
+                      {uploadingAll ? "Uploading…" : "Upload pending"}
                     </button>
                   </div>
                   {items.some((item) => item.state === "error") && (

@@ -198,6 +198,11 @@ describe("UnifiedTree expand-all / collapse-all", () => {
         />
       );
 
+      // "deep" is a dynamically-discovered LEVEL-2 folder (under "child"). The
+      // default "Levels" ceiling is 1, so it starts hidden; "Expand all" lifts
+      // the ceiling to "All" and the lazily-fetched subfolder appears.
+      expect(screen.queryByText("deep")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /^expand all$/i }));
       await screen.findByText("deep");
     } finally {
       fetchSpy.mockRestore();

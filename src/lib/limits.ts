@@ -10,10 +10,6 @@ function getKv() {
   return kvImpl;
 }
 
-export function isKvConfigured(): boolean {
-  return !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
-}
-
 // In-memory fallback used when KV isn't configured (dev + tests).
 // Stores { value, expiresAt } per key. Single-process only.
 const memStore = new Map<string, { value: number; expiresAt: number }>();

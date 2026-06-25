@@ -84,7 +84,15 @@ export function validateWaterbutlerActionUrl(urlString: string, guid: string): s
     throw new OsfWriteError(400, "invalid", "Invalid OSF upload URL.");
   }
   const prefix = `/v1/resources/${guid}/providers/${OSF_STORAGE}`;
-  const hostAllowed = url.protocol === "https:" && /^files(?:\.[a-z]{2}-\d+)?\.osf\.io$/i.test(url.hostname);
+  // Also assert no explicit port and no embedded credentials — neither is
+  // exploitable today (the host regex already pins *.osf.io), but a URL like
+  // `https://user:pass@files.osf.io:1234/...` should never reach an OSF token.
+  const hostAllowed =
+    url.protocol === "https:" &&
+    url.port === "" &&
+    url.username === "" &&
+    url.password === "" &&
+    /^files(?:\.[a-z]{2}-\d+)?\.osf\.io$/i.test(url.hostname);
   if (!hostAllowed || !url.pathname.toLowerCase().startsWith(prefix.toLowerCase())) {
     throw new OsfWriteError(
       400,

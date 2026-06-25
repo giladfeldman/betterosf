@@ -34,9 +34,14 @@ export async function RegistrationOverview({ guid }: { guid: string }) {
   }
 
   // File skeleton for the left navigator. Best-effort: a registration with no
-  // public files (or a transient OSF hiccup) still renders the metadata.
+  // public files (or a transient OSF hiccup) still renders the metadata. A
+  // hiccup degrades the tree (may be missing files) — surface that to the UI.
+  let skeletonDegraded = false;
   const skeleton: SkeletonNode[] = await collectFolderSkeleton(guid, { kind: "registration" }).catch(
-    (): SkeletonNode[] => []
+    (): SkeletonNode[] => {
+      skeletonDegraded = true;
+      return [];
+    }
   );
 
   const responseKeys = Object.keys(reg.responses);
@@ -132,6 +137,7 @@ export async function RegistrationOverview({ guid }: { guid: string }) {
             registrationTrees={[]}
             linkedTrees={[]}
             readOnly
+            degraded={skeletonDegraded}
           />
         }
         right={right}

@@ -43,6 +43,22 @@ export type FullProjectTree = {
   /** Folder skeletons for each linked project of this project. */
   linkedTrees: LinkedTree[];
   totalLinked: number;
+  /** True when the ROOT folder skeleton fetch failed (OSF 429/503/timeout) and
+   *  was degraded to empty — i.e. this tree may be missing folders that exist on
+   *  OSF. Lets the UI show "partially loaded — refresh" instead of a silent empty
+   *  project. Absent/false means the (possibly empty) tree is authoritative. */
+  degraded?: boolean;
+};
+
+/** Canonical empty tree — the fail-soft fallback shared by every caller. */
+export const EMPTY_TREE: FullProjectTree = {
+  rootSkeleton: [],
+  components: [],
+  totalComponents: 0,
+  registrationTrees: [],
+  totalRegistrations: 0,
+  linkedTrees: [],
+  totalLinked: 0,
 };
 
 /**
@@ -88,13 +104,22 @@ export async function collectFullTree(
   const componentTimeoutMs = opts.componentTimeoutMs ?? 8_000;
   const rootTimeoutMs = opts.rootTimeoutMs ?? 15_000;
 
+  // Sentinel distinguishes "root skeleton fetch failed/timed-out" from "fetch
+  // succeeded with no folders" — only the former is a degraded (incomplete) tree.
+  const SKELETON_FAILED = Symbol("skeleton-failed");
   // Parallel: root skeleton + direct children list + registrations + linked.
-  const [rootSkeleton, children, registrations, linkedNodes] = await Promise.all([
-    raceTimeout(collectFolderSkeleton(rootGuid), rootTimeoutMs, [] as SkeletonNode[]).catch((): SkeletonNode[] => []),
+  const [rootSkeletonResult, children, registrations, linkedNodes] = await Promise.all([
+    raceTimeout<SkeletonNode[] | typeof SKELETON_FAILED>(
+      collectFolderSkeleton(rootGuid),
+      rootTimeoutMs,
+      SKELETON_FAILED
+    ).catch((): typeof SKELETON_FAILED => SKELETON_FAILED),
     getAllChildren(rootGuid).catch((): NodeView[] => []),
     getNodeRegistrations(rootGuid).catch((): RegistrationView[] => []),
     getAllLinkedNodes(rootGuid).catch((): NodeView[] => []),
   ]);
+  const degraded = rootSkeletonResult === SKELETON_FAILED;
+  const rootSkeleton = degraded ? [] : rootSkeletonResult;
 
   // For the first N components, fetch each one's skeleton in parallel — each
   // racing its own timeout so one slow component can't sink the whole page.
@@ -193,5 +218,6 @@ export async function collectFullTree(
     totalRegistrations: registrations.length,
     linkedTrees: [...recursedLinked, ...skippedLinked],
     totalLinked: linkedNodes.length,
+    degraded,
   };
 }

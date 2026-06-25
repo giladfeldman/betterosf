@@ -18,6 +18,7 @@
  */
 import { isValidGuid } from "@/lib/osf/guid";
 import { selectToken } from "@/lib/osf/tokens";
+import { contentDisposition } from "@/lib/http/content-disposition";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -141,7 +142,7 @@ export async function GET(
   if (cl) headers.set("content-length", cl);
   headers.set("accept-ranges", "bytes");
   if (forceDownload) {
-    headers.set("content-disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
+    headers.set("content-disposition", contentDisposition(filename || "download"));
   } else {
     headers.set("content-disposition", "inline");
   }

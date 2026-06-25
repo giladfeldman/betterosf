@@ -4,17 +4,22 @@ import { useEffect, useState } from "react";
 import { JSONTree } from "react-json-tree";
 
 export function JsonViewer({ url }: { url: string }) {
-  const [data, setData] = useState<unknown>(null);
+  // Discriminated state so a file whose JSON content is literally `null` renders
+  // as `null` instead of being stuck on "Loading…" forever (the old code used a
+  // `null` data value as the not-yet-loaded sentinel, which collided with it).
+  const [state, setState] = useState<{ loaded: false } | { loaded: true; data: unknown }>({ loaded: false });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setState({ loaded: false });
+    setError(null);
     (async () => {
       try {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
-        if (!cancelled) setData(json);
+        if (!cancelled) setState({ loaded: true, data: json });
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
@@ -23,7 +28,7 @@ export function JsonViewer({ url }: { url: string }) {
   }, [url]);
 
   if (error) return <div className="p-4 text-red-600">Failed: {error}</div>;
-  if (data === null) return <div className="p-4 text-neutral-500">Loading…</div>;
+  if (!state.loaded) return <div className="p-4 text-neutral-500">Loading…</div>;
 
   // react-json-tree supports light/dark via theme — pass a minimal one
   const theme = {
@@ -35,7 +40,7 @@ export function JsonViewer({ url }: { url: string }) {
   };
   return (
     <div className="p-4 text-sm font-mono-files">
-      <JSONTree data={data} theme={theme} invertTheme={false} shouldExpandNodeInitially={(_k, _v, level) => level < 2} />
+      <JSONTree data={state.data} theme={theme} invertTheme={false} shouldExpandNodeInitially={(_k, _v, level) => level < 2} />
     </div>
   );
 }

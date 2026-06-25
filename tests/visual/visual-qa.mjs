@@ -299,6 +299,18 @@ async function main() {
     return (await heading.count()) > 0 && (await heading.first().isVisible());
   }
 
+  // Wait for file-leaf anchors to appear in the tree, polling up to `timeout`
+  // instead of a fixed sleep. After "Expand all" lifts the depth ceiling, a
+  // fresh OSF fetch cascade runs for the newly-revealed deep levels; a fixed
+  // 1.5s wait raced that cascade on multi-level registrations. Waiting on the
+  // actual condition is both correct for the depth-stepper and more robust to
+  // OSF latency generally. Returns the leaf count (0 if none within timeout).
+  async function waitForFileLeaves(timeout = 12_000) {
+    const leaves = page.locator('[role="tree"] a[href*="/files/view/"]');
+    await leaves.first().waitFor({ state: "attached", timeout }).catch(() => {});
+    return leaves.count();
+  }
+
   // Helper: detect any FileMissing render (sub-page error rendered inline by
   // the new FileMissing component when the walk fails). Covers the four
   // reasons: "Storage provider not found" | "Folder not found" |
@@ -358,11 +370,15 @@ async function main() {
     // the already-auto-loaded files. Allow the cascade a moment.
     await page.waitForTimeout(5000);
     const regExpandAll = page.getByRole("button", { name: /^Expand all$/ }).first();
+    let leafCount = 0;
     if (await regExpandAll.count()) {
       await regExpandAll.click();
-      await page.waitForTimeout(1500);
+      // "Expand all" lifts the depth ceiling to "All"; poll for the deep file
+      // leaves the freshly-started cascade fetches (not a fixed sleep).
+      leafCount = await waitForFileLeaves();
+    } else {
+      leafCount = await page.locator('[role="tree"] a[href*="/files/view/"]').count();
     }
-    const leafCount = await page.locator('[role="tree"] a[href*="/files/view/"]').count();
     record("registration tree auto-loads files (file leaves visible after Expand all)", leafCount > 0, `fileLeaves=${leafCount}`);
 
     const fresp = await page.goto(`${BASE}/${REG}/files`, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => null);
@@ -392,11 +408,14 @@ async function main() {
     // (the default Directory view hides file leaves).
     await page.waitForTimeout(5000);
     const c97ExpandAll = page.getByRole("button", { name: /^Expand all$/ }).first();
+    let leafCount = 0;
     if (await c97ExpandAll.count()) {
       await c97ExpandAll.click();
-      await page.waitForTimeout(1500);
+      // Poll for the deep file leaves after the ceiling lifts (see helper).
+      leafCount = await waitForFileLeaves();
+    } else {
+      leafCount = await page.locator('[role="tree"] a[href*="/files/view/"]').count();
     }
-    const leafCount = await page.locator('[role="tree"] a[href*="/files/view/"]').count();
     record("c97pd tree shows osfstorage files despite a broken sibling provider", leafCount > 0, `fileLeaves=${leafCount}`);
     await page.screenshot({ path: `${OUT}/G2c-registration-broken-provider.png`, fullPage: true });
   }
@@ -409,7 +428,8 @@ async function main() {
   const expandAll = page.getByRole("button", { name: /expand all/i }).first();
   if (await expandAll.count()) {
     await expandAll.click();
-    await page.waitForTimeout(2500);
+    // Poll for leaves after the ceiling lifts rather than a fixed sleep.
+    await waitForFileLeaves();
   }
   // Find first file leaf — anchor pointing at /files/view/...
   const fileLeaf = page.locator('[role="tree"] a[href*="/files/view/"]').first();

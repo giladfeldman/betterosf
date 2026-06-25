@@ -1,5 +1,6 @@
 import { selectToken } from "@/lib/osf/tokens";
 import { isValidGuid } from "@/lib/osf/guid";
+import { contentDisposition } from "@/lib/http/content-disposition";
 
 const ALLOWED_PROVIDERS = new Set([
   "osfstorage", "googledrive", "dropbox", "github", "s3", "box",
@@ -38,6 +39,7 @@ export async function GET(
   });
 
   if (!upstream.ok) {
+    console.warn(`[zip/${guid}/${provider}] Waterbutler returned ${upstream.status}`);
     return new Response(`Upstream returned ${upstream.status}`, { status: upstream.status });
   }
 
@@ -47,7 +49,7 @@ export async function GET(
     status: 200,
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Disposition": contentDisposition(filename),
       "Cache-Control": "private, no-store",
     },
   });

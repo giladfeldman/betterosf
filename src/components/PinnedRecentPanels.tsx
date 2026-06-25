@@ -97,19 +97,28 @@ export function PinnedRecentPanels({
     <section>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <h2 className="mr-2 text-xl font-semibold">Workspace</h2>
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={`rounded border px-3 py-1 text-sm ${t.id === active.id ? "border-blue-500 bg-blue-600 text-white" : "border-neutral-300 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900"}`}
-          >
-            {t.label}
-            <span className="ml-1 text-xs opacity-75">{t.items.length}</span>
-          </button>
-        ))}
+        <div role="tablist" aria-label="Workspace sections" className="flex flex-wrap gap-2">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              id={`workspace-tab-${t.id}`}
+              aria-selected={t.id === active.id}
+              aria-controls={`workspace-panel-${t.id}`}
+              tabIndex={t.id === active.id ? 0 : -1}
+              onClick={() => setTab(t.id)}
+              className={`rounded border px-3 py-1 text-sm ${t.id === active.id ? "border-blue-500 bg-blue-600 text-white" : "border-neutral-300 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900"}`}
+            >
+              {t.label}
+              <span className="ml-1 text-xs opacity-75">{t.items.length}</span>
+            </button>
+          ))}
+        </div>
       </div>
-      {itemList(active.items, active.empty)}
+      <div role="tabpanel" id={`workspace-panel-${active.id}`} aria-labelledby={`workspace-tab-${active.id}`}>
+        {itemList(active.items, active.empty)}
+      </div>
     </section>
   );
 }

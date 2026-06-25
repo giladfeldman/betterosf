@@ -2,7 +2,8 @@ import "server-only";
 import { osfGet } from "./client";
 import { parseNode, type NodeView } from "./parse";
 import { parseQuery } from "@/lib/search/parser";
-import { compileQuery, type FilterPair } from "@/lib/search/compile";
+import { compileQuery, MAX_QUERY_BRANCHES, type FilterPair } from "@/lib/search/compile";
+import { sanitizeSort } from "./sort";
 
 export type SearchPage<T> = {
   results: T[];
@@ -51,12 +52,13 @@ async function executeMulti<T>(
   const plan = compileQuery(ast, field);
   const page = opts?.page ?? 1;
   const size = opts?.perPage ?? 20;
-  const sort = opts?.sort;
+  const sort = sanitizeSort(opts?.sort);
 
   // For OR-union, fetch each request; for intersect (single request) just one fetch.
   // OSF paginates per request; for union we paginate per branch and union page-by-page,
-  // taking the first <size> after dedup. Limit to first 5 branches to bound cost.
-  const branches = plan.requests.slice(0, 5);
+  // taking the first <size> after dedup. compileQuery already caps requests at
+  // MAX_QUERY_BRANCHES; the slice is a defensive backstop on the same bound.
+  const branches = plan.requests.slice(0, MAX_QUERY_BRANCHES);
 
   const fetchOne = async (req: { filters: FilterPair[] }) => {
     const qs = new URLSearchParams();
@@ -243,26 +245,7 @@ export async function searchUsers(query: string, opts?: { page?: number; perPage
 import { getAllChildren, getAllLinkedNodes } from "@/lib/osf/nodes";
 import { getNodeRegistrations } from "@/lib/osf/registrations";
 import { fetchAllProjectEntries } from "@/lib/osf/files-recursive";
-
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  concurrency: number,
-  worker: (item: T) => Promise<R>
-): Promise<R[]> {
-  const safeConcurrency = Math.max(1, Math.min(concurrency, items.length || 1));
-  const out: R[] = new Array(items.length);
-  let index = 0;
-  async function run(): Promise<void> {
-    while (true) {
-      const i = index;
-      index += 1;
-      if (i >= items.length) return;
-      out[i] = await worker(items[i] as T);
-    }
-  }
-  await Promise.all(Array.from({ length: safeConcurrency }, () => run()));
-  return out;
-}
+import { mapWithConcurrency } from "@/lib/util/concurrency";
 
 function buildIncludeFn(query: string, field: string): (text: string) => boolean {
   const ast = parseQuery(query);

@@ -1,4 +1,4 @@
-import type { TreeUploadTarget } from "@/components/UnifiedTreeNode";
+import type { TreeUploadTarget } from "@/components/tree-types";
 
 /** A file in a dropped/extracted tree.
  *  - Drag-drop sets `file` eagerly (disk-backed FileSystemEntry handle, cheap to hold).

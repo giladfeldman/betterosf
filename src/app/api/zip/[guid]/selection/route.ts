@@ -89,6 +89,15 @@ export async function POST(
 
   const archive = archiver("zip", { zlib: { level: 0 } });
   const errors: string[] = [];
+  // L13: capture archiver-level stream errors so a source-stream abort can't
+  // reject unhandled and truncate/crash the worker.
+  archive.on("error", (err) => {
+    console.error(`[zip/${guid}/selection] archiver error:`, err);
+    errors.push(`archiver error: ${err instanceof Error ? err.message : String(err)}`);
+  });
+  archive.on("warning", (err) => {
+    console.warn(`[zip/${guid}/selection] archiver warning:`, err);
+  });
 
   (async () => {
     let token = "";
@@ -129,14 +138,15 @@ export async function POST(
       }
 
       if (errors.length > 0) {
+        console.warn(`[zip/${guid}/selection] completed with ${errors.length} partial failure(s)`);
         archive.append(
           `BetterOSF selected-items ZIP - partial failures\nGenerated at ${new Date().toISOString()}\n\n${errors.map((e) => `- ${e}`).join("\n")}\n`,
           { name: "_BETTEROSF_SELECTION_ERRORS.txt" }
         );
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      archive.append(`Fatal error while assembling selected-items ZIP: ${msg}\n`, { name: "_BETTEROSF_FATAL.txt" });
+      console.error(`[zip/${guid}/selection] fatal error while assembling ZIP:`, e);
+      archive.append(`Fatal error while assembling selected-items ZIP.\n`, { name: "_BETTEROSF_FATAL.txt" });
     } finally {
       await archive.finalize();
     }

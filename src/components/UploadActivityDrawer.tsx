@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listActivity, subscribeActivity, clearActivity } from "@/lib/upload/log";
 import type { ActivityEntry } from "@/lib/upload/types";
+import { useFocusTrap } from "./useFocusTrap";
 
 function StatusDot({ status }: { status: ActivityEntry["status"] }) {
   const color =
@@ -16,6 +17,8 @@ function StatusDot({ status }: { status: ActivityEntry["status"] }) {
 export function UploadActivityDrawer() {
   const [entries, setEntries] = useState<ActivityEntry[]>([]);
   const [open, setOpen] = useState(false);
+  const drawerRef = useRef<HTMLElement>(null);
+  useFocusTrap(drawerRef, open, () => setOpen(false));
 
   useEffect(() => {
     setEntries(listActivity());
@@ -49,7 +52,13 @@ export function UploadActivityDrawer() {
       </button>
 
       {open && (
-        <aside className="fixed right-0 top-0 z-50 flex h-full w-[min(24rem,calc(100vw-1rem))] flex-col border-l border-neutral-200 bg-white shadow-xl dark:border-neutral-800 dark:bg-neutral-950">
+        <aside
+          ref={drawerRef}
+          role="dialog"
+          aria-label="Upload activity"
+          tabIndex={-1}
+          className="fixed right-0 top-0 z-50 flex h-full w-[min(24rem,calc(100vw-1rem))] flex-col border-l border-neutral-200 bg-white shadow-xl outline-none dark:border-neutral-800 dark:bg-neutral-950"
+        >
           <div className="flex items-center justify-between border-b border-neutral-200 p-3 dark:border-neutral-800">
             <h2 className="text-sm font-semibold">Upload activity</h2>
             <div className="flex gap-2">

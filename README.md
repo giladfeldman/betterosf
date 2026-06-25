@@ -104,6 +104,24 @@ After this release, **provision Vercel KV** at https://vercel.com/your-team/bett
 - **Folder create gives feedback + refreshes.** Creating a folder now shows an explicit `✓ Created` (or the full error + a Retry) and the new folder appears immediately — no page reload.
 - **⟳ Refresh button** in the file/directory navigator re-fetches every loaded folder from OSF, bypassing the cache (fixes stale listings after changes made elsewhere).
 
+## v1.3.0 (Navigator depth control + deep-review hardening) — what's new
+
+- **"Levels" depth control in the file/folder navigator.** A stepper at the top
+  of the tree sets how many folder levels to show under each storage root —
+  default **1** (just the direct children of `osfstorage`). The tree only
+  fetches and renders down to that depth, so opening a deep project no longer
+  auto-drills every level and burns OSF API calls on folders you never look at.
+  Raise it (1 … 5 … All), or click any folder at the limit to **drill just that
+  branch** one level deeper without changing the global setting. The level is
+  remembered per project; "Expand all" / "Directory" lift it to "All".
+- **Explicit Show files / Hide files toggle** and a read-only **"N loaded"
+  counter** (folder listings fetched from OSF this session) in the navigator
+  toolbar, so the cost of expanding the tree is visible and controllable.
+- **Deep-review hardening:** a full codebase audit (39 findings) landed alongside
+  the navigator work — accessibility (keyboard tree navigation), correctness, and
+  a flatter, forge-proof per-IP rate limit in middleware (the signed-in multiplier
+  was removed; it could be spoofed without a verified session).
+
 ## Not yet — possible future work
 
 - Full-text search inside file contents

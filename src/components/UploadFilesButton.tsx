@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import type { TreeUploadTarget } from "./UnifiedTreeNode";
+import type { TreeUploadTarget } from "./tree-types";
 
 export const OPEN_UPLOAD_EVENT = "betterosf:open-upload";
 

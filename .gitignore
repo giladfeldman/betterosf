@@ -15,3 +15,9 @@ screenshots/
 # We ship a fresh copy of pdfjs-dist's worker into the build output, so
 # the source of truth is node_modules. Don't commit the copy.
 public/pdf.worker.min.mjs
+
+# deep-review skill scratch — reports, state, and tmp are per-run working
+# artifacts, not source. Keep them untracked.
+.claude/skills/_project/deep-review-report-*.md
+.claude/skills/_project/deep-review-state.json
+.claude/skills/_project/deep-review-tmp/

@@ -22,7 +22,10 @@ export async function requireOsfWriteToken(): Promise<string> {
   if (!session?.accessToken) {
     throw new OsfWriteError(401, "unauthorized", "Sign in with OSF to upload files.");
   }
-  if (!session.osfCanWrite) {
+  if (!session.osfCanWrite || session.osfAuthError) {
+    // osfAuthError = the OSF connection needs a reconnect (refresh failed / missing
+    // refresh token). Matches the /api/osf/upload-token gate so both upload paths
+    // reject the reconnect-needed state up front instead of wasting an OSF round-trip.
     throw new OsfWriteError(403, "forbidden", "Enable OSF uploads to grant write access.");
   }
   return session.accessToken;
@@ -79,7 +82,11 @@ export async function createOsfStorageFolder(target: UploadTarget, name: string)
 
 export function writeErrorResponse(error: unknown): Response {
   if (error instanceof OsfWriteError) {
+    // OsfWriteError messages are deliberately user-facing and safe to return.
     return Response.json({ error: error.message, code: error.code }, { status: error.status });
   }
-  return Response.json({ error: error instanceof Error ? error.message : String(error), code: "upstream" }, { status: 500 });
+  // Unexpected exception — log the detail server-side, return a generic body so
+  // we never leak internal strings (stack fragments, upstream URLs) to the client.
+  console.error("[osf/write] unexpected error:", error);
+  return Response.json({ error: "Upload failed due to an unexpected server error. Please try again.", code: "upstream" }, { status: 500 });
 }

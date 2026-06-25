@@ -6,7 +6,6 @@ import { canonicalGuidPath } from "@/lib/osf/url-bridge";
 const NAV_LIMIT_PER_MIN = 60;
 const API_LIMIT_PER_MIN = 240;
 const EXPENSIVE_API_LIMIT_PER_MIN = 80;
-const SIGNED_IN_LIMIT_MULTIPLIER = 5;
 
 const STATIC_FILE_RE = /\.(svg|ico|png|jpe?g|gif|webp|woff2?|css|js|map|txt|xml)$/i;
 const SEARCH_BOT_RE =
@@ -76,10 +75,6 @@ function textResponse(body: string, status: number, retryAfter?: string): NextRe
   return noIndexHeaders(res);
 }
 
-function isSignedIn(req: NextRequest): boolean {
-  return req.cookies.has("__Secure-authjs.session-token") || req.cookies.has("authjs.session-token");
-}
-
 function requestIp(req: NextRequest): string {
   return (
     req.headers.get("x-real-ip") ??
@@ -121,8 +116,12 @@ export async function middleware(req: NextRequest) {
   // logic with no OSF call) so localhost behavior stays identical to prod.
   if (isLocalHost) return navPassthrough(req);
 
-  const signedIn = isSignedIn(req);
-
+  // The per-IP limits are NOT tiered by sign-in state. The old code granted a 5×
+  // multiplier whenever an `authjs.session-token` cookie was merely PRESENT, which
+  // an anonymous client could forge to claim the higher tier and burn the shared
+  // OSF app-token quota. Verifying the JWT in Edge middleware is brittle, so we
+  // apply one flat per-IP budget to everyone — the base limits below are generous
+  // for a single human, and OSF's own per-token quota is the real backstop.
   const ip = requestIp(req);
   if (pathname.startsWith("/api/")) {
     const expensive =
@@ -130,9 +129,8 @@ export async function middleware(req: NextRequest) {
       pathname.includes("/download") ||
       pathname.includes("/folder") ||
       pathname.includes("/all");
-    const baseLimit = expensive ? EXPENSIVE_API_LIMIT_PER_MIN : API_LIMIT_PER_MIN;
-    const limit = signedIn ? baseLimit * SIGNED_IN_LIMIT_MULTIPLIER : baseLimit;
-    const key = `ip:${ip}:api:${expensive ? "expensive" : "general"}:${signedIn ? "signedin" : "anon"}:1min`;
+    const limit = expensive ? EXPENSIVE_API_LIMIT_PER_MIN : API_LIMIT_PER_MIN;
+    const key = `ip:${ip}:api:${expensive ? "expensive" : "general"}:1min`;
     const count = await incrementWindow(key, 60);
     if (count > limit) return textResponse("Too many requests. Please wait and try again.", 429, "60");
     return noIndexHeaders(NextResponse.next());
@@ -143,14 +141,11 @@ export async function middleware(req: NextRequest) {
     return navPassthrough(req);
   }
 
-  const navLimit = signedIn ? NAV_LIMIT_PER_MIN * SIGNED_IN_LIMIT_MULTIPLIER : NAV_LIMIT_PER_MIN;
-  const key = `ip:${ip}:nav:${signedIn ? "signedin" : "anon"}:1min`;
+  const key = `ip:${ip}:nav:1min`;
   const count = await incrementWindow(key, 60);
-  if (count > navLimit) {
+  if (count > NAV_LIMIT_PER_MIN) {
     return textResponse(
-      signedIn
-        ? "Too many requests. Please wait and try again."
-        : "Too many requests. BetterOSF rate-limits anonymous traffic to 60 page navigations per minute. Sign in or wait.",
+      "Too many requests. BetterOSF rate-limits traffic to 60 page navigations per minute per IP. Please wait.",
       429,
       "60"
     );
