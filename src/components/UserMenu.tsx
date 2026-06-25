@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { auth, signOut } from "@/auth";
 import { SignInButton } from "./SignInButton";
 
@@ -20,7 +21,7 @@ export async function UserMenu() {
           Reconnect OSF
         </SignInButton>
       )}
-      <a href="/me" className="hover:underline">Dashboard</a>
+      <Link href="/me" className="hover:underline">Dashboard</Link>
       <form action={async () => {
         "use server";
         await signOut({ redirectTo: "/" });

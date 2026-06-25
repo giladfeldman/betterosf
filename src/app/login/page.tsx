@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { SignInButton } from "@/components/SignInButton";
 
 export const metadata = { title: "Sign in - BetterOSF" };
@@ -11,7 +12,7 @@ export default function LoginPage() {
       </p>
       <SignInButton />
       <p className="mt-8 text-xs text-neutral-500">
-        Public OSF projects can be browsed without signing in. Paste a project URL or click an example on the <a href="/" className="underline">home page</a>.
+        Public OSF projects can be browsed without signing in. Paste a project URL or click an example on the <Link href="/" className="underline">home page</Link>.
       </p>
     </div>
   );

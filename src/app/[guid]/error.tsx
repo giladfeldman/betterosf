@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 export default function ProjectError({ error, reset }: { error: Error; reset: () => void }) {
   const lowerMessage = error.message.toLowerCase();
   const isAuth = lowerMessage.includes("authentication required") || lowerMessage.includes("unauthorized") || lowerMessage.includes("session expired");
@@ -21,7 +23,7 @@ export default function ProjectError({ error, reset }: { error: Error; reset: ()
       <p className="text-neutral-600 mb-4">{msg}</p>
       <div className="flex flex-wrap gap-2">
         <button onClick={reset} className="border px-3 py-1 rounded">Retry</button>
-        {(isAuth || isForbidden) && <a href="/login" className="border px-3 py-1 rounded hover:bg-neutral-50 dark:hover:bg-neutral-900">Sign in / reconnect</a>}
+        {(isAuth || isForbidden) && <Link href="/login" className="border px-3 py-1 rounded hover:bg-neutral-50 dark:hover:bg-neutral-900">Sign in / reconnect</Link>}
       </div>
     </div>
   );

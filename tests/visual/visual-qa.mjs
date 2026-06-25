@@ -647,7 +647,6 @@ async function main() {
     // kind="registration" → interceptLeftClick is true).
     const firstReg = page.locator('[role="treeitem"] a[href*="/registrations/"]').first();
     if (await firstReg.count()) {
-      const beforeUrl = page.url();
       await firstReg.click({ modifiers: [] });
       await page.waitForTimeout(4000); // skeleton fetch can take time
       const navigatedAway = !page.url().includes(`/${REG_PARENT_GUID}/files`);

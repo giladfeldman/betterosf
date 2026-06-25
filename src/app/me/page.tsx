@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { getCurrentUser, getMyProjects } from "@/lib/osf/users";
@@ -46,7 +47,7 @@ export default async function MyDashboard({
         <div className="max-w-xl">
           <h1 className="text-2xl font-semibold mb-2">Session expired</h1>
           <p className="mb-4">Your OSF session has expired. Please sign in again.</p>
-          <a href="/login" className="underline text-blue-600">Sign in</a>
+          <Link href="/login" className="underline text-blue-600">Sign in</Link>
         </div>
       );
     }
@@ -71,7 +72,7 @@ export default async function MyDashboard({
       </p>
 
       <p className="mb-4 text-sm">
-        <a href="/search?scope=user:me" className="text-blue-600 hover:underline">Search my projects</a>
+        <Link href="/search?scope=user:me" className="text-blue-600 hover:underline">Search my projects</Link>
       </p>
 
       <PinnedRecentPanels />
@@ -102,7 +103,7 @@ export default async function MyDashboard({
         pageSize={pag.pageSize}
         renderItem={(p) => (
           <li key={p.id}>
-            <a href={`/${p.id}`} className="text-blue-600 hover:underline">{p.title || p.id}</a>
+            <Link href={`/${p.id}`} className="text-blue-600 hover:underline">{p.title || p.id}</Link>
             {!p.public && <span className="ml-2 text-xs text-neutral-500">[private]</span>}
           </li>
         )}

@@ -1,5 +1,6 @@
 import "@/styles/globals.css";
 import type { Metadata } from "next";
+import Link from "next/link";
 import { headers } from "next/headers";
 import { ThemeProvider } from "next-themes";
 import { UserMenu } from "@/components/UserMenu";
@@ -33,12 +34,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem nonce={nonce}>
           <header className="border-b border-neutral-200 dark:border-neutral-800 px-4 sm:px-6 py-3 flex flex-wrap justify-between items-center gap-2">
             <div className="flex items-center gap-4">
-              <a href="/" className="font-semibold" aria-label="BetterOSF home">
+              <Link href="/" className="font-semibold" aria-label="BetterOSF home">
                 <BetterOsfLogo variant="compact" className="h-8" />
-              </a>
-              <a href="/search" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">Search</a>
-              <a href="/bookmarklet" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">Bookmarklet</a>
-              <a href="/about" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">About</a>
+              </Link>
+              <Link href="/search" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">Search</Link>
+              <Link href="/bookmarklet" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">Bookmarklet</Link>
+              <Link href="/about" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">About</Link>
             </div>
             <div className="flex items-center gap-3">
               <ThemeToggle />
@@ -57,9 +58,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               </span>
             </span>
             <span className="flex gap-4">
-              <a href="/about" className="hover:underline">About</a>
-              <a href="/bookmarklet" className="hover:underline">Bookmarklet</a>
-              <a href="/privacy" className="hover:underline">Privacy</a>
+              <Link href="/about" className="hover:underline">About</Link>
+              <Link href="/bookmarklet" className="hover:underline">Bookmarklet</Link>
+              <Link href="/privacy" className="hover:underline">Privacy</Link>
               <a href="https://scirenity.com" className="hover:underline">Scirenity</a>
               <a href="https://github.com/giladfeldman/betterosf" className="hover:underline">GitHub</a>
             </span>

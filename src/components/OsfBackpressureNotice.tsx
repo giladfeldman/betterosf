@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 /**
  * Soft, friendly HTTP-200 state shown when OSF applies *backpressure* to a
  * critical render-path fetch — a rate limit (429) or a persistent OSF outage
@@ -34,12 +36,12 @@ export function OsfBackpressureNotice({
         >
           Retry
         </button>
-        <a
+        <Link
           href="/"
           className="border px-3 py-1 rounded hover:bg-neutral-50 dark:hover:bg-neutral-900"
         >
           Home
-        </a>
+        </Link>
       </div>
     </div>
   );

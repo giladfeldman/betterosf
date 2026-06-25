@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getCount } from "@/lib/limits";
 import { auth } from "@/auth";
 
@@ -16,7 +17,7 @@ export async function QuotaBanner() {
     return (
       <div className="bg-red-100 dark:bg-red-950 text-red-900 dark:text-red-100 px-4 py-2 text-sm border-b border-red-300 dark:border-red-800">
         BetterOSF is over its daily OSF API quota. Anonymous browsing may be unreliable until UTC midnight.{" "}
-        <a href="/login" className="underline">Sign in</a> for full access.
+        <Link href="/login" className="underline">Sign in</Link> for full access.
       </div>
     );
   }
@@ -24,7 +25,7 @@ export async function QuotaBanner() {
     return (
       <div className="bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-100 px-4 py-2 text-sm border-b border-amber-200 dark:border-amber-800">
         BetterOSF is approaching its daily OSF API quota ({used}/{DAILY_CAP}). Pages may slow down later today.{" "}
-        <a href="/login" className="underline">Sign in</a> to use your own quota.
+        <Link href="/login" className="underline">Sign in</Link> to use your own quota.
       </div>
     );
   }

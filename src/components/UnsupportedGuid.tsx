@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Breadcrumb } from "@/components/Breadcrumb";
 
 /**
@@ -23,7 +24,7 @@ export function UnsupportedGuid({ guid, kind }: { guid: string; kind?: string })
         </a>
       </p>
       <p className="mt-4 text-sm text-neutral-500">
-        <a href="/" className="underline">Go home</a>
+        <Link href="/" className="underline">Go home</Link>
       </p>
     </div>
   );
