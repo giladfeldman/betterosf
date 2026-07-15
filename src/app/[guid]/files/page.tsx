@@ -28,12 +28,14 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
   const { kind, title, fullTree, linked, registrations, components } = resource;
   const node = { title };
   const isRegistration = kind === "registration";
+  const parent = fullTree.parentTree;
 
   return (
     <div>
       <Breadcrumb
         crumbs={[
           { label: "Home", href: "/" },
+          ...(parent ? [{ label: parent.title || parent.guid, href: `/${parent.guid}` }] : []),
           { label: node.title || guid, href: `/${guid}` },
           { label: "Files", href: `/${guid}/files` },
         ]}
@@ -52,6 +54,7 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
             registrations={registrations}
             registrationTrees={fullTree.registrationTrees}
             linkedTrees={fullTree.linkedTrees}
+            parentTree={fullTree.parentTree}
             readOnly={isRegistration}
             degraded={fullTree.degraded}
           />

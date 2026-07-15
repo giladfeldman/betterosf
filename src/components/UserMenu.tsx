@@ -17,7 +17,10 @@ export async function UserMenu() {
     <div className="flex items-center gap-3 text-sm">
       <span className={`rounded border px-2 py-1 text-xs ${statusClass}`}>{statusText}</span>
       {session.osfAuthError && (
-        <SignInButton className="border rounded px-2 py-1 hover:bg-neutral-100 dark:hover:bg-neutral-800">
+        <SignInButton
+          forceApproval
+          className="border rounded px-2 py-1 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
           Reconnect OSF
         </SignInButton>
       )}

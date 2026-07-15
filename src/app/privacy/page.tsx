@@ -14,8 +14,9 @@ export default function PrivacyPage() {
       <ul>
         <li>
           <strong>Session cookies</strong> for users who sign in with OSF. These hold an encrypted OAuth
-          access token in an httpOnly cookie set by Auth.js. The cookie is the only place your token lives;
-          we have no relational database.
+          access token and (when OSF issued one) a refresh token in an httpOnly cookie set by Auth.js.
+          The cookie is the only place your tokens live — we have no relational database. BetterOSF renews
+          the access token server-side via the refresh token so you are not asked to reconnect every hour.
         </li>
         <li>
           <strong>Short-lived counters</strong> for rate-limiting and quota tracking, such as per-IP navigation

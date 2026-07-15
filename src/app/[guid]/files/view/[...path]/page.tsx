@@ -74,27 +74,30 @@ export default async function FileViewerPage({
     }
   }
 
-  // Project title (kind-appropriate fetch).
-  const titlePromise = resourceKind === "registration"
-    ? getRegistration(guid).then((r) => r.title).catch((): string => "")
-    : getNode(guid).then((n) => n.title).catch((): string => "");
+  // Project title + parent (kind-appropriate fetch).
+  const nodeMetaPromise = resourceKind === "registration"
+    ? getRegistration(guid).then((r) => ({ title: r.title, parentId: null as string | null })).catch(() => ({ title: "", parentId: null as string | null }))
+    : getNode(guid).then((n) => ({ title: n.title, parentId: n.parentId })).catch(() => ({ title: "", parentId: null as string | null }));
 
   // Side-pane data: tree, linked projects, registrations. These power the
   // navigation pane but the page is still useful without them. For a
   // registration resource these endpoints don't apply — we skip them.
-  const [titleStr, fullTree, linked, registrations]: [string, FullProjectTree, NodeView[], RegistrationView[]] = await Promise.all([
-    titlePromise,
+  const [nodeMeta, fullTree, linked, registrations]: [{ title: string; parentId: string | null }, FullProjectTree, NodeView[], RegistrationView[]] = await Promise.all([
+    nodeMetaPromise,
     resourceKind === "registration"
       ? collectFolderSkeleton(guid, { kind: "registration" })
           .then((rootSkeleton): FullProjectTree => ({ ...EMPTY_TREE, rootSkeleton }))
           .catch((): FullProjectTree => ({ ...EMPTY_TREE, degraded: true }))
-      : collectFullTree(guid, {
-          maxComponentsToRecurse: 3,
-          maxRegistrationsToRecurse: 1,
-          maxLinkedToRecurse: 1,
-          componentTimeoutMs: 5_000,
-          rootTimeoutMs: 10_000,
-        }).catch((): FullProjectTree => ({ ...EMPTY_TREE, degraded: true })),
+      : nodeMetaPromise.then((meta) =>
+          collectFullTree(guid, {
+            maxComponentsToRecurse: 3,
+            maxRegistrationsToRecurse: 1,
+            maxLinkedToRecurse: 1,
+            componentTimeoutMs: 5_000,
+            rootTimeoutMs: 10_000,
+            parentId: meta.parentId,
+          }).catch((): FullProjectTree => ({ ...EMPTY_TREE, degraded: true }))
+        ),
     resourceKind === "registration"
       ? Promise.resolve<NodeView[]>([])
       : getAllLinkedNodes(guid).catch((): NodeView[] => []),
@@ -102,7 +105,8 @@ export default async function FileViewerPage({
       ? Promise.resolve<RegistrationView[]>([])
       : getNodeRegistrations(guid).catch((): RegistrationView[] => []),
   ]);
-  const node = { title: titleStr };
+  const node = { title: nodeMeta.title };
+  const parent = fullTree.parentTree;
 
   const components = fullTree.components.map((c) => ({
     id: c.guid,
@@ -114,6 +118,7 @@ export default async function FileViewerPage({
     dateCreated: "",
     dateModified: "",
     osfUrl: `https://osf.io/${c.guid}/`,
+    parentId: null as string | null,
     related: { children: "", linkedNodes: "", registrations: "", files: "", contributors: "" },
   }));
 
@@ -196,6 +201,7 @@ export default async function FileViewerPage({
       <Breadcrumb
         crumbs={[
           { label: "Home", href: "/" },
+          ...(parent ? [{ label: parent.title || parent.guid, href: `/${parent.guid}` }] : []),
           { label: node.title || guid, href: resourceKind === "registration" ? `/registrations/${guid}` : `/${guid}` },
           ...(resourceKind === "registration"
             ? []
@@ -235,6 +241,7 @@ export default async function FileViewerPage({
             registrations={registrations}
             registrationTrees={fullTree.registrationTrees}
             linkedTrees={fullTree.linkedTrees}
+            parentTree={fullTree.parentTree}
             readOnly={resourceKind === "registration"}
             degraded={fullTree.degraded}
           />

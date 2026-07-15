@@ -46,7 +46,7 @@ const MAX_LEVEL = 5;
 // user asks for more via the Levels stepper / "Expand all".
 const DEFAULT_MAX_DEPTH = 1;
 
-type HydrationKind = "component" | "linked" | "registration";
+type HydrationKind = "component" | "linked" | "registration" | "parent";
 
 type HydrationTask = {
   id: string;
@@ -115,7 +115,14 @@ function favoriteKindToTreeKind(kind: FavoriteRef["kind"]): TreeNodeKind {
 }
 
 function collectExpandedProviderIds(task: HydrationTask, skeleton: SkeletonNode[]): string[] {
-  const basePrefix = task.kind === "component" ? `component/${task.guid}` : task.kind === "linked" ? `linked/${task.guid}` : `registration/${task.guid}`;
+  const basePrefix =
+    task.kind === "component"
+      ? `component/${task.guid}`
+      : task.kind === "linked"
+        ? `linked/${task.guid}`
+        : task.kind === "parent"
+          ? `parent/${task.guid}`
+          : `registration/${task.guid}`;
   return skeleton.map((provider) => `${basePrefix}/provider:${provider.provider}`);
 }
 
@@ -150,6 +157,7 @@ export function UnifiedTree({
   registrations,
   registrationTrees,
   linkedTrees,
+  parentTree,
   readOnly = false,
   degraded = false,
 }: {
@@ -170,6 +178,9 @@ export function UnifiedTree({
   /** When provided, each linked project is rendered as an expandable sub-tree
    *  (parallel to registrationTrees). Falls back to flat leaf-link rendering. */
   linkedTrees?: LinkedTree[];
+  /** Immediate OSF parent project (component → containing project). Collapsed
+   *  by default; expand hydrates the parent skeleton on demand. */
+  parentTree?: LinkedTree | null;
   /** The server-rendered tree was degraded (OSF backpressure during the skeleton
    *  walk) and may be missing folders — show a "partially loaded, refresh" notice. */
   degraded?: boolean;
@@ -182,6 +193,7 @@ export function UnifiedTree({
   const [componentTreeState, setComponentTreeState] = useState<ComponentTree[]>(componentTrees ?? []);
   const [registrationTreeState, setRegistrationTreeState] = useState<RegistrationTree[]>(registrationTrees ?? []);
   const [linkedTreeState, setLinkedTreeState] = useState<LinkedTree[]>(linkedTrees ?? []);
+  const [parentTreeState, setParentTreeState] = useState<LinkedTree | null>(parentTree ?? null);
   const [hydratedIds, setHydratedIds] = useState<Record<string, true>>({});
   const [hydrationFailures, setHydrationFailures] = useState<Record<string, HydrationFailure>>({});
   const [priorityHydrationIds, setPriorityHydrationIds] = useState<string[]>([]);
@@ -195,6 +207,7 @@ export function UnifiedTree({
     setComponentTreeState(componentTrees ?? []);
     setRegistrationTreeState(registrationTrees ?? []);
     setLinkedTreeState(linkedTrees ?? []);
+    setParentTreeState(parentTree ?? null);
     setHydratedIds({});
     setHydrationFailures({});
     setPriorityHydrationIds([]);
@@ -204,7 +217,7 @@ export function UnifiedTree({
     setFilesHiddenState(getPref<boolean>(`tree.filesHidden.${guid}`, true));
     setMaxDepthState(readMaxDepthPref(guid));
     setForcedOpen(new Set());
-  }, [guid, componentTrees, registrationTrees, linkedTrees]);
+  }, [guid, componentTrees, registrationTrees, linkedTrees, parentTree]);
 
   // Initial expand state — all folder paths expanded (root + each component);
   // registrations collapsed; linked projects shown but not auto-recursed.
@@ -398,8 +411,17 @@ export function UnifiedTree({
     for (const r of registrationTreeState) {
       if (r.skipped) tasks.push({ id: hydrationTaskId("registration", r.guid), kind: "registration", guid: r.guid, title: r.title, apiKind: "registration" });
     }
+    if (parentTreeState?.skipped) {
+      tasks.push({
+        id: hydrationTaskId("parent", parentTreeState.guid),
+        kind: "parent",
+        guid: parentTreeState.guid,
+        title: parentTreeState.title,
+        apiKind: "node",
+      });
+    }
     return tasks;
-  }, [componentTreeState, linkedTreeState, registrationTreeState]);
+  }, [componentTreeState, linkedTreeState, registrationTreeState, parentTreeState]);
 
   const hydrationTaskById = useMemo(() => new Map(hydrationTasks.map((task) => [task.id, task])), [hydrationTasks]);
   const failedHydrationCount = Object.values(hydrationFailures).filter((failure) => failure.attempts >= HYDRATION_MAX_ATTEMPTS).length;
@@ -418,12 +440,21 @@ export function UnifiedTree({
         setComponentTreeState((prev) => prev.map((item) => item.guid === task.guid ? { ...item, skeleton: nextSkeleton, skipped: false } : item));
       } else if (task.kind === "linked") {
         setLinkedTreeState((prev) => prev.map((item) => item.guid === task.guid ? { ...item, skeleton: nextSkeleton, skipped: false } : item));
+      } else if (task.kind === "parent") {
+        setParentTreeState((prev) => (prev && prev.guid === task.guid ? { ...prev, skeleton: nextSkeleton, skipped: false } : prev));
       } else {
         setRegistrationTreeState((prev) => prev.map((item) => item.guid === task.guid ? { ...item, skeleton: nextSkeleton, skipped: false } : item));
       }
 
       setExpandedState((prev) => {
-        const rowId = task.kind === "component" ? `component/${task.guid}` : task.kind === "linked" ? `linked/${task.guid}` : `registration/${task.guid}`;
+        const rowId =
+          task.kind === "component"
+            ? `component/${task.guid}`
+            : task.kind === "linked"
+              ? `linked/${task.guid}`
+              : task.kind === "parent"
+                ? `parent/${task.guid}`
+                : `registration/${task.guid}`;
         if (!prev[rowId]) return prev;
         const next = { ...prev };
         for (const id of collectExpandedProviderIds(task, nextSkeleton)) next[id] = true;
@@ -585,6 +616,9 @@ export function UnifiedTree({
     for (const l of linkedTreeState ?? []) {
       if (!l.skipped && expanded[`linked/${l.guid}`]) visitProviderSet(l.guid, l.skeleton, `linked/${l.guid}`);
     }
+    if (parentTreeState && !parentTreeState.skipped && expanded[`parent/${parentTreeState.guid}`]) {
+      visitProviderSet(parentTreeState.guid, parentTreeState.skeleton, `parent/${parentTreeState.guid}`);
+    }
 
     if (Object.keys(toExpand).length > 0) setExpanded({ ...expanded, ...toExpand });
 
@@ -603,7 +637,7 @@ export function UnifiedTree({
         void fetchFiles(t.nodeGuid, t.provider, t.materializedPath, t.listingUrl);
       }
     }
-  }, [expanded, loadedEntries, loadingKeys, skeleton, componentTreeState, registrationTreeState, linkedTreeState, guid, fetchFiles, setExpanded, retryNonce, maxDepth, forcedOpen]);
+  }, [expanded, loadedEntries, loadingKeys, skeleton, componentTreeState, registrationTreeState, linkedTreeState, parentTreeState, guid, fetchFiles, setExpanded, retryNonce, maxDepth, forcedOpen]);
 
   const toggleSelected = useCallback((payload: TreeSelectionPayload, checked: boolean) => {
     const key = selectionKey(payload);
@@ -961,6 +995,44 @@ export function UnifiedTree({
       }
     }
 
+    // Parent project (above current project providers; collapsed by default)
+    if (parentTreeState) {
+      const parentId = `parent/${parentTreeState.guid}`;
+      const task: HydrationTask = {
+        id: hydrationTaskId("parent", parentTreeState.guid),
+        kind: "parent",
+        guid: parentTreeState.guid,
+        title: parentTreeState.title,
+        apiKind: "node",
+      };
+      const failure = hydrationFailures[task.id];
+      const failed = failure && failure.attempts >= HYDRATION_MAX_ATTEMPTS;
+      const parentHasContent = parentTreeState.skeleton.length > 0;
+      rows.push({
+        id: parentId,
+        depth: 0,
+        expanded: !!expanded[parentId],
+        hasChildren: parentHasContent || parentTreeState.skipped,
+        onToggle: () => {
+          const nextOpen = !expanded[parentId];
+          setExpanded({ ...expanded, [parentId]: nextOpen });
+          if (nextOpen && parentTreeState.skipped) queueHydrationTask(task);
+        },
+        node: {
+          id: parentTreeState.guid,
+          label: `Parent: ${parentTreeState.title}`,
+          kind: "parent",
+          href: `/${parentTreeState.guid}`,
+          badge: parentTreeState.skipped ? (failed ? "retry" : "indexing") : parentTreeState.isPublic ? undefined : "private",
+          loading: parentTreeState.skipped && runningHydrationId === task.id,
+          guid: parentTreeState.guid,
+        },
+      });
+      if (expanded[parentId] && !parentTreeState.skipped) {
+        emitNodeSubtree(parentTreeState.guid, parentTreeState.skeleton, parentId, 1, true, "project", parentTreeState.title);
+      }
+    }
+
     // Root project providers
     rows.push({
       id: "providers-root",
@@ -1157,7 +1229,7 @@ export function UnifiedTree({
     }
 
     return rows;
-  }, [expanded, filesHidden, maxDepth, forcedOpen, setForcedOpen, loadedEntries, loadingKeys, folderFailures, readOnly, skeleton, components, componentTreeState, linkedNodes, linkedTreeState, registrations, registrationTreeState, pinned, rootTitle, guid, fetchFiles, setExpanded, queueHydrationTask, hydrationFailures, runningHydrationId]);
+  }, [expanded, filesHidden, maxDepth, forcedOpen, setForcedOpen, loadedEntries, loadingKeys, folderFailures, readOnly, skeleton, components, componentTreeState, linkedNodes, linkedTreeState, registrations, registrationTreeState, parentTreeState, pinned, rootTitle, guid, fetchFiles, setExpanded, queueHydrationTask, hydrationFailures, runningHydrationId]);
 
   const uploadTargets = useMemo(() => {
     const seen = new Set<string>();
@@ -1323,8 +1395,16 @@ export function UnifiedTree({
         }
       }
     }
+    // Parent project sub-tree
+    if (parentTreeState) {
+      ids.push(`parent/${parentTreeState.guid}`);
+      for (const p of parentTreeState.skeleton) {
+        ids.push(`parent/${parentTreeState.guid}/provider:${p.provider}`);
+        walkSkeleton(p.children, `parent/${parentTreeState.guid}/provider:${p.provider}`);
+      }
+    }
     return ids;
-  }, [skeleton, componentTreeState, registrationTreeState, linkedTreeState]);
+  }, [skeleton, componentTreeState, registrationTreeState, linkedTreeState, parentTreeState]);
 
   // "Directory" (default view): expand the whole folder tree but keep file
   // leaves hidden — the structure-only overview.

@@ -11,6 +11,16 @@ export async function getNode(guid: string): Promise<NodeView> {
   return parseNode(raw);
 }
 
+/** Fetch the parent node when `parentId` is set; returns null for roots or on failure. */
+export async function getParentNode(parentId: string | null | undefined): Promise<NodeView | null> {
+  if (!parentId) return null;
+  try {
+    return await getNode(parentId);
+  } catch {
+    return null;
+  }
+}
+
 async function fetchNodeCollectionPage(url: string, defaultPath: string, guid: string): Promise<{ data: NodeView[]; links: { next: string | null } }> {
   const raw = url
     ? await osfGetUrl<CollectionResponse>(url, { tags: [`node:${guid}`] })

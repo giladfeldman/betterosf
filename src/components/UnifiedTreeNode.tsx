@@ -36,6 +36,7 @@ function kindIcon(kind: TreeNodeKind, provider?: string): ReactNode {
   if (kind === "component") return <span aria-hidden="true">🧩</span>;
   if (kind === "linked") return <span aria-hidden="true">🔗</span>;
   if (kind === "registration") return <span aria-hidden="true">🔒</span>;
+  if (kind === "parent") return <span aria-hidden="true">⬆</span>;
   return null;
 }
 
@@ -155,7 +156,8 @@ export function UnifiedTreeNode({
     node.kind === "pinned-root" ||
     node.kind === "component" ||
     node.kind === "registration" ||
-    node.kind === "linked";
+    node.kind === "linked" ||
+    node.kind === "parent";
 
   const content = node.href ? (
     <a

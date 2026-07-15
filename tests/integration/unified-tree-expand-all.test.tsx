@@ -353,4 +353,50 @@ describe("UnifiedTree expand-all / collapse-all", () => {
     fireEvent.click(screen.getByRole("button", { name: /collapse all/i }));
     expect(screen.queryByText("sub")).not.toBeInTheDocument();
   });
+
+  it("shows a collapsed Parent row above the current project and hydrates on expand", async () => {
+    server.use(
+      http.get("*/api/files/df9tj/skeleton", () =>
+        HttpResponse.json({
+          skeleton: [
+            {
+              provider: "osfstorage",
+              name: "osfstorage",
+              materializedPath: "/",
+              listingUrl: "https://api.osf.io/v2/nodes/df9tj/files/osfstorage/",
+              children: [{ provider: "osfstorage", name: "parent-folder", materializedPath: "/parent-folder/", listingUrl: "https://api.osf.io/x/pf/", children: [], fileCount: 0 }],
+              fileCount: 0,
+            },
+          ],
+        })
+      )
+    );
+    const parentTree: LinkedTree = {
+      guid: "df9tj",
+      title: "Parent Project",
+      category: "project",
+      isPublic: true,
+      skeleton: [],
+      skipped: true,
+    };
+    render(
+      <UnifiedTree
+        guid="v3m95"
+        rootTitle="Child Project"
+        skeleton={[leaf("osfstorage", "osfstorage", "/")]}
+        components={[]}
+        linkedNodes={[]}
+        registrations={[]}
+        parentTree={parentTree}
+      />
+    );
+    expect(screen.getByText("Parent: Parent Project")).toBeInTheDocument();
+    expect(screen.queryByText("parent-folder")).not.toBeInTheDocument();
+
+    // Expand parent → queues hydration; after hydrate, parent folders appear.
+    fireEvent.click(screen.getByText("Parent: Parent Project"));
+    await waitFor(() => {
+      expect(screen.getByText("parent-folder")).toBeInTheDocument();
+    });
+  });
 });

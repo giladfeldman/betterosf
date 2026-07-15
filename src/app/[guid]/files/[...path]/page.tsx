@@ -62,6 +62,7 @@ export default async function DeepFilesPage({
   }
   const { kind, title, fullTree, linked, registrations, components } = resource;
   const node = { title };
+  const parent = fullTree.parentTree;
   const providers = fullTree.rootSkeleton.map((p) => ({
     provider: p.provider,
     name: p.name,
@@ -127,6 +128,7 @@ export default async function DeepFilesPage({
       <Breadcrumb
         crumbs={[
           { label: "Home", href: "/" },
+          ...(parent ? [{ label: parent.title || parent.guid, href: `/${parent.guid}` }] : []),
           { label: node.title || guid, href: `/${guid}` },
           { label: "Files", href: `/${guid}/files` },
           { label: provider!, href: `/${guid}/files/${encodeURIComponent(provider!)}` },
@@ -150,6 +152,7 @@ export default async function DeepFilesPage({
             registrations={registrations}
             registrationTrees={fullTree.registrationTrees}
             linkedTrees={fullTree.linkedTrees}
+            parentTree={fullTree.parentTree}
             readOnly={kind === "registration"}
             degraded={fullTree.degraded}
           />

@@ -10,7 +10,7 @@ import { RegistrationOverview } from "@/components/RegistrationOverview";
 import { PreprintOverview } from "@/components/PreprintOverview";
 import { UserProfile } from "@/components/UserProfile";
 import { UnsupportedGuid } from "@/components/UnsupportedGuid";
-import { collectFullTree } from "@/lib/osf/full-tree";
+import { collectFullTree, EMPTY_TREE } from "@/lib/osf/full-tree";
 import { OsfError } from "@/lib/osf/types";
 import { osfBackpressureKind } from "@/lib/osf/backpressure";
 import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
@@ -201,14 +201,9 @@ export default async function ProjectPage({
       maxLinkedToRecurse: 1,
       componentTimeoutMs: 5_000,
       rootTimeoutMs: 10_000,
+      parentId: node.parentId,
     }).catch(() => ({
-      rootSkeleton: [],
-      components: [],
-      totalComponents: 0,
-      registrationTrees: [],
-      totalRegistrations: 0,
-      linkedTrees: [],
-      totalLinked: 0,
+      ...EMPTY_TREE,
       degraded: true,
     })),
     getAllLinkedNodes(guid).catch((): NodeView[] => []),
@@ -226,8 +221,10 @@ export default async function ProjectPage({
     dateCreated: "",
     dateModified: "",
     osfUrl: `https://osf.io/${c.guid}/`,
+    parentId: null,
     related: { children: "", linkedNodes: "", registrations: "", files: "", contributors: "" },
   }));
+  const parent = fullTree.parentTree;
 
   // Components filter + sort + pagination
   const compCategory = first(sp.compCategory);
@@ -474,6 +471,16 @@ export default async function ProjectPage({
             <h3 className="font-semibold mb-1">Status</h3>
             <p>{node.public ? "Public" : "Private"} · {node.category || "node"}</p>
           </div>
+          {parent && (
+            <div>
+              <h3 className="font-semibold mb-1">Parent project</h3>
+              <p>
+                <a href={`/${parent.guid}`} className="text-blue-600 hover:underline">
+                  {parent.title || parent.guid}
+                </a>
+              </p>
+            </div>
+          )}
           <div>
             <h3 className="font-semibold mb-1">Tags</h3>
             <p>{node.tags.join(", ") || "—"}</p>
@@ -503,7 +510,15 @@ export default async function ProjectPage({
 
   return (
     <div>
-      <Breadcrumb crumbs={[{ label: "Home", href: "/" }, { label: node.title || guid, href: `/${guid}` }]} />
+      <Breadcrumb
+        crumbs={[
+          { label: "Home", href: "/" },
+          ...(parent
+            ? [{ label: parent.title || parent.guid, href: `/${parent.guid}` }]
+            : []),
+          { label: node.title || guid, href: `/${guid}` },
+        ]}
+      />
       <SplitPane
         prefKey="overview"
         defaultLeftWidth={360}
@@ -518,6 +533,7 @@ export default async function ProjectPage({
             registrations={regs}
             registrationTrees={fullTree.registrationTrees}
             linkedTrees={fullTree.linkedTrees}
+            parentTree={fullTree.parentTree}
             degraded={fullTree.degraded}
           />
         }

@@ -30,7 +30,12 @@ export function osfProvider(opts: OAuthUserConfig<OsfProfile>): OAuth2Config<Osf
     type: "oauth",
     authorization: {
       url: "https://accounts.osf.io/oauth2/authorize",
-      params: { scope: OSF_UPLOAD_SCOPE },
+      params: {
+        scope: OSF_UPLOAD_SCOPE,
+        // OSF only issues refresh tokens when access_type=offline (default is
+        // online → access token only → ~hourly "Reconnect needed").
+        access_type: "offline",
+      },
     },
     token: "https://accounts.osf.io/oauth2/token",
     userinfo: {

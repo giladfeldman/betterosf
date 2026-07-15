@@ -8,6 +8,8 @@ export type NodeView = {
   dateCreated: string;
   dateModified: string;
   osfUrl: string;
+  /** Parent project/component guid, or null when this node is a root. */
+  parentId: string | null;
   related: {
     children: string;
     linkedNodes: string;
@@ -18,10 +20,17 @@ export type NodeView = {
 };
 
 type RelLink = { links?: { related?: { href?: string } } };
+type RelData = { data?: { id?: string } | null };
 
 function rel(raw: Record<string, unknown> | undefined, key: string): string {
   const r = raw?.[key] as RelLink | undefined;
   return r?.links?.related?.href ?? "";
+}
+
+function relId(raw: Record<string, unknown> | undefined, key: string): string | null {
+  const r = raw?.[key] as RelData | undefined;
+  const id = r?.data?.id;
+  return typeof id === "string" && id.length > 0 ? id : null;
 }
 
 export function parseNode(raw: { data: { id: string; attributes: Record<string, unknown>; relationships?: Record<string, unknown>; links?: { html?: string } } }): NodeView {
@@ -37,6 +46,7 @@ export function parseNode(raw: { data: { id: string; attributes: Record<string, 
     dateCreated: String(a.date_created ?? ""),
     dateModified: String(a.date_modified ?? ""),
     osfUrl: raw.data.links?.html ?? `https://osf.io/${raw.data.id}/`,
+    parentId: relId(r, "parent"),
     related: {
       children: rel(r, "children"),
       linkedNodes: rel(r, "linked_nodes"),

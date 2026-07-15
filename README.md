@@ -42,7 +42,7 @@ Production deploys automatically on every push to `main` via the Vercel GitHub i
 
 ## v0.3.0 (Plan 3: Auth + Dashboard) — what's new
 
-- Sign in with OSF (OAuth, read-only `osf.full_read` scope). Tokens live in encrypted httpOnly session cookies — no database.
+- Sign in with OSF (OAuth, `osf.full_read` + `osf.full_write`, `access_type=offline`). Access + refresh tokens live in encrypted httpOnly session cookies — no database. BetterOSF renews the access token via the refresh token so sessions stay usable without hourly reconnects.
 - `/me` dashboard listing your projects (including private ones).
 - Private OSF projects you have access to are now browseable through BetterOSF.
 - Anonymous browsing of public projects still works exactly as before.
@@ -104,6 +104,11 @@ After this release, **provision Vercel KV** at https://vercel.com/your-team/bett
 - **Folder create gives feedback + refreshes.** Creating a folder now shows an explicit `✓ Created` (or the full error + a Retry) and the new folder appears immediately — no page reload.
 - **⟳ Refresh button** in the file/directory navigator re-fetches every loaded folder from OSF, bypassing the cache (fixes stale listings after changes made elsewhere).
 
+## v1.4.0 (Parent project UI + OSF session refresh) — what's new
+
+- **Parent project** surfaced on component/child pages: breadcrumb `Home › Parent › Current`, Status aside link, and a top-of-navigator `Parent:` row (collapsed by default; expand loads the parent's files; click the label to open the parent).
+- **OSF OAuth** now requests `access_type=offline` so BetterOSF gets a refresh token and can renew the ~1h access token without hourly "Reconnect needed". Existing sessions: click **Reconnect OSF once** after deploy.
+
 ## v1.3.0 (Navigator depth control + deep-review hardening) — what's new
 
 - **"Levels" depth control in the file/folder navigator.** A stepper at the top
@@ -125,6 +130,5 @@ After this release, **provision Vercel KV** at https://vercel.com/your-team/bett
 ## Not yet — possible future work
 
 - Full-text search inside file contents
-- OAuth refresh-token flow (currently relies on OSF's token expiry schedule)
 - Cross-device favorites sync (currently localStorage only)
 - Pool of multiple OSF app tokens for higher anonymous quota

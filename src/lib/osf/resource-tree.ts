@@ -38,6 +38,7 @@ function componentsFromTree(fullTree: FullProjectTree): NodeView[] {
     dateCreated: "",
     dateModified: "",
     osfUrl: `https://osf.io/${c.guid}/`,
+    parentId: null,
     related: { children: "", linkedNodes: "", registrations: "", files: "", contributors: "" },
   }));
 }
@@ -65,7 +66,9 @@ export async function collectResourceTree(guid: string): Promise<ResourceTree> {
     const [fullTree, linked, registrations]: [FullProjectTree, NodeView[], RegistrationView[]] =
       await Promise.all([
         // A total failure here (not just per-provider) is itself a degraded tree.
-        collectFullTree(guid, TREE_OPTS).catch((): FullProjectTree => ({ ...EMPTY_TREE, degraded: true })),
+        collectFullTree(guid, { ...TREE_OPTS, parentId: node.parentId }).catch(
+          (): FullProjectTree => ({ ...EMPTY_TREE, degraded: true })
+        ),
         getAllLinkedNodes(guid).catch((): NodeView[] => []),
         getNodeRegistrations(guid).catch((): RegistrationView[] => []),
       ]);

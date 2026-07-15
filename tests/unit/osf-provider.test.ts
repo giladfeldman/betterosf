@@ -27,6 +27,14 @@ describe("osfProvider", () => {
     expect(scope).toBe(OSF_UPLOAD_SCOPE);
   });
 
+  it("requests access_type=offline so OSF issues a refresh token", () => {
+    const accessType =
+      typeof config.authorization === "object"
+        ? (config.authorization as { params?: { access_type?: string } }).params?.access_type
+        : undefined;
+    expect(accessType).toBe("offline");
+  });
+
   it("detects write-capable OSF scopes", () => {
     expect(hasOsfWriteScope(OSF_WRITE_SCOPE)).toBe(true);
     expect(hasOsfWriteScope(`${OSF_READ_SCOPE} ${OSF_WRITE_SCOPE}`)).toBe(true);

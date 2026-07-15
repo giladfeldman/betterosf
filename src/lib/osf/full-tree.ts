@@ -1,6 +1,6 @@
 import "server-only";
 import { collectFolderSkeleton, type SkeletonNode } from "./folder-skeleton";
-import { getAllChildren, getAllLinkedNodes } from "./nodes";
+import { getAllChildren, getAllLinkedNodes, getParentNode } from "./nodes";
 import { getNodeRegistrations, type RegistrationView } from "./registrations";
 import type { NodeView } from "./parse";
 
@@ -43,6 +43,12 @@ export type FullProjectTree = {
   /** Folder skeletons for each linked project of this project. */
   linkedTrees: LinkedTree[];
   totalLinked: number;
+  /**
+   * Immediate OSF parent project, when this node is a component/child.
+   * Skeleton starts skipped so expand-in-tree hydrates on demand (no extra
+   * full skeleton fetch on every page load).
+   */
+  parentTree: LinkedTree | null;
   /** True when the ROOT folder skeleton fetch failed (OSF 429/503/timeout) and
    *  was degraded to empty — i.e. this tree may be missing folders that exist on
    *  OSF. Lets the UI show "partially loaded — refresh" instead of a silent empty
@@ -59,6 +65,7 @@ export const EMPTY_TREE: FullProjectTree = {
   totalRegistrations: 0,
   linkedTrees: [],
   totalLinked: 0,
+  parentTree: null,
 };
 
 /**
@@ -96,6 +103,8 @@ export async function collectFullTree(
     maxLinkedToRecurse?: number;
     componentTimeoutMs?: number;
     rootTimeoutMs?: number;
+    /** When set, resolve the parent node for the navigator (skipped skeleton). */
+    parentId?: string | null;
   } = {}
 ): Promise<FullProjectTree> {
   const maxComp = opts.maxComponentsToRecurse ?? 5;
@@ -107,8 +116,8 @@ export async function collectFullTree(
   // Sentinel distinguishes "root skeleton fetch failed/timed-out" from "fetch
   // succeeded with no folders" — only the former is a degraded (incomplete) tree.
   const SKELETON_FAILED = Symbol("skeleton-failed");
-  // Parallel: root skeleton + direct children list + registrations + linked.
-  const [rootSkeletonResult, children, registrations, linkedNodes] = await Promise.all([
+  // Parallel: root skeleton + direct children list + registrations + linked + parent.
+  const [rootSkeletonResult, children, registrations, linkedNodes, parentNode] = await Promise.all([
     raceTimeout<SkeletonNode[] | typeof SKELETON_FAILED>(
       collectFolderSkeleton(rootGuid),
       rootTimeoutMs,
@@ -117,9 +126,22 @@ export async function collectFullTree(
     getAllChildren(rootGuid).catch((): NodeView[] => []),
     getNodeRegistrations(rootGuid).catch((): RegistrationView[] => []),
     getAllLinkedNodes(rootGuid).catch((): NodeView[] => []),
+    getParentNode(opts.parentId),
   ]);
   const degraded = rootSkeletonResult === SKELETON_FAILED;
   const rootSkeleton = degraded ? [] : rootSkeletonResult;
+
+  // Parent is metadata-only on first paint; expand-in-tree hydrates the skeleton.
+  const parentTree: LinkedTree | null = parentNode
+    ? {
+        guid: parentNode.id,
+        title: parentNode.title || parentNode.id,
+        category: parentNode.category,
+        isPublic: parentNode.public,
+        skeleton: [],
+        skipped: true,
+      }
+    : null;
 
   // For the first N components, fetch each one's skeleton in parallel — each
   // racing its own timeout so one slow component can't sink the whole page.
@@ -218,6 +240,7 @@ export async function collectFullTree(
     totalRegistrations: registrations.length,
     linkedTrees: [...recursedLinked, ...skippedLinked],
     totalLinked: linkedNodes.length,
+    parentTree,
     degraded,
   };
 }

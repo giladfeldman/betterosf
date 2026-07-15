@@ -457,7 +457,12 @@ export function UploadDialog({
               <p className="mb-2">Your OSF connection needs to be refreshed before uploading.</p>
               <button
                 type="button"
-                onClick={() => signIn("osf", undefined, { scope: status.writeScope || OSF_UPLOAD_SCOPE })}
+                onClick={() =>
+                  signIn("osf", undefined, {
+                    scope: status.writeScope || OSF_UPLOAD_SCOPE,
+                    approval_prompt: "force",
+                  })
+                }
                 className="rounded border border-amber-300 bg-white px-3 py-1 text-amber-800 hover:bg-amber-50 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
               >
                 Reconnect OSF

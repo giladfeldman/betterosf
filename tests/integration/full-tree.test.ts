@@ -132,5 +132,52 @@ describe("collectFullTree", () => {
     const bad = tree.components.find((c) => c.guid === "bad")!;
     expect(bad.skeleton).toEqual([]);
     expect(bad.skipped).toBe(false);
+    expect(tree.parentTree).toBeNull();
+  });
+
+  it("resolves parentTree as skipped metadata when parentId is set (hydrate on expand)", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/v3m95/files/", () => HttpResponse.json({ data: [], links: { next: null } })),
+      http.get("https://api.osf.io/v2/nodes/v3m95/children/", () =>
+        HttpResponse.json({ data: [], links: { next: null } })
+      ),
+      http.get("https://api.osf.io/v2/nodes/df9tj/", () =>
+        HttpResponse.json({
+          data: {
+            id: "df9tj",
+            type: "nodes",
+            attributes: {
+              title: "Parent Project",
+              description: "",
+              category: "project",
+              public: true,
+              tags: [],
+              date_created: "",
+              date_modified: "",
+            },
+            relationships: {},
+            links: { html: "https://osf.io/df9tj/" },
+          },
+        })
+      ),
+    );
+    const tree = await collectFullTree("v3m95", { parentId: "df9tj" });
+    expect(tree.parentTree).toMatchObject({
+      guid: "df9tj",
+      title: "Parent Project",
+      skipped: true,
+      skeleton: [],
+    });
+  });
+
+  it("leaves parentTree null when parentId is omitted", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/rootonly/files/", () => HttpResponse.json({ data: [], links: { next: null } })),
+      http.get("https://api.osf.io/v2/nodes/rootonly/children/", () =>
+        HttpResponse.json({ data: [], links: { next: null } })
+      ),
+    );
+    const tree = await collectFullTree("rootonly");
+    expect(tree.parentTree).toBeNull();
   });
 });

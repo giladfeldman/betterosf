@@ -16,7 +16,8 @@ export type TreeNodeKind =
   | "file"
   | "component"
   | "linked"
-  | "registration";
+  | "registration"
+  | "parent";
 
 export type TreeSelectionPayload =
   | {

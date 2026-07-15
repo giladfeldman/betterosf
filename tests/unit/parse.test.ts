@@ -48,6 +48,20 @@ describe("parseNode", () => {
     expect(node.related.contributors).toBe("https://api.osf.io/v2/nodes/ezcuj/contributors/");
   });
 
+  it("parses parentId from relationships.parent.data.id", () => {
+    const raw = JSON.parse(JSON.stringify(RAW_NODE));
+    raw.data.relationships.parent = { data: { type: "nodes", id: "df9tj" } };
+    const node = parseNode(raw);
+    expect(node.parentId).toBe("df9tj");
+  });
+
+  it("sets parentId to null when parent is absent or null", () => {
+    expect(parseNode(RAW_NODE).parentId).toBeNull();
+    const raw = JSON.parse(JSON.stringify(RAW_NODE));
+    raw.data.relationships.parent = { data: null };
+    expect(parseNode(raw).parentId).toBeNull();
+  });
+
   it("handles missing description gracefully", () => {
     const raw = JSON.parse(JSON.stringify(RAW_NODE));
     delete raw.data.attributes.description;
