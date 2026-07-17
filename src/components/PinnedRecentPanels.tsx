@@ -66,8 +66,13 @@ export function PinnedRecentPanels({
 
   useEffect(() => {
     setMounted(true);
-    setPins(listPins());
-    setRecent(listRecent());
+    const refresh = () => {
+      setPins(listPins());
+      setRecent(listRecent());
+    };
+    refresh();
+    window.addEventListener("betterosf:sync", refresh);
+    return () => window.removeEventListener("betterosf:sync", refresh);
   }, []);
 
   const tabs = useMemo(() => {

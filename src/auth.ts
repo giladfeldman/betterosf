@@ -99,7 +99,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.refreshToken = account.refresh_token;
         token.accessTokenExpires = Date.now() + expiresIn * 1000;
         token.osfScope = account.scope;
-        token.osfUserId = (profile as { data?: { id?: string } }).data?.id;
+        const osfProfile = profile as {
+          data?: { id?: string; attributes?: { full_name?: string; email?: string } };
+          id?: string;
+          name?: string | null;
+          email?: string | null;
+        };
+        // Auth.js may pass either raw OSF userinfo or the mapped profile().
+        token.osfUserId = osfProfile.data?.id ?? osfProfile.id;
+        if (token.osfUserId) {
+          const { upsertOsfUser } = await import("@/lib/db/users");
+          await upsertOsfUser({
+            osfUserId: token.osfUserId,
+            name: osfProfile.name ?? osfProfile.data?.attributes?.full_name ?? null,
+            email: osfProfile.email ?? osfProfile.data?.attributes?.email ?? null,
+          });
+        }
         return token;
       }
       if (token.accessToken && token.accessTokenExpires && Date.now() < token.accessTokenExpires - 60_000) {

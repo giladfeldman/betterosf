@@ -1,12 +1,15 @@
 import Link from "next/link";
+import type { Route } from "next";
 import { auth, signOut } from "@/auth";
 import { SignInButton } from "./SignInButton";
+import { isAdminSession } from "@/lib/admin";
 
 export async function UserMenu() {
   const session = await auth();
   if (!session) {
     return <SignInButton />;
   }
+  const admin = await isAdminSession();
   const statusText = session.osfAuthError ? "Reconnect needed" : session.osfCanWrite ? "Uploads enabled" : "Read-only";
   const statusClass = session.osfAuthError
     ? "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
@@ -24,11 +27,20 @@ export async function UserMenu() {
           Reconnect OSF
         </SignInButton>
       )}
-      <Link href="/me" className="hover:underline">Dashboard</Link>
-      <form action={async () => {
-        "use server";
-        await signOut({ redirectTo: "/" });
-      }}>
+      <Link href={"/me" as Route} className="hover:underline">
+        Dashboard
+      </Link>
+      {admin && (
+        <Link href={"/admin/logs" as Route} className="hover:underline">
+          Admin
+        </Link>
+      )}
+      <form
+        action={async () => {
+          "use server";
+          await signOut({ redirectTo: "/" });
+        }}
+      >
         <button type="submit" className="border rounded px-2 py-1 hover:bg-neutral-100 dark:hover:bg-neutral-800">
           Sign out
         </button>

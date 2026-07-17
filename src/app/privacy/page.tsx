@@ -15,8 +15,19 @@ export default function PrivacyPage() {
         <li>
           <strong>Session cookies</strong> for users who sign in with OSF. These hold an encrypted OAuth
           access token and (when OSF issued one) a refresh token in an httpOnly cookie set by Auth.js.
-          The cookie is the only place your tokens live — we have no relational database. BetterOSF renews
-          the access token server-side via the refresh token so you are not asked to reconnect every hour.
+          BetterOSF renews the access token server-side via the refresh token so you are not asked to
+          reconnect every hour.
+        </li>
+        <li>
+          <strong>Account + preference data</strong> in a Neon Postgres database hosted in the EU
+          (Frankfurt, <code>aws-eu-central-1</code>) when you sign in: your OSF user id, display name,
+          email if OSF provided one, synced bookmarks/favorites, and view preferences. This lets pins
+          and settings follow you across devices. We do not store your OSF access or refresh tokens in
+          the database — those stay in the session cookie only.
+        </li>
+        <li>
+          <strong>Operational logs</strong> (errors and diagnostics) in the same EU database for
+          administrators, retained for a short window and redacted of secrets.
         </li>
         <li>
           <strong>Short-lived counters</strong> for rate-limiting and quota tracking, such as per-IP navigation
@@ -24,15 +35,16 @@ export default function PrivacyPage() {
         </li>
         <li>
           <strong>Browser localStorage</strong> on your device for preferences, split-pane width, pins, recent
-          items, and theme choices.
+          items, and theme choices (also used when you are signed out; signed-in users sync bookmarks and
+          key prefs to Neon).
         </li>
       </ul>
 
       <h2>What we don&apos;t store</h2>
       <ul>
         <li>No analytics service. No third-party telemetry.</li>
-        <li>No long-term user database.</li>
         <li>We don&apos;t cache file contents; previews and downloads stream from OSF&apos;s storage.</li>
+        <li>OSF OAuth tokens are not written to the database.</li>
       </ul>
 
       <h2>What we send to OSF</h2>

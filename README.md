@@ -42,7 +42,7 @@ Production deploys automatically on every push to `main` via the Vercel GitHub i
 
 ## v0.3.0 (Plan 3: Auth + Dashboard) — what's new
 
-- Sign in with OSF (OAuth, `osf.full_read` + `osf.full_write`, `access_type=offline`). Access + refresh tokens live in encrypted httpOnly session cookies — no database. BetterOSF renews the access token via the refresh token so sessions stay usable without hourly reconnects.
+- Sign in with OSF (OAuth, `osf.full_read` + `osf.full_write`, `access_type=offline`). Access + refresh tokens live in encrypted httpOnly session cookies. Signed-in bookmarks and view prefs sync to Neon Postgres in the EU (`aws-eu-central-1`); anonymous browsing stays public via the app token. BetterOSF renews the access token via the refresh token so sessions stay usable without hourly reconnects.
 - `/me` dashboard listing your projects (including private ones).
 - Private OSF projects you have access to are now browseable through BetterOSF.
 - Anonymous browsing of public projects still works exactly as before.

@@ -6,6 +6,7 @@ import { OsfError } from "@/lib/osf/types";
 import { osfBackpressureKind } from "@/lib/osf/backpressure";
 import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
 import { PinnedRecentPanels } from "@/components/PinnedRecentPanels";
+import { SyncOnSignIn } from "@/components/SyncOnSignIn";
 import { PaginatedSection, parsePagination } from "@/components/PaginatedSection";
 import type { NodeView } from "@/lib/osf/parse";
 
@@ -66,6 +67,7 @@ export default async function MyDashboard({
 
   return (
     <div className="max-w-4xl">
+      <SyncOnSignIn />
       <h1 className="text-3xl font-semibold mb-4">Hi, {user.fullName}</h1>
       <p className="mb-6 text-neutral-600">
         Signed in as <a href={user.osfUrl} className="underline text-blue-600">OSF user {user.id}</a>.

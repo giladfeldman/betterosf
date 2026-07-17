@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import type { Route } from "next";
 import { getPref, setPref } from "@/lib/prefs";
+import { pushPrefToServer } from "@/lib/sync/client";
 
 const OPTIONS = [10, 20, 50, 100, 200, "all"] as const;
 type SizeOption = (typeof OPTIONS)[number];
@@ -52,6 +53,7 @@ export function PageSizeSelector({
   const onChange = (v: SizeOption) => {
     setSize(v);
     setPref(`pageSize.${prefKey}`, v);
+    void pushPrefToServer(`pageSize.${prefKey}`, v);
     const next = new URLSearchParams(params.toString());
     next.set(paramName, String(v));
     next.delete(pageParamName);

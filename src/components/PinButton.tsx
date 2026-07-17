@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { addPin, removePin, isPinned, type FavoriteRef } from "@/lib/favorites";
+import { deleteServerBookmark, putServerBookmark } from "@/lib/sync/client";
 
 export function PinButton({ refEntry }: { refEntry: FavoriteRef }) {
   const [pinned, setPinned] = useState(false);
@@ -10,6 +11,9 @@ export function PinButton({ refEntry }: { refEntry: FavoriteRef }) {
   useEffect(() => {
     setMounted(true);
     setPinned(isPinned(refEntry.id));
+    const onSync = () => setPinned(isPinned(refEntry.id));
+    window.addEventListener("betterosf:sync", onSync);
+    return () => window.removeEventListener("betterosf:sync", onSync);
   }, [refEntry.id]);
 
   if (!mounted) {
@@ -28,9 +32,11 @@ export function PinButton({ refEntry }: { refEntry: FavoriteRef }) {
     if (pinned) {
       removePin(refEntry.id);
       setPinned(false);
+      void deleteServerBookmark(refEntry.id);
     } else {
       addPin(refEntry);
       setPinned(true);
+      void putServerBookmark(refEntry);
     }
   };
 
