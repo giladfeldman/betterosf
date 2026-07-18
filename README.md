@@ -127,6 +127,17 @@ After this release, **provision Vercel KV** at https://vercel.com/your-team/bett
   a flatter, forge-proof per-IP rate limit in middleware (the signed-in multiplier
   was removed; it could be spoofed without a verified session).
 
+## v1.5.0 (Neon EU + synced bookmarks) — what's new
+
+- Signed-in bookmarks and view prefs sync to Neon Postgres in the EU (`betterosf-eu`, `aws-eu-central-1`). JWT sessions still hold OSF tokens.
+- Admin log viewer at `/admin/logs` (gated by `ADMIN_OSF_USER_IDS`).
+
+## v1.5.1 (AWS SES admin digests) — what's new
+
+- Admin error digests via AWS SES (`eu-west-1`), interim FROM `betterosf@scimeto.app`.
+- Bounce/complaint webhook + suppression (`email_events`); daily cron at 08:00 UTC.
+- Dedicated BetterOSF sending domain still deferred (see `todo.md`).
+
 ## Not yet — possible future work
 
 - Full-text search inside file contents

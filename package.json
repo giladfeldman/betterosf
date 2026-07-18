@@ -1,6 +1,6 @@
 {
   "name": "betterosf",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "",
   "main": "index.js",
   "directories": {
@@ -25,6 +25,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@aws-sdk/client-ses": "^3.1090.0",
     "@neondatabase/serverless": "^1.1.0",
     "@tanstack/react-virtual": "^3.13.25",
     "@vercel/kv": "^3.0.0",
@@ -44,6 +45,7 @@
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "shiki": "^4.1.0",
+    "sns-validator": "^0.3.5",
     "xlsx": "^0.18.5",
     "zod": "^3.25.76"
   },
@@ -59,6 +61,7 @@
     "@types/node": "^22.19.19",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
+    "@types/sns-validator": "^0.3.3",
     "@types/ws": "^8.18.1",
     "@vitest/ui": "^2.1.9",
     "adm-zip": "^0.5.17",
