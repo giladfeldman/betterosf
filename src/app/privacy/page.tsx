@@ -38,12 +38,25 @@ export default function PrivacyPage() {
           items, and theme choices (also used when you are signed out; signed-in users sync bookmarks and
           key prefs to Neon).
         </li>
+        <li>
+          <strong>Pre-delete backups in your browser (IndexedDB)</strong>. When you delete files from OSF using
+          BetterOSF, we first copy those files into your browser&apos;s local storage so you can restore a copy
+          if the deletion was a mistake — OSF itself has no trash. These backups contain the actual contents of
+          the files you deleted. They stay on your device: they are never uploaded to our servers, and they are
+          deliberately kept outside the preferences that signed-in users sync to the database. We keep at most
+          20 backups or 500&nbsp;MB, deleting the oldest first, and your browser may also clear them on its own.
+          You can view and delete them at any time from the Backups panel, or by clearing this site&apos;s data.
+        </li>
       </ul>
 
       <h2>What we don&apos;t store</h2>
       <ul>
         <li>No analytics service. No third-party telemetry.</li>
-        <li>We don&apos;t cache file contents; previews and downloads stream from OSF&apos;s storage.</li>
+        <li>
+          <strong>On our servers</strong> we don&apos;t cache file contents; previews and downloads stream from
+          OSF&apos;s storage. The one exception to file contents being stored anywhere is the pre-delete backup
+          described above, which is held only in your own browser.
+        </li>
         <li>OSF OAuth tokens are not written to the database.</li>
       </ul>
 

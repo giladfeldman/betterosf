@@ -19,6 +19,10 @@ export type TreeNodeKind =
   | "registration"
   | "parent";
 
+// IMPORTANT: TreeSelectionPayload is duplicated in UnifiedTreeNode.tsx to break the
+// circular import described above. Any change here MUST be mirrored there in the same
+// commit — the two copies have drifted before. tests/unit/unified-tree-node.test.tsx
+// carries a structural cross-check that fails if they diverge.
 export type TreeSelectionPayload =
   | {
       kind: "file";
@@ -27,6 +31,14 @@ export type TreeSelectionPayload =
       path: string;
       name: string;
       downloadUrl: string;
+      /**
+       * OSF's own Waterbutler delete link. Populated ONLY for writable osfstorage
+       * targets — absence is what suppresses the delete affordance for registrations,
+       * read-only trees, and non-osfstorage providers.
+       */
+      deleteUrl?: string;
+      /** The containing folder's listingUrl, so the tree can refresh after a delete. */
+      parentListingUrl?: string;
     }
   | {
       kind: "folder";
@@ -34,6 +46,10 @@ export type TreeSelectionPayload =
       provider: string;
       path: string;
       name: string;
+      /** See the file variant. */
+      deleteUrl?: string;
+      /** The PARENT folder's listingUrl (not this folder's own). */
+      parentListingUrl?: string;
     };
 
 export type TreeUploadTarget = {

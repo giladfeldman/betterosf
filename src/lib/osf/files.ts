@@ -19,6 +19,8 @@ export type FileEntry =
       modified: string;
       materializedPath: string;
       downloadUrl: string;
+      /** OSF's own Waterbutler delete link. Optional: absent means no delete affordance. */
+      deleteUrl?: string;
     }
   | {
       kind: "folder";
@@ -28,6 +30,8 @@ export type FileEntry =
       listingUrl: string;
       uploadUrl?: string;
       newFolderUrl?: string;
+      /** OSF's own Waterbutler delete link. Optional: absent means no delete affordance. */
+      deleteUrl?: string;
     };
 
 type RawEntry = {
@@ -42,7 +46,7 @@ type RawEntry = {
     materialized_path?: string;
   };
   relationships?: { files?: { links?: { related?: { href?: string } } } };
-  links?: { download?: string; upload?: string; new_folder?: string };
+  links?: { download?: string; upload?: string; new_folder?: string; delete?: string };
 };
 
 type CollectionResponse = { data: RawEntry[]; links: { next: string | null } };
@@ -57,6 +61,7 @@ function parseEntry(raw: RawEntry): FileEntry {
       listingUrl: raw.relationships?.files?.links?.related?.href ?? "",
       uploadUrl: raw.links?.upload,
       newFolderUrl: raw.links?.new_folder,
+      deleteUrl: raw.links?.delete,
     };
   }
   return {
@@ -67,6 +72,7 @@ function parseEntry(raw: RawEntry): FileEntry {
     modified: String(raw.attributes.modified ?? ""),
     materializedPath: String(raw.attributes.materialized_path ?? ""),
     downloadUrl: raw.links?.download ?? "",
+    deleteUrl: raw.links?.delete,
   };
 }
 

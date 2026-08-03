@@ -10,6 +10,7 @@ import type { FileEntry } from "@/lib/osf/files";
 import { UnifiedTreeNode } from "./UnifiedTreeNode";
 import type { TreeNodeData, TreeNodeKind, TreeSelectionPayload, TreeUploadTarget } from "./tree-types";
 import { UploadDialog } from "./UploadDialog";
+import { DeleteDialog } from "./DeleteDialog";
 import { UploadActivityDrawer } from "./UploadActivityDrawer";
 import { OPEN_UPLOAD_EVENT } from "./UploadFilesButton";
 import type { DroppedNode } from "@/lib/upload/types";
@@ -134,6 +135,7 @@ function skeletonFromFolder(entry: Extract<FileEntry, { kind: "folder" }>, provi
     listingUrl: entry.listingUrl,
     uploadUrl: entry.uploadUrl,
     newFolderUrl: entry.newFolderUrl,
+    deleteUrl: entry.deleteUrl,
     children: [],
     fileCount: 0,
   };
@@ -311,6 +313,29 @@ export function UnifiedTree({
   const [retryNonce, setRetryNonce] = useState(0);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Record<string, TreeSelectionPayload>>({});
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  // Whether THIS user can actually write to OSF right now.
+  //
+  // `allowUploads` (= !readOnly) only excludes registrations — it is true for anonymous
+  // visitors on any ordinary project. That is tolerable for the Upload button, which opens
+  // a dialog that then gates on write-status, but NOT for Delete: a destructive control
+  // must never render for someone who cannot delete. Defaults to false so the affordance
+  // is absent until write access is positively confirmed.
+  const [canWrite, setCanWrite] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/osf/write-status", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s: { canWrite?: boolean } | null) => {
+        if (!cancelled) setCanWrite(Boolean(s?.canWrite));
+      })
+      .catch(() => {
+        /* stay false — fail closed */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [downloadingSelection, setDownloadingSelection] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [uploadTarget, setUploadTarget] = useState<TreeUploadTarget | null>(null);
@@ -651,6 +676,54 @@ export function UnifiedTree({
 
   const clearSelection = useCallback(() => setSelected({}), []);
 
+  const openDeleteDialog = useCallback(() => setDeleteDialogOpen(true), []);
+
+  // A row's Delete button targets exactly that one item, independent of whatever is
+  // ticked in select mode — clicking Delete on a row must never quietly delete the
+  // current multi-selection instead.
+  const [rowDeleteTarget, setRowDeleteTarget] = useState<TreeSelectionPayload | null>(null);
+  const openRowDelete = useCallback((selection: TreeSelectionPayload) => {
+    setRowDeleteTarget(selection);
+    setDeleteDialogOpen(true);
+  }, []);
+
+  // After a delete: drop the rows from selection and force-refresh each affected parent
+  // folder. Both are required — clearing the client cache alone leaves the server's
+  // ≤5-min cached listing to serve the deleted file straight back.
+  const handleDeleted = useCallback(
+    (deleted: TreeSelectionPayload[]) => {
+      setSelected((prev) => {
+        const next = { ...prev };
+        for (const item of deleted) delete next[selectionKey(item)];
+        return next;
+      });
+      const parents = new Map<string, { guid: string; provider: string; listingUrl: string }>();
+      for (const item of deleted) {
+        if (!item.parentListingUrl) continue;
+        parents.set(item.parentListingUrl, {
+          guid: item.guid,
+          provider: item.provider,
+          listingUrl: item.parentListingUrl,
+        });
+      }
+      for (const p of parents.values()) {
+        const params = folderParamsRef.current;
+        // Find the cache key whose recorded listingUrl matches this parent, so the
+        // refresh targets the exact folder the tree already has loaded.
+        for (const [key, recorded] of params.entries()) {
+          if (recorded.listingUrl !== p.listingUrl) continue;
+          setLoadedEntries((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+          void fetchFiles(recorded.nodeGuid, recorded.provider, recorded.materializedPath, recorded.listingUrl, true);
+        }
+      }
+    },
+    [fetchFiles]
+  );
+
   const refreshUploadTarget = useCallback(
     (target: TreeUploadTarget) => {
       // force=true bypasses both the stale-closure early-return and the server cache,
@@ -734,6 +807,9 @@ export function UnifiedTree({
       for (const provider of providers) {
         const providerId = `${basePrefix}/provider:${provider.provider}`;
         const canUploadHere = allowUploads && provider.provider === "osfstorage";
+        // Stricter than canUploadHere: also requires a confirmed write-capable session,
+        // so a signed-out visitor never sees a Delete control at all.
+        const canDeleteHere = canUploadHere && canWrite;
         rows.push({
           id: providerId,
           depth: baseDepth,
@@ -773,6 +849,10 @@ export function UnifiedTree({
               provider: provider.provider,
               path: "/",
               name: provider.name,
+              // No deleteUrl on a provider root, deliberately: this IS the storage root.
+              // resolveDeleteUrl refuses it server-side anyway (a Waterbutler root delete
+              // recursively wipes all contents), and an absent affordance beats one that
+              // always errors.
             },
             uploadTarget: canUploadHere
               ? {
@@ -796,7 +876,10 @@ export function UnifiedTree({
 
         if (!expanded[providerId]) continue;
 
-        const emitFolder = (folder: SkeletonNode, depth: number, parentId: string) => {
+        // `parentListingUrl` is the listing URL of the folder CONTAINING this one. It is
+        // threaded down so a delete can refresh the right folder afterwards, and so a
+        // folder backup can locate itself among its siblings to expand.
+        const emitFolder = (folder: SkeletonNode, depth: number, parentId: string, parentListingUrl: string) => {
           const id = `${parentId}/${folder.name}`;
           const fileKey = folderKey(nodeGuid, folder.provider, folder.materializedPath);
           const childEntries = loadedEntries[fileKey];
@@ -855,6 +938,10 @@ export function UnifiedTree({
                 provider: folder.provider,
                 path: folder.materializedPath,
                 name: folder.name,
+                // Gated on canUploadHere — the same gate uploads use. Registrations and
+                // read-only trees never set it, so no delete affordance can render.
+                deleteUrl: canDeleteHere ? folder.deleteUrl : undefined,
+                parentListingUrl: canDeleteHere ? parentListingUrl : undefined,
               },
               uploadTarget: canUploadHere
                 ? {
@@ -881,8 +968,8 @@ export function UnifiedTree({
             // Child FILES of an open, in-bounds folder always render — they're
             // the leaf content the user opened this folder to see.
             if (!atDepthLimit) {
-              for (const sub of folder.children) emitFolder(sub, depth + 1, id);
-              for (const sub of dynamicFolders) emitFolder(sub, depth + 1, id);
+              for (const sub of folder.children) emitFolder(sub, depth + 1, id, folder.listingUrl);
+              for (const sub of dynamicFolders) emitFolder(sub, depth + 1, id, folder.listingUrl);
             }
             for (const f of childFiles) {
               if (filesHidden) break; // "Directory" view: folders only
@@ -912,6 +999,8 @@ export function UnifiedTree({
                     path: fileSelectionPath(folder.materializedPath, f.name),
                     name: f.name,
                     downloadUrl: f.downloadUrl,
+                    deleteUrl: canDeleteHere ? f.deleteUrl : undefined,
+                    parentListingUrl: canDeleteHere ? folder.listingUrl : undefined,
                   },
                 },
               });
@@ -919,7 +1008,7 @@ export function UnifiedTree({
           }
         };
 
-        for (const folder of provider.children) emitFolder(folder, baseDepth + 1, providerId);
+        for (const folder of provider.children) emitFolder(folder, baseDepth + 1, providerId, provider.listingUrl);
 
         // Top-level folders/files at provider root (loaded once user expands the provider)
         const rootFileKey = folderKey(nodeGuid, provider.provider, "/");
@@ -928,7 +1017,7 @@ export function UnifiedTree({
         const staticRootFolderPaths = new Set(provider.children.map((child) => child.materializedPath));
         for (const folder of rootFolders) {
           if (staticRootFolderPaths.has(folder.materializedPath)) continue;
-          emitFolder(skeletonFromFolder(folder, provider.provider), baseDepth + 1, providerId);
+          emitFolder(skeletonFromFolder(folder, provider.provider), baseDepth + 1, providerId, provider.listingUrl);
         }
         const rootFiles = filesHidden ? [] : rootEntries.filter((e) => e.kind === "file");
         for (const f of rootFiles) {
@@ -950,9 +1039,11 @@ export function UnifiedTree({
                 kind: "file",
                 guid: nodeGuid,
                 provider: provider.provider,
-                  path: fileSelectionPath("/", f.name),
+                path: fileSelectionPath("/", f.name),
                 name: f.name,
                 downloadUrl: f.downloadUrl,
+                deleteUrl: canDeleteHere ? f.deleteUrl : undefined,
+                parentListingUrl: canDeleteHere ? provider.listingUrl : undefined,
               },
             },
           });
@@ -1229,7 +1320,7 @@ export function UnifiedTree({
     }
 
     return rows;
-  }, [expanded, filesHidden, maxDepth, forcedOpen, setForcedOpen, loadedEntries, loadingKeys, folderFailures, readOnly, skeleton, components, componentTreeState, linkedNodes, linkedTreeState, registrations, registrationTreeState, parentTreeState, pinned, rootTitle, guid, fetchFiles, setExpanded, queueHydrationTask, hydrationFailures, runningHydrationId]);
+  }, [expanded, filesHidden, maxDepth, forcedOpen, setForcedOpen, loadedEntries, loadingKeys, folderFailures, readOnly, canWrite, skeleton, components, componentTreeState, linkedNodes, linkedTreeState, registrations, registrationTreeState, parentTreeState, pinned, rootTitle, guid, fetchFiles, setExpanded, queueHydrationTask, hydrationFailures, runningHydrationId]);
 
   const uploadTargets = useMemo(() => {
     const seen = new Set<string>();
@@ -1447,6 +1538,10 @@ export function UnifiedTree({
     setExpanded(next);
   };
   const selectedCount = Object.keys(selected).length;
+  // Only osfstorage items in a writable tree carry a deleteUrl (see the emitters), so
+  // this count IS the delete gate — the UI never has to re-derive permission.
+  const deletableItems = useMemo(() => Object.values(selected).filter((s) => Boolean(s.deleteUrl)), [selected]);
+  const deletableCount = deletableItems.length;
   const rateLimitSeconds = Math.max(0, Math.ceil((rateLimitedUntil - hydrationNow) / 1000));
   const hydrationProgress = hydrationTotal > 0 ? Math.round((successfulHydrationCount / hydrationTotal) * 100) : 100;
   const showHydrationWidget = hydrationTasks.length > 0 || failedHydrationCount > 0 || Boolean(runningHydrationId);
@@ -1588,6 +1683,27 @@ export function UnifiedTree({
             >
               {downloadingSelection ? "Preparing..." : "Download selected"}
             </button>
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={openDeleteDialog}
+                disabled={selectedCount === 0 || deletableCount === 0}
+                title={
+                  deletableCount < selectedCount
+                    ? `${selectedCount - deletableCount} of ${selectedCount} can't be deleted (read-only or not OSF Storage)`
+                    : undefined
+                }
+                className="rounded border border-red-300 px-2 py-0.5 font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-neutral-300 disabled:text-neutral-500 disabled:hover:bg-transparent dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+              >
+                Delete selected
+              </button>
+            )}
+            {/* Never silently drop undeletable items from a destructive batch — say so. */}
+            {selectMode && deletableCount < selectedCount && selectedCount > 0 && (
+              <span className="text-amber-700 dark:text-amber-300">
+                {selectedCount - deletableCount} of {selectedCount} can&apos;t be deleted
+              </span>
+            )}
           </>
         )}
       </div>
@@ -1669,6 +1785,7 @@ export function UnifiedTree({
                   selected={row.node.selection ? !!selected[selectionKey(row.node.selection)] : false}
                   onSelect={toggleSelected}
                   onUpload={openUploadDialog}
+                  onDelete={openRowDelete}
                   onCreateFolder={refreshUploadTarget}
                   onDropUpload={handleDropUpload}
                   onRetry={
@@ -1740,6 +1857,18 @@ export function UnifiedTree({
             setDroppedNodes(null);
           }}
           onComplete={refreshUploadTarget}
+        />
+      )}
+      {deleteDialogOpen && (rowDeleteTarget ? [rowDeleteTarget] : deletableItems).length > 0 && (
+        <DeleteDialog
+          guid={guid}
+          projectTitle={rootTitle || guid}
+          items={rowDeleteTarget ? [rowDeleteTarget] : deletableItems}
+          onClose={() => {
+            setDeleteDialogOpen(false);
+            setRowDeleteTarget(null);
+          }}
+          onDeleted={handleDeleted}
         />
       )}
       <UploadActivityDrawer />

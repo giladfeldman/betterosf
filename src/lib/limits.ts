@@ -14,14 +14,14 @@ function getKv() {
 // Stores { value, expiresAt } per key. Single-process only.
 const memStore = new Map<string, { value: number; expiresAt: number }>();
 
-function memIncr(key: string, ttlSec: number): number {
+function memIncr(key: string, ttlSec: number, by = 1): number {
   const now = Date.now();
   const existing = memStore.get(key);
   if (!existing || existing.expiresAt <= now) {
-    memStore.set(key, { value: 1, expiresAt: now + ttlSec * 1000 });
-    return 1;
+    memStore.set(key, { value: by, expiresAt: now + ttlSec * 1000 });
+    return by;
   }
-  existing.value += 1;
+  existing.value += by;
   memStore.set(key, existing);
   return existing.value;
 }
@@ -57,6 +57,38 @@ export async function incrementWindow(key: string, windowSec: number): Promise<n
   if (!kv) return memIncr(key, windowSec);
   const val = await kv.kv.incr(key);
   if (val === 1) await kv.kv.expire(key, windowSec);
+  return val;
+}
+
+/**
+ * Increment a windowed counter by `by` rather than 1.
+ *
+ * Needed for batch destructive operations: one request deleting 100 files is 100
+ * destructive acts, and charging it as a single unit would let a caller delete
+ * unbounded amounts by batching.
+ */
+export async function incrementByWindow(key: string, by: number, windowSec: number): Promise<number> {
+  const amount = Math.max(1, Math.floor(by));
+  const kv = getKv();
+  if (!kv) return memIncr(key, windowSec, amount);
+  const val = await kv.kv.incrby(key, amount);
+  if (val === amount) await kv.kv.expire(key, windowSec);
+  return val;
+}
+
+/**
+ * Increment a UTC-day counter by `by` rather than 1. See incrementByWindow.
+ */
+export async function incrementDailyBy(key: string, by: number): Promise<number> {
+  const amount = Math.max(1, Math.floor(by));
+  const now = new Date();
+  const endOfDayMs =
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) - now.getTime();
+  const ttlSec = Math.max(60, Math.floor(endOfDayMs / 1000));
+  const kv = getKv();
+  if (!kv) return memIncr(key, ttlSec, amount);
+  const val = await kv.kv.incrby(key, amount);
+  if (val === amount) await kv.kv.expire(key, ttlSec);
   return val;
 }
 

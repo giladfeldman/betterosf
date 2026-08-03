@@ -8,6 +8,8 @@ export type SkeletonNode = {
   listingUrl: string;
   uploadUrl?: string;
   newFolderUrl?: string;
+  /** OSF's own Waterbutler delete link, carried through so the tree can offer a delete. */
+  deleteUrl?: string;
   children: SkeletonNode[];
   /** Number of files (NOT folders) directly under this folder. Used by the UI
    *  to show "(N)" badges so users see there's content before clicking. */
@@ -60,6 +62,7 @@ export async function collectFolderSkeleton(
         listingUrl: f.listingUrl,
         uploadUrl: f.uploadUrl,
         newFolderUrl: f.newFolderUrl,
+        deleteUrl: f.deleteUrl,
         children: child.subfolders,
         fileCount: child.fileCount,
       });

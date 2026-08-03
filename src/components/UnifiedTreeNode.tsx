@@ -69,6 +69,7 @@ export function UnifiedTreeNode({
   selectMode = false,
   onSelect,
   onUpload,
+  onDelete,
   onCreateFolder,
   onDropUpload,
   onRetry,
@@ -85,6 +86,8 @@ export function UnifiedTreeNode({
   selectMode?: boolean;
   onSelect?: (payload: TreeSelectionPayload, checked: boolean) => void;
   onUpload?: (target: TreeUploadTarget) => void;
+  /** Opens the delete confirmation dialog for this single row. */
+  onDelete?: (selection: TreeSelectionPayload) => void;
   onCreateFolder?: (target: TreeUploadTarget) => void;
   onDropUpload?: (target: TreeUploadTarget, items: DataTransferItem[]) => void;
   onRetry?: () => void;
@@ -247,7 +250,9 @@ export function UnifiedTreeNode({
           ⟳ Retry
         </button>
       )}
-      {(node.uploadTarget || node.downloadHref) && (
+      {/* File rows have neither uploadTarget nor downloadHref, so the strip must also
+          open for a deletable selection — otherwise files get no actions at all. */}
+      {(node.uploadTarget || node.downloadHref || node.selection?.deleteUrl) && (
         <span className="ml-auto flex shrink-0 items-center gap-1">
           {node.uploadTarget && (
             <NewFolderControl target={node.uploadTarget} onCreated={onCreateFolder} />
@@ -276,6 +281,23 @@ export function UnifiedTreeNode({
             >
               ZIP
             </a>
+          )}
+          {/* Only writable osfstorage targets carry deleteUrl (set in UnifiedTree's
+              emitters, gated on canUploadHere), so registrations, read-only trees,
+              non-OSF-Storage providers, and provider roots never render this. */}
+          {node.selection?.deleteUrl && (
+            <button
+              type="button"
+              aria-label={`Delete ${node.label}`}
+              title={`Delete ${node.label} from OSF`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete?.(node.selection!);
+              }}
+              className="shrink-0 rounded border border-red-300 bg-red-50 px-1.5 text-[11px] font-medium text-red-700 hover:bg-red-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-500 dark:border-red-800 dark:bg-red-950 dark:text-red-300 dark:hover:bg-red-900"
+            >
+              Delete
+            </button>
           )}
         </span>
       )}

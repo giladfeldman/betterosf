@@ -1,5 +1,53 @@
 # Known Issues
 
+## Deletion: three limits users and maintainers must know (2026-08-03)
+
+**1. Local backups are evictable — they are not an archive.**
+Pre-delete backups live in the browser's IndexedDB. The browser may clear them at any
+time without notice, and they are lost with the device, on "clear site data", and in
+private browsing. `navigator.storage.persist()` is requested but browsers may refuse.
+This is why the ZIP download becomes **mandatory** above 100 MB / 100 files / any folder,
+and why all UI copy says "kept in this browser" rather than "saved". Do not soften that
+wording, and do not present the local backup as a durable copy.
+
+**2. The delete rate cap is a speed bump, not enforcement.**
+`src/middleware.ts` bypasses rate limiting for signed-in users, so the cap lives in the
+route via `src/lib/limits.ts`. Vercel KV is **not provisioned**, so `limits.ts` falls back
+to a per-lambda in-memory store — a determined caller can evade it by spreading requests
+across lambdas. The real gate is the typed confirmation. Provisioning KV upgrades this to
+a genuine cross-instance cap with no code change.
+
+**3. Restore is not undo.**
+Restoring a backup uploads new files. They receive new OSF file ids and fresh version
+history, and any external link to an original file id stays broken. The UI says "restore a
+copy" deliberately.
+
+**Testing constraint.** `tests/visual/visual-qa.mjs` is anonymous and asserts only the
+*absence* of delete controls; confirm-gating is covered in jsdom with mocks. The real
+irreversible path is covered by `tests/destructive/live-delete.mjs`, which creates its own
+throwaway OSF project, builds a tree, deletes from it, and verifies each removal:
+
+```bash
+BETTEROSF_DESTRUCTIVE_TEST=i-understand OSF_TEST_TOKEN=<token> npm run test:destructive
+```
+
+It needs a human with an OSF token — **an agent cannot run it**, and it must never be wired
+into `/ship`, CI, or `npm test`. Use a **dedicated throwaway OSF account**. The script takes
+no project argument by design; see its header for the five safety interlocks and why adding
+a `--guid` flag would remove four of them at once.
+
+## Anonymous delete-button leak (fixed 2026-08-03, same day)
+
+For one build, row-level Delete buttons rendered for signed-out visitors — 28 of them on a
+public project. Cause: the affordance was gated on `canUploadHere`
+(= `!readOnly && osfstorage`), which is **true for anonymous users** since it only excludes
+registrations. Fixed by gating on `canDeleteHere` (= `canUploadHere && canWrite`), where
+`canWrite` comes from `/api/osf/write-status` and defaults to `false`.
+
+Caught only by the visual-qa absence assertion, which is why that gate is mandatory on every
+QA pass. Regression locked in by `tests/unit/delete-affordance.test.ts`. **Never gate a
+destructive control on `readOnly`/`canUploadHere` alone.**
+
 ## Malformed multi-body `.docx` renders blank in docx-preview (mitigated 2026-06-07)
 
 **Symptom.** Some `.docx` files on OSF — notably survey-tool exports (Qualtrics)

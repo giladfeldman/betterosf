@@ -138,8 +138,25 @@ After this release, **provision Vercel KV** at https://vercel.com/your-team/bett
 - Bounce/complaint webhook + suppression (`email_events`); daily cron at 08:00 UTC.
 - Dedicated BetterOSF sending domain still deferred (see `todo.md`).
 
+## v1.6.0 (File/folder deletion + local backups) — what's new
+
+- **Delete files and folders from OSF Storage**, with a deliberately slow confirmation
+  flow. OSF has no trash and no restore path, so deletion is permanent:
+  - Folders are expanded first, so you see a real file count before consenting
+  - A **verified backup is captured before any deletion**; an incomplete backup blocks it
+  - A typed confirmation phrase is required — folders and bulk deletes also need a checkbox
+  - Per-item outcomes are always reported (`deleted` / `already gone` / `failed`)
+- **Local pre-delete backups** kept in your browser, with one-click restore of a copy.
+  Capped at 20 backups / 500 MB, oldest evicted first (7-day grace).
+- **Mandatory backup download** above 100 MB, above 100 files, when a folder is involved,
+  or when browser storage is unavailable — browser storage can be evicted at any time.
+- Deletion terms at `/terms`, also shown inline in the delete dialog; the typed
+  confirmation is recorded as an electronic signature.
+- Registrations remain immutable — no delete affordance anywhere.
+
 ## Not yet — possible future work
 
 - Full-text search inside file contents
-- Cross-device favorites sync (currently localStorage only)
+- Cross-device favorites sync (pins/prefs sync for signed-in users; local backups stay local by design)
 - Pool of multiple OSF app tokens for higher anonymous quota
+- File rename / move / copy (currently only upload + delete)

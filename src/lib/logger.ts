@@ -10,6 +10,7 @@ export type LogType =
   | "auth"
   | "osf"
   | "upload"
+  | "delete"
   | "db"
   | "admin"
   | "uncaught"
@@ -108,4 +109,24 @@ export function logWarn(type: LogType, message: string, context?: Record<string,
 
 export function logError(type: LogType, message: string, context?: Record<string, unknown>, userId?: string | null): void {
   void writeLog("error", type, message, context, userId);
+}
+
+/**
+ * Awaitable log write, for records that must be durable BEFORE the next action runs.
+ *
+ * The fire-and-forget helpers above are right for ordinary telemetry, but a consent
+ * record for an irreversible deletion must land first: if the batch dies midway, the
+ * evidence that the user agreed has to already exist. Returns true when the row was
+ * written, false when no database is configured.
+ */
+export async function logEventAwaited(
+  level: LogLevel,
+  type: LogType,
+  message: string,
+  context?: Record<string, unknown>,
+  userId?: string | null,
+): Promise<boolean> {
+  if (!getDb()) return false;
+  await writeLog(level, type, message, context, userId);
+  return true;
 }

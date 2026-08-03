@@ -113,6 +113,86 @@ export function actionUrl(target: UploadTarget, kind: "file" | "folder", name: s
   return url.toString();
 }
 
+/**
+ * A single file/folder the user has asked to delete.
+ *
+ * `deleteUrl` comes from OSF's own `links.delete` on the file entry — we never
+ * synthesize it. `listingUrl` is carried purely so `resolveDeleteUrl` can pin the
+ * target to a project/component (see the registration check below); it is not used
+ * to build the request.
+ */
+export type DeleteTarget = {
+  guid: string;
+  provider: string;
+  kind: "file" | "folder";
+  path: string;
+  name: string;
+  deleteUrl: string;
+  listingUrl: string;
+};
+
+/**
+ * Validate and normalize a Waterbutler delete URL. This is the security core of the
+ * delete feature — everything else trusts what this returns.
+ *
+ * The ORDER of these checks is load-bearing:
+ *
+ *   1. The registration pin (step 2) is the ONLY thing distinguishing a registration
+ *      from a node. Their Waterbutler URLs are origin-identical, so the host/prefix
+ *      check below cannot tell them apart. Registrations are immutable on OSF; the
+ *      `readOnly` React prop is a UI affordance, NOT a security boundary.
+ *
+ *   2. The query string is stripped (step 4) BEFORE the root check (step 5). Waterbutler's
+ *      `?confirm_delete=1` is required for root deletes only, and a root delete does not
+ *      delete the root — it recursively deletes ALL of its contents. Stripping first means
+ *      no client input can smuggle that parameter past the root refusal.
+ *
+ *   3. The trailing slash is derived from `kind` (step 6), never trusted from the URL.
+ *      Waterbutler distinguishes files from folders by the trailing slash, so a mangled
+ *      URL must be corrected rather than sent as-is at a different resource.
+ */
+export function resolveDeleteUrl(target: DeleteTarget): string {
+  if (!isValidGuid(target.guid)) {
+    throw new OsfWriteError(400, "invalid", "Invalid GUID");
+  }
+  if (target.provider !== OSF_STORAGE) {
+    throw new OsfWriteError(400, "invalid", "Deleting is only supported for OSF Storage.");
+  }
+  // Registrations are permanent scientific records — never deletable through BetterOSF.
+  // Mirrors the same pin in validateUploadTarget().
+  if (!target.listingUrl.startsWith("https://api.osf.io/v2/nodes/")) {
+    throw new OsfWriteError(
+      400,
+      "invalid",
+      "Deleting is only supported for project and component OSF Storage. Registrations are permanent and cannot be modified."
+    );
+  }
+
+  const validated = validateWaterbutlerActionUrl(target.deleteUrl, target.guid);
+  const url = new URL(validated);
+  // Drop anything the caller appended — notably `confirm_delete`, which would turn a
+  // refused root delete into a recursive wipe of every file in the provider.
+  url.search = "";
+  url.hash = "";
+
+  const prefix = `/v1/resources/${target.guid}/providers/${OSF_STORAGE}`;
+  const rest = url.pathname.slice(prefix.length);
+  if (rest === "" || rest === "/") {
+    throw new OsfWriteError(
+      400,
+      "invalid",
+      "BetterOSF will not delete an entire OSF Storage root. Select the files or folders inside it instead."
+    );
+  }
+
+  url.pathname =
+    target.kind === "folder"
+      ? `${url.pathname.replace(/\/+$/, "")}/`
+      : url.pathname.replace(/\/+$/, "");
+
+  return url.toString();
+}
+
 export function readableUpstreamBody(body: string): string {
   const trimmed = body.trim();
   if (!trimmed) return "";
@@ -140,13 +220,13 @@ export function readableUpstreamBody(body: string): string {
   return trimmed.replace(/\s+/g, " ").slice(0, 300);
 }
 
-export function mapUploadStatus(status: number, body: string): OsfWriteError {
+export function mapUploadStatus(status: number, body: string, verb: "upload" | "delete" = "upload"): OsfWriteError {
   const message = readableUpstreamBody(body);
   if (status === 401) return new OsfWriteError(401, "unauthorized", "Your OSF session expired. Sign in again.");
   if (status === 403) return new OsfWriteError(403, "forbidden", "You may not have write permission on this project or component.");
   if (status === 409) return new OsfWriteError(409, "conflict", message || "A file or folder with that name already exists.");
   if (status === 413) return new OsfWriteError(413, "too_large", "OSF rejected this upload as too large.");
-  return new OsfWriteError(status, "upstream", message || `OSF upload failed with status ${status}.`);
+  return new OsfWriteError(status, "upstream", message || `OSF ${verb} failed with status ${status}.`);
 }
 
 export function validateUploadTarget(target: UploadTarget): UploadTarget {

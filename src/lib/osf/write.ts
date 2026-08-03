@@ -7,13 +7,15 @@ import {
   actionUrl,
   cleanName,
   mapUploadStatus,
+  resolveDeleteUrl,
   validateUploadTarget,
+  type DeleteTarget,
   type UploadTarget,
 } from "./waterbutler-url";
 
 // Re-export the shared types/helpers so existing server-side imports keep working.
-export { OsfWriteError, validateUploadTarget };
-export type { UploadTarget };
+export { OsfWriteError, validateUploadTarget, resolveDeleteUrl };
+export type { UploadTarget, DeleteTarget };
 
 const MAX_FILE_SIZE = OSF_MAX_FILE_SIZE;
 
@@ -78,6 +80,60 @@ export async function createOsfStorageFolder(target: UploadTarget, name: string)
     throw mapUploadStatus(res.status, body.slice(0, 500));
   }
   return res.json().catch(() => ({}));
+}
+
+export type DeleteOutcome = {
+  path: string;
+  name: string;
+  kind: "file" | "folder";
+  status: "deleted" | "already_gone" | "failed";
+  code?: string;
+  message?: string;
+};
+
+/**
+ * Delete ONE file/folder from OSF Storage.
+ *
+ * Runs server-side rather than direct-from-browser (unlike uploads). Uploads accept
+ * browser token exposure to buy something otherwise impossible — bypassing Vercel's
+ * 4.5 MB body limit. A DELETE has a ~0-byte body, so there is no compensating benefit,
+ * and a leaked token from a flow the user expects DELETEs from destroys data
+ * irreversibly. The registration pin and audit trail also require a server.
+ *
+ * 404 is reported as `already_gone`, not a failure: the item is absent, which is the
+ * requested end state, and it makes retrying a partially-failed batch idempotent.
+ */
+export async function deleteFromOsfStorage(target: DeleteTarget, token: string): Promise<DeleteOutcome> {
+  const base = { path: target.path, name: target.name, kind: target.kind };
+  try {
+    const url = resolveDeleteUrl(target);
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (res.status === 204 || res.status === 200) {
+      return { ...base, status: "deleted" };
+    }
+    if (res.status === 404 || res.status === 410) {
+      return { ...base, status: "already_gone" };
+    }
+    const body = await res.text().catch(() => "");
+    const mapped = mapUploadStatus(res.status, body.slice(0, 500), "delete");
+    return { ...base, status: "failed", code: mapped.code, message: mapped.message };
+  } catch (e) {
+    if (e instanceof OsfWriteError) {
+      return { ...base, status: "failed", code: e.code, message: e.message };
+    }
+    // Network/DNS/abort — never leak internals to the client.
+    console.error("[osf/delete] unexpected error:", e);
+    return {
+      ...base,
+      status: "failed",
+      code: "upstream",
+      message: "Could not reach OSF to delete this item. It was NOT deleted.",
+    };
+  }
 }
 
 export function writeErrorResponse(error: unknown): Response {

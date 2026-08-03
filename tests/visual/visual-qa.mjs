@@ -110,6 +110,7 @@ const PAGES = [
   { name: "16-about", url: "/about" },
   { name: "16b-bookmarklet", url: "/bookmarklet" },
   { name: "17-privacy", url: "/privacy" },
+  { name: "17b-terms", url: "/terms" },
   { name: "18-404", url: "/notarealroute/files" },
   ...GUID_TYPES.map((g) => ({ name: `19-guidtype-${g.kind}`, url: `/${g.guid}` })),
 ];
@@ -363,6 +364,15 @@ async function main() {
     // Registrations are immutable — no upload affordance anywhere on the page.
     const uploadButtons = await page.getByRole("button", { name: /upload/i }).count();
     record("registration shows NO upload buttons (immutable)", uploadButtons === 0, `uploadButtons=${uploadButtons}`);
+
+    // ...and no delete affordance either. NOTE: this harness is ANONYMOUS and runs
+    // against public third-party OSF fixtures, so it asserts the ABSENCE of destructive
+    // controls only. The delete flow itself is deliberately NOT exercised here — driving
+    // it would need a write-capable session, which would put a real irreversible control
+    // one bug away from a CI run. Confirm-gating behaviour is covered in
+    // tests/integration/delete-dialog.test.tsx (jsdom, fully mocked).
+    const regDeleteButtons = await page.getByRole("button", { name: /^delete/i }).count();
+    record("registration shows NO delete buttons (immutable)", regDeleteButtons === 0, `deleteButtons=${regDeleteButtons}`);
 
     // Progressive auto-load: deep folders/files appear WITHOUT clicking through
     // each level (the reported annoyance). The default "Directory" view hides
@@ -696,9 +706,31 @@ async function main() {
     record(`navigator select mode exposes checkboxes: ${checkboxes}`, checkboxes > 0);
     const zipActions = await page.locator('[role="tree"] a[aria-label*="Download"][href*="/api/zip/"]').count();
     record(`navigator exposes folder ZIP actions: ${zipActions}`, zipActions > 0);
+
+    // Anonymous browsing must expose NO destructive control. The tree emitters only set
+    // `deleteUrl` for a writable osfstorage target, so a signed-out visitor should never
+    // see "Delete selected" enabled. Absence-only by design — see the note on the
+    // registration check above for why this harness must not drive a real delete.
+    const deleteSelected = page.getByRole("button", { name: /delete selected/i });
+    const deleteCount = await deleteSelected.count();
+    const deleteUsable = deleteCount > 0 ? await deleteSelected.first().isEnabled() : false;
+    record(
+      "anonymous select mode exposes NO usable delete control",
+      deleteCount === 0 || !deleteUsable,
+      `count=${deleteCount} enabled=${deleteUsable}`
+    );
   } else {
     record("navigator select mode button present", false);
   }
+
+  // Re-load so select mode is off: the toolbar's "Delete selected" (already asserted
+  // disabled above) would otherwise be counted here and mask what this check is for —
+  // per-ROW delete buttons inside the tree, which must never render for a signed-out user.
+  await page.goto(`${BASE}/${MANY_LABS_GUID}/files`, { waitUntil: "domcontentloaded" });
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+  const anonRowDeletes = await page.locator('[role="tree"] button', { hasText: /^delete/i }).count();
+  record("anonymous file tree exposes NO row delete buttons", anonRowDeletes === 0, `deleteButtons=${anonRowDeletes}`);
 
   await page.goto(`${BASE}/${MANY_LABS_GUID}/files`, { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});

@@ -1,6 +1,6 @@
 {
   "name": "betterosf",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "",
   "main": "index.js",
   "directories": {
@@ -18,7 +18,8 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "test:destructive": "node tests/destructive/live-delete.mjs"
   },
   "keywords": [],
   "author": "",

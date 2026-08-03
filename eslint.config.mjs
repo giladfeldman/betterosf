@@ -23,6 +23,9 @@ const eslintConfig = [
       "coverage/**", // vitest coverage output
       "test-results/**", // Playwright run artifacts
       "post-deploy-report.json", // Playwright post-deploy report
+      // Vendored, minified PDF.js worker — third-party build output, never hand-edited.
+      // Linting it produced 7 errors + ~1580 warnings that drowned out real findings.
+      "public/pdf.worker.min.mjs",
     ],
   },
   { files: ["**/*.{js,jsx,mjs,cjs,ts,tsx}"] },
