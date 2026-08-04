@@ -6,6 +6,7 @@ import { getNode, getAllLinkedNodes } from "@/lib/osf/nodes";
 import { getNodeRegistrations, getRegistration, type RegistrationView } from "@/lib/osf/registrations";
 import { collectFullTree, EMPTY_TREE, type FullProjectTree } from "@/lib/osf/full-tree";
 import { OsfError } from "@/lib/osf/types";
+import { classifyWalkFailure, type WalkFailureReason } from "@/lib/osf/walk-failure";
 import type { NodeView } from "@/lib/osf/parse";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { UnifiedTree } from "@/components/UnifiedTree";
@@ -61,14 +62,25 @@ export default async function FileViewerPage({
   // exist — bail to the route-level not-found.
   let providers: ProviderRoot[] = [];
   let resourceKind: "node" | "registration";
+  // True when OSF rejected our saved token (401). The provider list is empty in
+  // that case for an auth reason, NOT because the resource has no providers —
+  // the two must not be conflated by the walk's empty-providers fallback.
+  let providerLookupUnauthorized = false;
   try {
     const r = await getProviderRootsAuto(guid);
     providers = r.roots;
     resourceKind = r.kind;
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") notFound();
-    if (e instanceof OsfError && (e.code === "rate_limited" || e.code === "upstream")) {
+    // An expired token (401) must NOT blow up the whole route: the walk below
+    // re-hits OSF and renders an actionable "reconnect" panel with the page
+    // chrome intact. Same fail-soft treatment as OSF backpressure.
+    if (
+      e instanceof OsfError &&
+      (e.code === "rate_limited" || e.code === "upstream" || e.code === "unauthorized")
+    ) {
       resourceKind = "node";
+      providerLookupUnauthorized = e.code === "unauthorized";
     } else {
       throw e;
     }
@@ -131,10 +143,14 @@ export default async function FileViewerPage({
   // the specific file can't be resolved, so users can recover via the tree.
   type WalkResult =
     | { kind: "ok"; file: Extract<FileEntry, { kind: "file" }>; listingUrl?: string; uploadUrl?: string; newFolderUrl?: string }
-    | { kind: "fail"; reason: "wrong-provider" | "missing-folder" | "missing-file" | "upstream-error" };
+    | { kind: "fail"; reason: "wrong-provider" | "missing-folder" | "missing-file" | WalkFailureReason };
 
   async function walkToFile(): Promise<WalkResult> {
     if (!providerMatch) {
+      // Don't fall back to a direct Waterbutler URL when the provider list is
+      // empty because OSF rejected our token — that URL 401s too, so the user
+      // would get a broken viewer instead of a "reconnect OSF" prompt.
+      if (providerLookupUnauthorized) return { kind: "fail", reason: "needs-reconnect" };
       if (providers.length === 0 && provider && rest.length > 0) {
         return {
           kind: "ok",
@@ -168,12 +184,8 @@ export default async function FileViewerPage({
       if (!f || f.kind !== "file") return { kind: "fail", reason: "missing-file" };
       return { kind: "ok", file: f, listingUrl, uploadUrl, newFolderUrl };
     } catch (e) {
-      if (
-        e instanceof OsfError &&
-        (e.code === "not_found" || e.code === "forbidden" || e.code === "rate_limited" || e.code === "upstream")
-      ) {
-        return { kind: "fail", reason: "upstream-error" };
-      }
+      const reason = classifyWalkFailure(e);
+      if (reason) return { kind: "fail", reason };
       throw e;
     }
   }

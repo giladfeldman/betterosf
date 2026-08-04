@@ -12,6 +12,8 @@ describe("route contracts", () => {
   it("keeps critical API routes wired", () => {
     expect(exists("src/app/api/zip/[guid]/route.ts")).toBe(true);
     expect(exists("src/app/api/osf/write-status/route.ts")).toBe(true);
+    expect(exists("src/app/api/files/[guid]/delete/route.ts")).toBe(true);
+    expect(exists("src/app/api/files/[guid]/rename/route.ts")).toBe(true);
   });
 
   it("keeps deep folder page route wired", () => {

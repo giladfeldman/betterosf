@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode, type DragEvent } from "react";
 import { NewFolderControl } from "./NewFolderControl";
+import { RenameControl } from "./RenameControl";
 import type { TreeNodeKind, TreeSelectionPayload, TreeUploadTarget, TreeNodeData } from "./tree-types";
 
 // Re-export the tree types so existing `from "./UnifiedTreeNode"` imports keep
@@ -70,6 +71,7 @@ export function UnifiedTreeNode({
   onSelect,
   onUpload,
   onDelete,
+  onRenamed,
   onCreateFolder,
   onDropUpload,
   onRetry,
@@ -88,6 +90,8 @@ export function UnifiedTreeNode({
   onUpload?: (target: TreeUploadTarget) => void;
   /** Opens the delete confirmation dialog for this single row. */
   onDelete?: (selection: TreeSelectionPayload) => void;
+  /** Called AFTER a successful in-place rename, so the parent folder can refresh. */
+  onRenamed?: (selection: TreeSelectionPayload) => void;
   onCreateFolder?: (target: TreeUploadTarget) => void;
   onDropUpload?: (target: TreeUploadTarget, items: DataTransferItem[]) => void;
   onRetry?: () => void;
@@ -281,6 +285,14 @@ export function UnifiedTreeNode({
             >
               ZIP
             </a>
+          )}
+          {/* Rename shares the Delete gate exactly: deleteUrl doubles as the item's
+              Waterbutler URL (OSF serves the identical URL under links.move), and its
+              presence already encodes canDeleteHere = canUploadHere && canWrite.
+              parentListingUrl is additionally required for the server-side
+              registration pin and the post-rename refresh. */}
+          {node.selection?.deleteUrl && node.selection?.parentListingUrl && (
+            <RenameControl selection={node.selection} onRenamed={onRenamed} />
           )}
           {/* Only writable osfstorage targets carry deleteUrl (set in UnifiedTree's
               emitters, gated on canUploadHere), so registrations, read-only trees,

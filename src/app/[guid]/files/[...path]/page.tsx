@@ -3,6 +3,7 @@ import { isValidGuid } from "@/lib/osf/guid";
 import { getFolderContents, type FileEntry } from "@/lib/osf/files";
 import { collectResourceTree } from "@/lib/osf/resource-tree";
 import { OsfError } from "@/lib/osf/types";
+import { classifyWalkFailure, type WalkFailureReason } from "@/lib/osf/walk-failure";
 import { osfBackpressureKind } from "@/lib/osf/backpressure";
 import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -58,6 +59,15 @@ export default async function DeepFilesPage({
     if (e instanceof OsfError && e.code === "not_found") notFound();
     const bp = osfBackpressureKind(e);
     if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="these files" />;
+    // An expired OSF token is recoverable: show the reconnect panel rather than
+    // destroying the page via the route error boundary.
+    if (e instanceof OsfError && e.code === "unauthorized") {
+      return (
+        <div className="p-6">
+          <FileMissing reason="needs-reconnect" guid={guid} attemptedPath={`/${guid}/${path.join("/")}`} />
+        </div>
+      );
+    }
     throw e;
   }
   const { kind, title, fullTree, linked, registrations, components } = resource;
@@ -76,7 +86,7 @@ export default async function DeepFilesPage({
 
   type WalkResult =
     | { kind: "ok"; entries: FileEntry[]; listingUrl: string; uploadUrl?: string; newFolderUrl?: string }
-    | { kind: "fail"; reason: "wrong-provider" | "missing-folder" | "upstream-error" };
+    | { kind: "fail"; reason: "wrong-provider" | "missing-folder" | WalkFailureReason };
 
   async function walk(): Promise<WalkResult> {
     if (!matchingProvider) return { kind: "fail", reason: "wrong-provider" };
@@ -95,12 +105,8 @@ export default async function DeepFilesPage({
       }
       return { kind: "ok", entries, listingUrl, uploadUrl, newFolderUrl };
     } catch (e) {
-      if (
-        e instanceof OsfError &&
-        (e.code === "not_found" || e.code === "forbidden" || e.code === "rate_limited" || e.code === "upstream")
-      ) {
-        return { kind: "fail", reason: "upstream-error" };
-      }
+      const reason = classifyWalkFailure(e);
+      if (reason) return { kind: "fail", reason };
       throw e;
     }
   }

@@ -57,6 +57,28 @@ export function cleanName(name: string): string {
   return trimmed;
 }
 
+/** Waterbutler/OSF tolerate long names; this cap only guards against abuse. */
+export const MAX_RENAME_NAME_LENGTH = 1024;
+
+/**
+ * Validate a user-typed NEW name for a rename. Unlike cleanName this does NOT
+ * percent-decode: the input is typed by the user, not lifted from a URL, so a
+ * literal "%20" in the box must stay a literal "%20" in the name.
+ */
+export function cleanRenameName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === "." || trimmed === "..") {
+    throw new OsfWriteError(400, "invalid", "Enter a new file or folder name.");
+  }
+  if (trimmed.includes("/") || trimmed.includes("\\")) {
+    throw new OsfWriteError(400, "invalid", "Names cannot contain slashes.");
+  }
+  if (trimmed.length > MAX_RENAME_NAME_LENGTH) {
+    throw new OsfWriteError(400, "invalid", `Names are limited to ${MAX_RENAME_NAME_LENGTH} characters.`);
+  }
+  return trimmed;
+}
+
 function encodePath(path: string): string {
   const cleaned = cleanPath(path);
   const parts = cleaned.split("/").filter(Boolean).map(encodeURIComponent);
@@ -152,23 +174,65 @@ export type DeleteTarget = {
  *      URL must be corrected rather than sent as-is at a different resource.
  */
 export function resolveDeleteUrl(target: DeleteTarget): string {
+  return resolveItemActionUrl(target, target.deleteUrl, {
+    providerRefusal: "Deleting is only supported for OSF Storage.",
+    registrationRefusal:
+      "Deleting is only supported for project and component OSF Storage. Registrations are permanent and cannot be modified.",
+    rootRefusal: "BetterOSF will not delete an entire OSF Storage root. Select the files or folders inside it instead.",
+  });
+}
+
+/**
+ * A single file/folder the user has asked to rename in place.
+ *
+ * `moveUrl` is the item's own Waterbutler URL, taken from OSF's `links.move` /
+ * `links.delete` on the file entry (OSF serves the IDENTICAL URL under both keys —
+ * the tree carries it as `deleteUrl`). We never synthesize it. `listingUrl` exists
+ * purely for the registration pin, exactly as in DeleteTarget.
+ */
+export type RenameTarget = {
+  guid: string;
+  provider: string;
+  kind: "file" | "folder";
+  path: string;
+  name: string;
+  moveUrl: string;
+  listingUrl: string;
+};
+
+export function resolveRenameUrl(target: RenameTarget): string {
+  return resolveItemActionUrl(target, target.moveUrl, {
+    providerRefusal: "Renaming is only supported for OSF Storage.",
+    registrationRefusal:
+      "Renaming is only supported for project and component OSF Storage. Registrations are permanent and cannot be modified.",
+    rootRefusal: "BetterOSF will not rename an OSF Storage root.",
+  });
+}
+
+/**
+ * Shared validation core for per-item Waterbutler actions (delete, rename).
+ * The ORDER of the checks — registration pin, then host pin, then query strip,
+ * then root refusal, then kind-derived slash — is load-bearing; see the
+ * resolveDeleteUrl doc comment above.
+ */
+function resolveItemActionUrl(
+  target: Pick<DeleteTarget, "guid" | "provider" | "kind" | "listingUrl">,
+  itemUrl: string,
+  messages: { providerRefusal: string; registrationRefusal: string; rootRefusal: string }
+): string {
   if (!isValidGuid(target.guid)) {
     throw new OsfWriteError(400, "invalid", "Invalid GUID");
   }
   if (target.provider !== OSF_STORAGE) {
-    throw new OsfWriteError(400, "invalid", "Deleting is only supported for OSF Storage.");
+    throw new OsfWriteError(400, "invalid", messages.providerRefusal);
   }
-  // Registrations are permanent scientific records — never deletable through BetterOSF.
+  // Registrations are permanent scientific records — never mutable through BetterOSF.
   // Mirrors the same pin in validateUploadTarget().
   if (!target.listingUrl.startsWith("https://api.osf.io/v2/nodes/")) {
-    throw new OsfWriteError(
-      400,
-      "invalid",
-      "Deleting is only supported for project and component OSF Storage. Registrations are permanent and cannot be modified."
-    );
+    throw new OsfWriteError(400, "invalid", messages.registrationRefusal);
   }
 
-  const validated = validateWaterbutlerActionUrl(target.deleteUrl, target.guid);
+  const validated = validateWaterbutlerActionUrl(itemUrl, target.guid);
   const url = new URL(validated);
   // Drop anything the caller appended — notably `confirm_delete`, which would turn a
   // refused root delete into a recursive wipe of every file in the provider.
@@ -178,11 +242,7 @@ export function resolveDeleteUrl(target: DeleteTarget): string {
   const prefix = `/v1/resources/${target.guid}/providers/${OSF_STORAGE}`;
   const rest = url.pathname.slice(prefix.length);
   if (rest === "" || rest === "/") {
-    throw new OsfWriteError(
-      400,
-      "invalid",
-      "BetterOSF will not delete an entire OSF Storage root. Select the files or folders inside it instead."
-    );
+    throw new OsfWriteError(400, "invalid", messages.rootRefusal);
   }
 
   url.pathname =
@@ -220,7 +280,7 @@ export function readableUpstreamBody(body: string): string {
   return trimmed.replace(/\s+/g, " ").slice(0, 300);
 }
 
-export function mapUploadStatus(status: number, body: string, verb: "upload" | "delete" = "upload"): OsfWriteError {
+export function mapUploadStatus(status: number, body: string, verb: "upload" | "delete" | "rename" = "upload"): OsfWriteError {
   const message = readableUpstreamBody(body);
   if (status === 401) return new OsfWriteError(401, "unauthorized", "Your OSF session expired. Sign in again.");
   if (status === 403) return new OsfWriteError(403, "forbidden", "You may not have write permission on this project or component.");

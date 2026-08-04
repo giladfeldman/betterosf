@@ -6,16 +6,19 @@ import {
   OSF_MAX_FILE_SIZE,
   actionUrl,
   cleanName,
+  cleanRenameName,
   mapUploadStatus,
   resolveDeleteUrl,
+  resolveRenameUrl,
   validateUploadTarget,
   type DeleteTarget,
+  type RenameTarget,
   type UploadTarget,
 } from "./waterbutler-url";
 
 // Re-export the shared types/helpers so existing server-side imports keep working.
-export { OsfWriteError, validateUploadTarget, resolveDeleteUrl };
-export type { UploadTarget, DeleteTarget };
+export { OsfWriteError, validateUploadTarget, resolveDeleteUrl, resolveRenameUrl, cleanRenameName };
+export type { UploadTarget, DeleteTarget, RenameTarget };
 
 const MAX_FILE_SIZE = OSF_MAX_FILE_SIZE;
 
@@ -132,6 +135,70 @@ export async function deleteFromOsfStorage(target: DeleteTarget, token: string):
       status: "failed",
       code: "upstream",
       message: "Could not reach OSF to delete this item. It was NOT deleted.",
+    };
+  }
+}
+
+export type RenameOutcome = {
+  path: string;
+  name: string;
+  newName: string;
+  kind: "file" | "folder";
+  status: "renamed" | "failed";
+  code?: string;
+  message?: string;
+};
+
+/**
+ * Rename ONE file/folder in place on OSF Storage (Waterbutler intra-provider move
+ * with an unchanged parent): POST to the item's own Waterbutler URL with
+ * `{"action": "rename", "rename": "<newName>"}`.
+ *
+ * Server-side for the same reasons deletes are (see deleteFromOsfStorage): the body
+ * is tiny so there is no Vercel-limit benefit to a browser call, and the registration
+ * pin + audit trail require a server. Unlike delete, a 404 here is a FAILURE — the
+ * item the user pointed at no longer exists, and reporting success would hide that.
+ */
+export async function renameInOsfStorage(target: RenameTarget, newName: string, token: string): Promise<RenameOutcome> {
+  const base = { path: target.path, name: target.name, newName, kind: target.kind };
+  try {
+    const url = resolveRenameUrl(target);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ action: "rename", rename: newName }),
+      cache: "no-store",
+    });
+    // Waterbutler answers 200 (replaced) or 201 (created) for a successful move/rename.
+    if (res.status === 200 || res.status === 201) {
+      return { ...base, status: "renamed" };
+    }
+    if (res.status === 404 || res.status === 410) {
+      return {
+        ...base,
+        status: "failed",
+        code: "upstream",
+        message: "This item no longer exists on OSF. Refresh the tree and try again.",
+      };
+    }
+    const body = await res.text().catch(() => "");
+    const mapped = mapUploadStatus(res.status, body.slice(0, 500), "rename");
+    return { ...base, status: "failed", code: mapped.code, message: mapped.message };
+  } catch (e) {
+    if (e instanceof OsfWriteError) {
+      return { ...base, status: "failed", code: e.code, message: e.message };
+    }
+    // Network/DNS/abort — never leak internals to the client.
+    console.error("[osf/rename] unexpected error:", e);
+    return {
+      ...base,
+      status: "failed",
+      code: "upstream",
+      message: "Could not reach OSF to rename this item. It was NOT renamed.",
     };
   }
 }

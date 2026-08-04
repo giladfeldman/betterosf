@@ -216,6 +216,80 @@ describe("UnifiedTreeNode: expand chevron button", () => {
   });
 });
 
+describe("UnifiedTreeNode: rename/delete affordance gating", () => {
+  const WB = "https://files.osf.io/v1/resources/abc12/providers/osfstorage";
+  const writableSelection = {
+    kind: "file" as const,
+    guid: "abc12",
+    provider: "osfstorage",
+    path: "/a.csv",
+    name: "a.csv",
+    downloadUrl: "d",
+    deleteUrl: `${WB}/5f1a`,
+    parentListingUrl: "https://api.osf.io/v2/nodes/abc12/files/osfstorage/",
+  };
+
+  it("renders Rename and Delete for a writable selection (deleteUrl present)", () => {
+    render(
+      <UnifiedTreeNode
+        node={baseNode({ kind: "file", href: "/x", newTab: false, selection: writableSelection })}
+        depth={1}
+        expanded={false}
+        hasChildren={false}
+        onToggle={() => {}}
+      />
+    );
+    expect(screen.getByRole("button", { name: /^rename a\.csv/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^delete/i })).toBeInTheDocument();
+  });
+
+  it("renders NEITHER Rename nor Delete without deleteUrl (read-only / anonymous / registration)", () => {
+    // The emitters only set deleteUrl when canDeleteHere = canUploadHere && canWrite —
+    // this is the same fail-closed gate that fixed the 2026-08-03 leaked-Delete incident.
+    const { deleteUrl: _d, parentListingUrl: _p, ...readOnlySelection } = writableSelection;
+    render(
+      <UnifiedTreeNode
+        node={baseNode({ kind: "file", href: "/x", newTab: false, selection: readOnlySelection })}
+        depth={1}
+        expanded={false}
+        hasChildren={false}
+        onToggle={() => {}}
+      />
+    );
+    expect(screen.queryByRole("button", { name: /rename/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
+  });
+
+  it("suppresses Rename when parentListingUrl is missing (registration pin + refresh need it)", () => {
+    const { parentListingUrl: _p, ...noParent } = writableSelection;
+    render(
+      <UnifiedTreeNode
+        node={baseNode({ kind: "file", href: "/x", newTab: false, selection: noParent })}
+        depth={1}
+        expanded={false}
+        hasChildren={false}
+        onToggle={() => {}}
+      />
+    );
+    expect(screen.queryByRole("button", { name: /rename/i })).not.toBeInTheDocument();
+  });
+
+  it("opens an inline input prefilled with the current name", () => {
+    render(
+      <UnifiedTreeNode
+        node={baseNode({ kind: "file", href: "/x", newTab: false, selection: writableSelection })}
+        depth={1}
+        expanded={false}
+        hasChildren={false}
+        onToggle={() => {}}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^rename a\.csv/i }));
+    const input = screen.getByRole("textbox", { name: /new name for a\.csv/i });
+    expect(input).toHaveValue("a.csv");
+  });
+});
+
 describe("UnifiedTreeNode: aria + selection", () => {
   it("treeitem aria-expanded is set only when hasChildren", () => {
     const { rerender } = render(

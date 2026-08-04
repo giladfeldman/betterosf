@@ -374,6 +374,11 @@ async function main() {
     const regDeleteButtons = await page.getByRole("button", { name: /^delete/i }).count();
     record("registration shows NO delete buttons (immutable)", regDeleteButtons === 0, `deleteButtons=${regDeleteButtons}`);
 
+    // Rename shares the exact same gate as Delete (deleteUrl presence), so a
+    // registration must never expose it either.
+    const regRenameButtons = await page.getByRole("button", { name: /^rename/i }).count();
+    record("registration shows NO rename buttons (immutable)", regRenameButtons === 0, `renameButtons=${regRenameButtons}`);
+
     // Progressive auto-load: deep folders/files appear WITHOUT clicking through
     // each level (the reported annoyance). The default "Directory" view hides
     // file leaves, so switch to "Expand all" (a single toolbar click) to reveal
@@ -731,6 +736,10 @@ async function main() {
   await page.waitForTimeout(1500);
   const anonRowDeletes = await page.locator('[role="tree"] button', { hasText: /^delete/i }).count();
   record("anonymous file tree exposes NO row delete buttons", anonRowDeletes === 0, `deleteButtons=${anonRowDeletes}`);
+  // Rename is gated on the same deleteUrl presence as Delete — a leaked Rename button
+  // for a signed-out visitor would be the same class of bug as the 2026-08-03 incident.
+  const anonRowRenames = await page.locator('[role="tree"] button', { hasText: /^rename/i }).count();
+  record("anonymous file tree exposes NO row rename buttons", anonRowRenames === 0, `renameButtons=${anonRowRenames}`);
 
   await page.goto(`${BASE}/${MANY_LABS_GUID}/files`, { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});

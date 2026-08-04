@@ -724,6 +724,31 @@ export function UnifiedTree({
     [fetchFiles]
   );
 
+  // After an in-place rename: drop the now-stale selection entry (its path and name
+  // changed) and force-refresh the parent folder, exactly as handleDeleted does — the
+  // server's ≤5-min cached listing would otherwise keep serving the old name.
+  const handleRenamed = useCallback(
+    (item: TreeSelectionPayload) => {
+      setSelected((prev) => {
+        const next = { ...prev };
+        delete next[selectionKey(item)];
+        return next;
+      });
+      if (!item.parentListingUrl) return;
+      const params = folderParamsRef.current;
+      for (const [key, recorded] of params.entries()) {
+        if (recorded.listingUrl !== item.parentListingUrl) continue;
+        setLoadedEntries((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+        void fetchFiles(recorded.nodeGuid, recorded.provider, recorded.materializedPath, recorded.listingUrl, true);
+      }
+    },
+    [fetchFiles]
+  );
+
   const refreshUploadTarget = useCallback(
     (target: TreeUploadTarget) => {
       // force=true bypasses both the stale-closure early-return and the server cache,
@@ -1786,6 +1811,7 @@ export function UnifiedTree({
                   onSelect={toggleSelected}
                   onUpload={openUploadDialog}
                   onDelete={openRowDelete}
+                  onRenamed={handleRenamed}
                   onCreateFolder={refreshUploadTarget}
                   onDropUpload={handleDropUpload}
                   onRetry={

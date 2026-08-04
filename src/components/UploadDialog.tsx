@@ -31,6 +31,18 @@ type UploadItem = {
   errorCode?: string;
 };
 
+/**
+ * User-facing labels for each upload state. "pending" used to render as the bare
+ * internal state name, which read as a status ("this is pending") rather than an
+ * instruction, so users didn't realise the upload still needed to be started.
+ */
+const ITEM_STATE_LABELS: Record<UploadItem["state"], string> = {
+  pending: "ready to upload",
+  uploading: "uploading…",
+  done: "uploaded",
+  error: "failed",
+};
+
 function formatBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB"];
   let n = bytes;
@@ -106,7 +118,7 @@ export function UploadDialog({
   const [folderState, setFolderState] = useState<"idle" | "creating" | "done" | "error">("idle");
   const [folderError, setFolderError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
-  // Re-entrancy guard for the manual-picker "Upload pending" batch (a double-click
+  // Re-entrancy guard for the manual-picker batch upload (a double-click
   // would otherwise fire duplicate uploads and N tree refreshes).
   const [uploadingAll, setUploadingAll] = useState(false);
 
@@ -647,7 +659,11 @@ export function UploadDialog({
                       aria-busy={uploadingAll}
                       className="rounded border border-blue-300 px-3 py-1 text-blue-700 hover:bg-blue-50 disabled:border-neutral-300 disabled:text-neutral-500 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950"
                     >
-                      {uploadingAll ? "Uploading…" : "Upload pending"}
+                      {uploadingAll
+                        ? "Uploading…"
+                        : pendingCount === items.length
+                          ? `Upload ${pendingCount} file${pendingCount === 1 ? "" : "s"}`
+                          : `Upload remaining ${pendingCount}`}
                     </button>
                   </div>
                   {items.some((item) => item.state === "error") && (
@@ -662,7 +678,7 @@ export function UploadDialog({
                           <span className="min-w-0 flex-1 truncate font-medium" title={item.file.name}>{item.file.name}</span>
                           <span className="shrink-0 text-xs text-neutral-500">{formatBytes(item.file.size)}</span>
                           <span className={`shrink-0 text-xs ${item.state === "error" ? "text-red-600 dark:text-red-400" : item.state === "done" ? "text-green-700 dark:text-green-400" : "text-neutral-500"}`}>
-                            {item.state === "uploading" ? "uploading..." : item.state}
+                            {ITEM_STATE_LABELS[item.state]}
                           </span>
                         </div>
                         {item.error && (

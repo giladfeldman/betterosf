@@ -6,22 +6,27 @@ beforeEach(() => {
 });
 
 describe("favorites", () => {
+  // These use toMatchObject rather than toEqual because pins also carry a
+  // `pinnedAt` timestamp (added 2026-08-04 for the homepage workspace stats);
+  // asserting the exact object shape would make every new field a false failure.
   it("addPin + listPins round-trip", () => {
     addPin({ id: "abc12", title: "My Project", kind: "project" });
-    expect(listPins()).toEqual([{ id: "abc12", title: "My Project", kind: "project" }]);
+    expect(listPins()).toHaveLength(1);
+    expect(listPins()[0]).toMatchObject({ id: "abc12", title: "My Project", kind: "project" });
   });
 
   it("addPin is idempotent on id", () => {
     addPin({ id: "abc12", title: "My Project", kind: "project" });
     addPin({ id: "abc12", title: "Renamed", kind: "project" }); // updates title
-    expect(listPins()).toEqual([{ id: "abc12", title: "Renamed", kind: "project" }]);
+    expect(listPins()).toHaveLength(1);
+    expect(listPins()[0]).toMatchObject({ id: "abc12", title: "Renamed", kind: "project" });
   });
 
   it("removePin removes by id", () => {
     addPin({ id: "a", title: "A", kind: "project" });
     addPin({ id: "b", title: "B", kind: "project" });
     removePin("a");
-    expect(listPins()).toEqual([{ id: "b", title: "B", kind: "project" }]);
+    expect(listPins().map((p) => p.id)).toEqual(["b"]);
   });
 
   it("recordView prepends and dedupes", () => {

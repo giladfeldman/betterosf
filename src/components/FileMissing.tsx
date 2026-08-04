@@ -1,4 +1,11 @@
-type Reason = "wrong-provider" | "missing-folder" | "missing-file" | "upstream-error";
+import Link from "next/link";
+
+type Reason =
+  | "wrong-provider"
+  | "missing-folder"
+  | "missing-file"
+  | "upstream-error"
+  | "needs-reconnect";
 
 const MESSAGES: Record<Reason, { title: string; body: string }> = {
   "wrong-provider": {
@@ -17,6 +24,10 @@ const MESSAGES: Record<Reason, { title: string; body: string }> = {
     title: "OSF didn't return this file",
     body: "We reached OSF but the file lookup failed. This can happen for permission-restricted files or transient OSF errors. Try again or browse via the tree.",
   },
+  "needs-reconnect": {
+    title: "Your OSF connection expired",
+    body: "OSF rejected the saved connection for this browser, so this file couldn't be loaded. Reconnect OSF and this page will work again. Public files stay readable if you sign out.",
+  },
 };
 
 export function FileMissing({
@@ -34,9 +45,17 @@ export function FileMissing({
       <h2 className="text-lg font-semibold mb-1">{m.title}</h2>
       <p className="text-sm text-neutral-700 dark:text-neutral-300 mb-3">{m.body}</p>
       <p className="text-xs font-mono break-all text-neutral-500 dark:text-neutral-400 mb-3">{attemptedPath}</p>
-      <div className="flex gap-3 text-sm">
-        <a className="underline" href={`/${guid}/files`}>Browse files</a>
-        <a className="underline" href={`/${guid}`}>Project overview</a>
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        {reason === "needs-reconnect" && (
+          <Link
+            className="border rounded px-3 py-1 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40"
+            href="/login"
+          >
+            Reconnect OSF
+          </Link>
+        )}
+        <Link className="underline" href={`/${guid}/files`}>Browse files</Link>
+        <Link className="underline" href={`/${guid}`}>Project overview</Link>
       </div>
     </div>
   );

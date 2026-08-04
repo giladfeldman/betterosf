@@ -11,6 +11,7 @@ export type LogType =
   | "osf"
   | "upload"
   | "delete"
+  | "rename"
   | "db"
   | "admin"
   | "uncaught"
