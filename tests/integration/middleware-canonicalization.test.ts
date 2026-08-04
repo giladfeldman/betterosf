@@ -14,19 +14,19 @@ import { middleware } from "@/middleware";
  */
 describe("middleware canonicalisation runs on localhost (prod parity)", () => {
   it("redirects an uppercase guid to lowercase on localhost", async () => {
-    const res = await middleware(new NextRequest(new URL("http://localhost:3000/3KMR9")));
+    const res = await middleware(new NextRequest(new URL("http://localhost:4747/3KMR9")));
     expect(res.status).toBe(308);
     expect(new URL(res.headers.get("location")!).pathname).toBe("/3kmr9");
   });
 
   it("strips an /overview suffix on localhost", async () => {
-    const res = await middleware(new NextRequest(new URL("http://localhost:3000/3kmr9/overview")));
+    const res = await middleware(new NextRequest(new URL("http://localhost:4747/3kmr9/overview")));
     expect(res.status).toBe(308);
     expect(new URL(res.headers.get("location")!).pathname).toBe("/3kmr9");
   });
 
   it("rewrites /<guid>/files/<fileGuid> to the bare file guid on localhost", async () => {
-    const res = await middleware(new NextRequest(new URL("http://localhost:3000/3kmr9/files/zzzz9")));
+    const res = await middleware(new NextRequest(new URL("http://localhost:4747/3kmr9/files/zzzz9")));
     expect(res.status).toBe(308);
     expect(new URL(res.headers.get("location")!).pathname).toBe("/zzzz9");
   });
@@ -36,7 +36,7 @@ describe("middleware canonicalisation runs on localhost (prod parity)", () => {
     // rate-limit. Far exceed the 60/min anon nav limit; localhost must never 429.
     let res!: Response;
     for (let i = 0; i < 75; i++) {
-      res = await middleware(new NextRequest(new URL("http://localhost:3000/about")));
+      res = await middleware(new NextRequest(new URL("http://localhost:4747/about")));
     }
     expect(res.status).not.toBe(429);
   });

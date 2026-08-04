@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.7.0 — 2026-08-04
+
+### Fixed
+- **Deep file/folder pages no longer die on an expired OSF session.** OSF returns HTTP 401
+  for an expired token, which mapped to `OsfError("unauthorized")` — a code absent from
+  every deep-path walk's catch list, so it rethrew into the route error boundary and
+  replaced the whole page with "Couldn't load this project". Affected only signed-in
+  users; an anonymous request sends no bearer token and can never produce a 401, which is
+  why anonymous QA never caught it. Pages now keep their tree and breadcrumb and offer a
+  **Reconnect OSF** action (`src/lib/osf/walk-failure.ts`, `osfBackpressureKind`).
+- **Empty text files rendered a blank pane** indistinguishable from a crash. A 0-byte file
+  produced zero visible characters via Shiki. Text/code files now show name, size, line
+  and character counts, and an empty or whitespace-only file says so explicitly.
+- **"Upload pending" replaced** with actionable copy: per-file status reads "ready to
+  upload" and the batch button reads "Upload 3 files" / "Upload remaining 2".
+
+### Added
+- **Informative landing page** — what it does, how it works, where your data goes.
+- **Workspace table** with last-opened time, visit count and location; sortable/filterable.
+- **Floating version badge** (bottom-right) sourced from `package.json` via
+  `src/lib/version.ts`; doubles as the bug-report entry point.
+- **Bug reports** — `/feedback` (anonymous allowed), stored in `bug_reports` (Neon EU),
+  emailed to `ADMIN_NOTIFY_EMAIL` via SES from `betterosf@scimeto.app`, triaged at
+  `/admin/feedback`.
+- **Visit statistics** on recents (`lastViewed`, `visits`, `pinnedAt`), all optional so
+  entries from older builds render "—" rather than a fabricated 1970 date.
+
+### Changed
+- **Removed the Many Labs 2 / RPP example links** from the anonymous homepage. Each costs
+  dozens of OSF API calls to open, which put the app's most expensive request one click
+  from every first-time visitor.
+- **Local dev port moved 3000 → 4747.** `npm run dev` / `npm start` pin it; visual-qa
+  gained `--local`. Port 3000 is banned and enforced repo-wide by
+  `tests/unit/dev-port.test.ts`.
+- `betterosf-cleanup` gained **Phase 4.5**: user-facing copy must match shipped features,
+  verified in both directions on every run.
+
+### Security
+- **Protocol-relative URL smuggling in bug reports** (found by cross-model review).
+  `//evil.example/x` starts with `/` but resolves to a different origin, so an anonymous
+  reporter could plant a phishing link that rendered as a trusted clickable link in the
+  admin inbox. Now rejected at intake (`//`, `/\`, `\/`, `\\`), absolute URLs are
+  host-allowlisted, and the admin UI re-validates independently because rows stored
+  before the fix remain in the database.
+- Removed the blanket `taskkill //F //IM node.exe` from the pre-approved command list — it
+  killed every other project's node processes.
+
 ## 1.6.0 — 2026-08-03
 
 ### Added

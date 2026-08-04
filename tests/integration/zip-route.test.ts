@@ -15,7 +15,7 @@ describe("ZIP folder route", () => {
         });
       })
     );
-    const req = new Request("http://localhost:3000/api/zip/ezcuj/osfstorage/data");
+    const req = new Request("http://localhost:4747/api/zip/ezcuj/osfstorage/data");
     const res = await GET(req, { params: Promise.resolve({ guid: "ezcuj", provider: "osfstorage", path: ["data"] }) });
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/zip");
@@ -29,7 +29,7 @@ describe("ZIP folder route", () => {
         new HttpResponse(null, { status: 404 })
       )
     );
-    const req = new Request("http://localhost:3000/api/zip/ezcuj/osfstorage/missing");
+    const req = new Request("http://localhost:4747/api/zip/ezcuj/osfstorage/missing");
     const res = await GET(req, { params: Promise.resolve({ guid: "ezcuj", provider: "osfstorage", path: ["missing"] }) });
     expect(res.status).toBe(404);
   });
@@ -43,13 +43,13 @@ describe("ZIP folder route", () => {
         })
       )
     );
-    const req = new Request("http://localhost:3000/api/zip/ezcuj/osfstorage");
+    const req = new Request("http://localhost:4747/api/zip/ezcuj/osfstorage");
     const res = await GET(req, { params: Promise.resolve({ guid: "ezcuj", provider: "osfstorage", path: undefined }) });
     expect(res.status).toBe(200);
   });
 
   it("rejects invalid guid", async () => {
-    const req = new Request("http://localhost:3000/api/zip/!!!/osfstorage");
+    const req = new Request("http://localhost:4747/api/zip/!!!/osfstorage");
     const res = await GET(req, { params: Promise.resolve({ guid: "!!!", provider: "osfstorage", path: undefined }) });
     expect(res.status).toBe(400);
   });

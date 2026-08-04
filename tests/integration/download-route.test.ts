@@ -18,7 +18,7 @@ describe("/api/files/[guid]/download", () => {
     );
 
     const target = encodeURIComponent("https://files.osf.io/v1/resources/m3p49/providers/osfstorage/html");
-    const req = new Request(`http://localhost:3000/api/files/m3p49/download?u=${target}&name=preregistration.html`);
+    const req = new Request(`http://localhost:4747/api/files/m3p49/download?u=${target}&name=preregistration.html`);
     const res = await GET(req, { params: Promise.resolve({ guid: "m3p49" }) });
 
     expect(res.status).toBe(200);

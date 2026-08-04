@@ -24,7 +24,7 @@ function emptyCollection() {
 
 describe("whole-tree ZIP route", () => {
   it("returns 400 for invalid guid", async () => {
-    const req = new Request("http://localhost:3000/api/zip/!!!");
+    const req = new Request("http://localhost:4747/api/zip/!!!");
     const res = await GET(req, { params: Promise.resolve({ guid: "!!!" }) });
     expect(res.status).toBe(400);
   });
@@ -50,7 +50,7 @@ describe("whole-tree ZIP route", () => {
         })
       ),
     );
-    const req = new Request("http://localhost:3000/api/zip/solo");
+    const req = new Request("http://localhost:4747/api/zip/solo");
     const res = await GET(req, { params: Promise.resolve({ guid: "solo" }) });
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/zip");
@@ -82,7 +82,7 @@ describe("whole-tree ZIP route", () => {
         new HttpResponse(null, { status: 403 })
       ),
     );
-    const req = new Request("http://localhost:3000/api/zip/halfbad");
+    const req = new Request("http://localhost:4747/api/zip/halfbad");
     const res = await GET(req, { params: Promise.resolve({ guid: "halfbad" }) });
     expect(res.status).toBe(200);
     const buf = await res.arrayBuffer();

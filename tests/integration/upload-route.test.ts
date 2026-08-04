@@ -24,7 +24,7 @@ describe("OSF Storage write routes", () => {
     const form = new FormData();
     form.set("file", file);
     for (const [key, value] of Object.entries(fields)) form.set(key, value);
-    return new Request("http://localhost:3000/api/files/ezcuj/upload", { method: "POST", body: form });
+    return new Request("http://localhost:4747/api/files/ezcuj/upload", { method: "POST", body: form });
   }
 
   const validFields = {
@@ -202,7 +202,7 @@ describe("OSF Storage write routes", () => {
         return HttpResponse.json({ data: { id: "new-folder" } });
       })
     );
-    const req = new Request("http://localhost:3000/api/files/ezcuj/folder-create", {
+    const req = new Request("http://localhost:4747/api/files/ezcuj/folder-create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...validFields, name: "New Folder" }),

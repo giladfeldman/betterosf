@@ -23,7 +23,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { OsfError } from "@/lib/osf/types";
-import { classifyWalkFailure } from "@/lib/osf/walk-failure";
+import { classifyWalkFailure, classifyEmptyProviders } from "@/lib/osf/walk-failure";
 
 describe("deep-path walk classification of OSF auth failures", () => {
   it("classifies a 401 as needs-reconnect instead of rethrowing (THE regression)", () => {
@@ -43,5 +43,70 @@ describe("deep-path walk classification of OSF auth failures", () => {
     // A programming error must NOT be silently swallowed into a pretty panel.
     expect(classifyWalkFailure(new TypeError("x is not a function"))).toBeNull();
     expect(classifyWalkFailure(new OsfError(418, "unknown", ""))).toBeNull();
+  });
+});
+
+/**
+ * Gap identified by a cross-model review (codex, 2026-08-04): the classifiers were
+ * pinned, but the route-level branch that stops a 401 from reaching the direct
+ * Waterbutler fallback was not. Without that guard the page would synthesise a
+ * download URL carrying the same rejected token, showing a broken viewer instead of
+ * the reconnect prompt.
+ */
+describe("empty provider list — auth artifact vs genuinely provider-less", () => {
+  it("routes a 401-emptied provider list to the reconnect prompt, NOT the direct-URL fallback", () => {
+    expect(
+      classifyEmptyProviders({
+        unauthorized: true,
+        providerCount: 0,
+        hasProvider: true,
+        hasPathSegments: true,
+      }),
+    ).toBe("needs-reconnect");
+  });
+
+  it("keeps the reconnect verdict even when the fallback's other conditions all hold", () => {
+    // The auth check must win regardless of how fallback-shaped the request looks.
+    expect(
+      classifyEmptyProviders({
+        unauthorized: true,
+        providerCount: 0,
+        hasProvider: true,
+        hasPathSegments: true,
+      }),
+    ).not.toBe("fallback");
+  });
+
+  it("still allows the legitimate fallback for a genuinely provider-less resource", () => {
+    expect(
+      classifyEmptyProviders({
+        unauthorized: false,
+        providerCount: 0,
+        hasProvider: true,
+        hasPathSegments: true,
+      }),
+    ).toBe("fallback");
+  });
+
+  it("reports wrong-provider when providers exist but none matched", () => {
+    expect(
+      classifyEmptyProviders({
+        unauthorized: false,
+        providerCount: 3,
+        hasProvider: true,
+        hasPathSegments: true,
+      }),
+    ).toBe("wrong-provider");
+  });
+
+  it("does not use the fallback when there is no path to build a URL from", () => {
+    expect(
+      classifyEmptyProviders({
+        unauthorized: false,
+        providerCount: 0,
+        hasProvider: true,
+        hasPathSegments: false,
+      }),
+    ).toBe("wrong-provider");
   });
 });

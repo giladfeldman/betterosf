@@ -124,9 +124,14 @@ Production + Development env-var sets work fine via CLI.
 
 ## OSF developer apps only allow one callback URL
 
-OSF's OAuth app registration UI accepts a single Authorization callback URL. We registered the production callback. Local-dev OAuth (`http://localhost:3000/api/auth/callback/osf`) will fail until either:
+OSF's OAuth app registration UI accepts a single Authorization callback URL. We registered the production callback. Local-dev OAuth (`http://localhost:4747/api/auth/callback/osf`) will fail until either:
 
 - OSF supports multiple callback URLs per app (open feature request), or
 - We register a separate dev OAuth app and switch env vars per environment.
 
 Not currently blocking — local dev uses anonymous browsing only.
+
+Note: if a dev OAuth app IS registered later, its callback must use port **4747**
+(BetterOSF's local port — see the "Port 4747, never 3000" rule in `CLAUDE.md`).
+OSF matches the callback URL exactly, so a mismatched port fails the OAuth
+handshake with an opaque error.

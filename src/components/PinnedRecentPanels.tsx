@@ -7,17 +7,6 @@ import { formatAbsoluteTime, formatRelativeTime } from "@/lib/relative-time";
 type Tab = "projects" | "files" | "folders" | "registrations" | "pinned";
 type SortKey = "recent" | "visits" | "title";
 
-/**
- * Shown ONLY on a completely empty workspace, as a way in for first-time
- * visitors. Deliberately not rendered once the user has any history of their
- * own — the homepage used to list these permanently, which the user asked to
- * remove (2026-08-04).
- */
-const EXAMPLE_PROJECTS = [
-  { guid: "8cd4r", title: "Many Labs 2" },
-  { guid: "ezcuj", title: "Reproducibility Project: Psychology" },
-] as const;
-
 const KIND_ICONS: Record<FavoriteKind, string> = {
   project: "🗄",
   component: "🧩",
@@ -248,34 +237,15 @@ export function PinnedRecentPanels({
 
   const totalRecent = recent.length;
 
-  // First run: no history at all. The landing page no longer hardcodes example
-  // projects, so without this a new visitor would face an empty panel with
-  // nothing to click. These are starting points, not defaults, and they vanish
-  // permanently as soon as the user has any history of their own.
-  if (totalRecent === 0 && pins.length === 0) {
-    return (
-      <section aria-labelledby="workspace-heading">
-        <h2 id="workspace-heading" className="mb-2 text-xl font-semibold">Workspace</h2>
-        <p className="mb-4 text-sm text-neutral-600 dark:text-neutral-400">
-          Projects, files, and folders you open will be listed here — with when you last opened them and
-          how often — so you can jump straight back in. Everything stays in this browser.
-        </p>
-        <div className="rounded border border-dashed border-neutral-300 p-4 dark:border-neutral-700">
-          <p className="mb-2 text-sm font-medium">New here? Try an example:</p>
-          <ul className="space-y-1 text-sm">
-            {EXAMPLE_PROJECTS.map((ex) => (
-              <li key={ex.guid}>
-                <a className="text-blue-600 hover:underline dark:text-blue-400" href={`/${ex.guid}`}>
-                  {ex.title}
-                </a>
-                <span className="ml-2 text-xs text-neutral-500">{ex.guid}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </section>
-    );
-  }
+  // First run: no history at all. Render NOTHING rather than an empty shell.
+  //
+  // This used to offer two example projects (Many Labs 2, RPP) as a way in, but
+  // those are among the largest projects on OSF and each costs dozens of API
+  // calls to open — putting the app's most expensive request one click from
+  // every first-time visitor (user report 2026-08-04). The landing page now
+  // explains what BetterOSF does in prose instead, so an empty workspace has
+  // nothing useful to add.
+  if (totalRecent === 0 && pins.length === 0) return null;
 
   return (
     <section aria-labelledby="workspace-heading">

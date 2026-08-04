@@ -6,7 +6,7 @@ import { getNode, getAllLinkedNodes } from "@/lib/osf/nodes";
 import { getNodeRegistrations, getRegistration, type RegistrationView } from "@/lib/osf/registrations";
 import { collectFullTree, EMPTY_TREE, type FullProjectTree } from "@/lib/osf/full-tree";
 import { OsfError } from "@/lib/osf/types";
-import { classifyWalkFailure, type WalkFailureReason } from "@/lib/osf/walk-failure";
+import { classifyWalkFailure, classifyEmptyProviders, type WalkFailureReason } from "@/lib/osf/walk-failure";
 import type { NodeView } from "@/lib/osf/parse";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { UnifiedTree } from "@/components/UnifiedTree";
@@ -147,11 +147,16 @@ export default async function FileViewerPage({
 
   async function walkToFile(): Promise<WalkResult> {
     if (!providerMatch) {
-      // Don't fall back to a direct Waterbutler URL when the provider list is
-      // empty because OSF rejected our token — that URL 401s too, so the user
-      // would get a broken viewer instead of a "reconnect OSF" prompt.
-      if (providerLookupUnauthorized) return { kind: "fail", reason: "needs-reconnect" };
-      if (providers.length === 0 && provider && rest.length > 0) {
+      const emptyKind = classifyEmptyProviders({
+        unauthorized: providerLookupUnauthorized,
+        providerCount: providers.length,
+        hasProvider: Boolean(provider),
+        hasPathSegments: rest.length > 0,
+      });
+      if (emptyKind === "needs-reconnect") return { kind: "fail", reason: "needs-reconnect" };
+      // The `provider` re-check is redundant with `hasProvider` above, but it is
+      // what lets TypeScript narrow `provider` to a string for the URL builders.
+      if (emptyKind === "fallback" && provider) {
         return {
           kind: "ok",
           file: {

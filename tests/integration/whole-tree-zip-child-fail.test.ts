@@ -47,7 +47,7 @@ describe("whole-tree ZIP — partial failure inside a child component", () => {
       http.get("https://api.osf.io/v2/nodes/kid/files/", () => HttpResponse.json({ errors: [{ detail: "boom" }] }, { status: 500 })),
     );
 
-    const req = new Request("http://localhost:3000/api/zip/proj");
+    const req = new Request("http://localhost:4747/api/zip/proj");
     const res = await GET(req, { params: Promise.resolve({ guid: "proj" }) });
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/zip");

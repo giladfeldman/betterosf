@@ -5,20 +5,20 @@ import { GET } from "@/app/api/files/[guid]/folder/route";
 
 describe("/api/files/[guid]/folder", () => {
   it("returns 400 for an invalid guid", async () => {
-    const req = new Request("http://localhost:3000/api/files/!!!/folder?listingUrl=https://api.osf.io/v2/nodes/x/files/osfstorage/");
+    const req = new Request("http://localhost:4747/api/files/!!!/folder?listingUrl=https://api.osf.io/v2/nodes/x/files/osfstorage/");
     const res = await GET(req, { params: Promise.resolve({ guid: "!!!" }) });
     expect(res.status).toBe(400);
   });
 
   it("returns 400 when listingUrl query param is missing", async () => {
-    const req = new Request("http://localhost:3000/api/files/ezcuj/folder");
+    const req = new Request("http://localhost:4747/api/files/ezcuj/folder");
     const res = await GET(req, { params: Promise.resolve({ guid: "ezcuj" }) });
     expect(res.status).toBe(400);
     expect(await res.text()).toMatch(/listingUrl/i);
   });
 
   it("rejects non-OSF listingUrls (SSRF guard)", async () => {
-    const req = new Request("http://localhost:3000/api/files/ezcuj/folder?listingUrl=https://evil.example/x/");
+    const req = new Request("http://localhost:4747/api/files/ezcuj/folder?listingUrl=https://evil.example/x/");
     const res = await GET(req, { params: Promise.resolve({ guid: "ezcuj" }) });
     expect(res.status).toBe(400);
     expect(await res.text()).toMatch(/invalid/i);
@@ -36,7 +36,7 @@ describe("/api/files/[guid]/folder", () => {
         })
       ),
     );
-    const req = new Request("http://localhost:3000/api/files/ezcuj/folder?listingUrl=" + encodeURIComponent("https://api.osf.io/v2/nodes/ezcuj/files/osfstorage/"));
+    const req = new Request("http://localhost:4747/api/files/ezcuj/folder?listingUrl=" + encodeURIComponent("https://api.osf.io/v2/nodes/ezcuj/files/osfstorage/"));
     const res = await GET(req, { params: Promise.resolve({ guid: "ezcuj" }) });
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toContain("max-age=60");

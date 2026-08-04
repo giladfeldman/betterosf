@@ -20,6 +20,30 @@ export type WalkFailureReason = "upstream-error" | "needs-reconnect";
  * send no bearer token and never see a 401, which is why this only ever bit
  * signed-in users and never showed up in anonymous QA.
  */
+/**
+ * Decide what an EMPTY provider list means for the file-view route.
+ *
+ * That route has a long-standing fallback: when a resource reports no providers
+ * at all, it synthesises a direct Waterbutler URL so the file can still be
+ * fetched. That is correct for a genuinely provider-less resource, but WRONG
+ * when the list is empty because OSF rejected our token — the synthesised URL
+ * carries the same dead credential and 401s too, so the user would get a broken
+ * viewer instead of a "reconnect OSF" prompt.
+ *
+ * Returns "needs-reconnect" when the emptiness is an auth artifact, "fallback"
+ * when the direct-URL path is legitimate, and "wrong-provider" otherwise.
+ */
+export function classifyEmptyProviders(opts: {
+  unauthorized: boolean;
+  providerCount: number;
+  hasProvider: boolean;
+  hasPathSegments: boolean;
+}): "needs-reconnect" | "fallback" | "wrong-provider" {
+  if (opts.unauthorized) return "needs-reconnect";
+  if (opts.providerCount === 0 && opts.hasProvider && opts.hasPathSegments) return "fallback";
+  return "wrong-provider";
+}
+
 export function classifyWalkFailure(e: unknown): WalkFailureReason | null {
   if (!(e instanceof OsfError)) return null;
   if (e.code === "unauthorized") return "needs-reconnect";

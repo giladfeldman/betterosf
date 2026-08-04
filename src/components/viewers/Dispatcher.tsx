@@ -51,7 +51,7 @@ export function ViewerDispatcher({
     case "xlsx": return <Xlsx url={url} />;
     case "csv": return <Csv url={url} />;
     case "markdown": return <Markdown url={url} />;
-    case "code": return <Code url={url} filename={filename} />;
+    case "code": return <Code url={url} filename={filename} sizeBytes={sizeBytes} />;
     case "json": return <Json url={url} />;
     case "image": return <Image url={url} alt={filename} />;
     case "svg": return <Svg url={url} alt={filename} />;

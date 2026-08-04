@@ -33,7 +33,7 @@ function body(overrides: Record<string, unknown> = {}) {
 }
 
 function request(payload: unknown) {
-  return new Request(`http://localhost:3000/api/files/${GUID}/rename`, {
+  return new Request(`http://localhost:4747/api/files/${GUID}/rename`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -154,7 +154,7 @@ describe("rename route", () => {
 
     it("rejects a malformed body", async () => {
       const res = await renamePost(
-        new Request(`http://localhost:3000/api/files/${GUID}/rename`, { method: "POST", body: "not json" }),
+        new Request(`http://localhost:4747/api/files/${GUID}/rename`, { method: "POST", body: "not json" }),
         { params: Promise.resolve({ guid: GUID }) }
       );
       expect(res.status).toBe(400);

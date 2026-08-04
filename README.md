@@ -154,9 +154,31 @@ After this release, **provision Vercel KV** at https://vercel.com/your-team/bett
   confirmation is recorded as an electronic signature.
 - Registrations remain immutable — no delete affordance anywhere.
 
+## v1.7.0 (Landing page, version badge, bug reports) — what's new
+
+- **Informative landing page** explaining what BetterOSF does, how it works, and where your
+  data goes. The two heavy example projects were removed — each cost dozens of OSF API
+  calls to open, putting the most expensive request in the app one click from every
+  first-time visitor.
+- **Workspace table** on the homepage: recently-opened projects, files, and folders with
+  when you last opened them, how often, and where they live. Sortable and filterable;
+  stays in your browser.
+- **Floating version badge** (bottom-right) showing the running build, doubling as the
+  entry point to bug reporting.
+- **Bug reports at `/feedback`** — no account needed, no email address required. Reports
+  are stored in Neon (EU) and emailed to the maintainer; triaged at `/admin/feedback`.
+- **Empty text files now say they're empty** instead of rendering a blank pane that looked
+  like a crash. Text/code files show name, size, line and character counts.
+- **Expired OSF sessions fail soft.** A 401 from OSF used to destroy the whole page with
+  "Couldn't load this project"; deep file and folder pages now keep their tree and
+  breadcrumb and offer a "Reconnect OSF" button.
+- **Local dev moved to port 4747.** Port 3000 is banned and enforced by
+  `tests/unit/dev-port.test.ts` — it collides with other local projects and once caused a
+  probe to hit a different app's server entirely.
+
 ## Not yet — possible future work
 
 - Full-text search inside file contents
 - Cross-device favorites sync (pins/prefs sync for signed-in users; local backups stay local by design)
 - Pool of multiple OSF app tokens for higher anonymous quota
-- File rename / move / copy (currently only upload + delete)
+- File move / copy (rename shipped in v1.6.1; upload and delete already supported)

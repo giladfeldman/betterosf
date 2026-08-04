@@ -15,7 +15,7 @@ describe("folder route fresh listing", () => {
         ], links: { next: null } })
       )
     );
-    const req = new Request(`http://localhost:3000/api/files/ezcuj/folder?fresh=1&listingUrl=${encodeURIComponent(listingUrl)}`);
+    const req = new Request(`http://localhost:4747/api/files/ezcuj/folder?fresh=1&listingUrl=${encodeURIComponent(listingUrl)}`);
     const res = await folderGet(req, { params: Promise.resolve({ guid: "ezcuj" }) });
     expect(res.status).toBe(200);
     const body = await res.json();

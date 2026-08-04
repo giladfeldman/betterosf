@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { codeToHtml } from "shiki";
+import { TextMeta } from "./TextMeta";
 
 function extToLang(name: string): string {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
@@ -19,8 +20,17 @@ function extToLang(name: string): string {
   return map[ext] ?? "text";
 }
 
-export function CodeViewer({ url, filename }: { url: string; filename: string }) {
+export function CodeViewer({
+  url,
+  filename,
+  sizeBytes = null,
+}: {
+  url: string;
+  filename: string;
+  sizeBytes?: number | null;
+}) {
   const [html, setHtml] = useState<string | null>(null);
+  const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -29,9 +39,19 @@ export function CodeViewer({ url, filename }: { url: string; filename: string })
       try {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const text = await res.text();
+        const body = await res.text();
+        if (cancelled) return;
+        setText(body);
+
+        // Shiki emits an empty <pre> for empty input, which renders as a blank
+        // pane. Skip highlighting entirely — TextMeta reports the empty state.
+        if (body.length === 0) {
+          setHtml("");
+          return;
+        }
+
         const lang = extToLang(filename);
-        const rendered = await codeToHtml(text, {
+        const rendered = await codeToHtml(body, {
           lang,
           themes: { light: "github-light", dark: "github-dark" },
           defaultColor: false, // emit both themes; we override via CSS
@@ -45,14 +65,18 @@ export function CodeViewer({ url, filename }: { url: string; filename: string })
   }, [url, filename]);
 
   if (error) return <div className="p-4 text-red-600">Failed: {error}</div>;
-  if (html === null) return <div className="p-4 text-neutral-500">Loading…</div>;
+  if (html === null || text === null) return <div className="p-4 text-neutral-500">Loading…</div>;
 
   return (
-    <div
-      className="p-4 text-sm overflow-auto
-                 [&_pre]:!bg-transparent [&_pre]:p-4 [&_pre]:rounded
-                 [&_pre.shiki]:bg-neutral-50 [&_pre.shiki]:dark:bg-neutral-900"
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <div className="p-4 text-sm overflow-auto">
+      <TextMeta filename={filename} text={text} sizeBytes={sizeBytes} />
+      {html && (
+        <div
+          className="[&_pre]:!bg-transparent [&_pre]:p-4 [&_pre]:rounded
+                     [&_pre.shiki]:bg-neutral-50 [&_pre.shiki]:dark:bg-neutral-900"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      )}
+    </div>
   );
 }

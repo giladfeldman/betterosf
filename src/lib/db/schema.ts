@@ -101,4 +101,40 @@ export const emailEvents = pgTable(
   ],
 );
 
+/**
+ * User-submitted bug reports and feedback.
+ *
+ * Anonymous submission is allowed on purpose: BetterOSF's primary audience
+ * browses OSF signed-out, and requiring a login to report a broken page would
+ * lose exactly the reports we most need. `userId` is therefore nullable, and
+ * `contactEmail` is optional — a report with neither is still worth storing.
+ */
+export const bugReports = pgTable(
+  "bug_reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** "bug" | "idea" | "question" — what the reporter said it was. */
+    kind: text("kind").notNull().default("bug"),
+    message: text("message").notNull(),
+    /** Optional reply-to address supplied by the reporter. */
+    contactEmail: text("contact_email"),
+    /** Page the reporter was on — the highest-signal field after the message. */
+    pageUrl: text("page_url"),
+    /** App version, so a report is always tied to a specific build. */
+    appVersion: text("app_version"),
+    userAgent: text("user_agent"),
+    /** Signed-in reporter, when there is one. Survives user deletion as null. */
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    osfUserId: text("osf_user_id"),
+    /** "new" | "triaged" | "resolved" — admin workflow state. */
+    status: text("status").notNull().default("new"),
+    adminNotes: text("admin_notes"),
+  },
+  (t) => [
+    index("bug_reports_created_idx").on(t.createdAt),
+    index("bug_reports_status_created_idx").on(t.status, t.createdAt),
+  ],
+);
+
 // <website-upgrade:schema-end>

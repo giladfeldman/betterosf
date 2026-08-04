@@ -51,7 +51,7 @@ test("whole-project ZIP route responds with application/zip headers", async () =
   // archive is covered by the integration suite.
   test.setTimeout(120_000);
   const controller = new AbortController();
-  const res = await fetch(`http://localhost:3000/api/zip/${PUBLIC_GUID}`, { signal: controller.signal });
+  const res = await fetch(`http://localhost:4747/api/zip/${PUBLIC_GUID}`, { signal: controller.signal });
   expect(res.status).toBe(200);
   expect(res.headers.get("content-type")).toContain("zip");
   expect(res.headers.get("content-disposition") ?? "").toMatch(/\.zip"?$/);

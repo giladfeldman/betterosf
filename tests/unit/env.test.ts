@@ -5,10 +5,10 @@ describe("parseEnv", () => {
   it("parses a valid environment", () => {
     const env = parseEnv({
       OSF_APP_TOKEN: "abc123",
-      NEXT_PUBLIC_BASE_URL: "http://localhost:3000",
+      NEXT_PUBLIC_BASE_URL: "http://localhost:4747",
     });
     expect(env.OSF_APP_TOKEN).toBe("abc123");
-    expect(env.NEXT_PUBLIC_BASE_URL).toBe("http://localhost:3000");
+    expect(env.NEXT_PUBLIC_BASE_URL).toBe("http://localhost:4747");
   });
 
   it("throws when OSF_APP_TOKEN missing", () => {

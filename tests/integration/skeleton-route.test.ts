@@ -5,7 +5,7 @@ import { GET } from "@/app/api/files/[guid]/skeleton/route";
 
 describe("/api/files/[guid]/skeleton", () => {
   it("returns 400 for an invalid guid", async () => {
-    const req = new Request("http://localhost:3000/api/files/!!!/skeleton");
+    const req = new Request("http://localhost:4747/api/files/!!!/skeleton");
     const res = await GET(req, { params: Promise.resolve({ guid: "!!!" }) });
     expect(res.status).toBe(400);
     expect(await res.text()).toMatch(/invalid/i);
@@ -17,7 +17,7 @@ describe("/api/files/[guid]/skeleton", () => {
         HttpResponse.json({ errors: [{ detail: "Not found." }] }, { status: 404 })
       )
     );
-    const req = new Request("http://localhost:3000/api/files/missing/skeleton");
+    const req = new Request("http://localhost:4747/api/files/missing/skeleton");
     const res = await GET(req, { params: Promise.resolve({ guid: "missing" }) });
     expect(res.status).toBe(404);
   });
@@ -38,7 +38,7 @@ describe("/api/files/[guid]/skeleton", () => {
         HttpResponse.json({ data: [], links: { next: null } })
       ),
     );
-    const req = new Request("http://localhost:3000/api/files/happy/skeleton");
+    const req = new Request("http://localhost:4747/api/files/happy/skeleton");
     const res = await GET(req, { params: Promise.resolve({ guid: "happy" }) });
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toContain("no-store");

@@ -44,7 +44,7 @@ function body(overrides: Record<string, unknown> = {}) {
 }
 
 function request(payload: unknown) {
-  return new Request(`http://localhost:3000/api/files/${GUID}/delete`, {
+  return new Request(`http://localhost:4747/api/files/${GUID}/delete`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -225,7 +225,7 @@ describe("delete route", () => {
 
     it("rejects a malformed body", async () => {
       const res = await deletePost(
-        new Request(`http://localhost:3000/api/files/${GUID}/delete`, { method: "POST", body: "not json" }),
+        new Request(`http://localhost:4747/api/files/${GUID}/delete`, { method: "POST", body: "not json" }),
         { params: Promise.resolve({ guid: GUID }) }
       );
       expect(res.status).toBe(400);

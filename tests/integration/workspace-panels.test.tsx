@@ -32,20 +32,31 @@ function seedRecents(entries: unknown[]) {
 }
 
 describe("workspace — empty state", () => {
-  it("shows example projects only when there is no history at all", async () => {
-    render(<PinnedRecentPanels showPinned />);
-    expect(await screen.findByText("Many Labs 2")).toBeInTheDocument();
-    expect(screen.getByText("Reproducibility Project: Psychology")).toBeInTheDocument();
+  /**
+   * The example projects (Many Labs 2, RPP) were REMOVED on 2026-08-04: they are
+   * among the largest projects on OSF and each costs dozens of API calls to
+   * open, which put the app's most expensive request one click from every
+   * first-time visitor. These tests pin that they never come back.
+   */
+  it("renders nothing at all when the visitor has no history", () => {
+    const { container } = render(<PinnedRecentPanels showPinned />);
+    expect(container).toBeEmptyDOMElement();
   });
 
-  it("hides the examples as soon as the user has their own history", async () => {
+  it("never links the heavy example projects", () => {
+    render(<PinnedRecentPanels showPinned />);
+    expect(screen.queryByText(/Many Labs 2/)).toBeNull();
+    expect(screen.queryByText(/Reproducibility Project/)).toBeNull();
+    expect(screen.queryByText(/Try an example/i)).toBeNull();
+  });
+
+  it("appears as soon as the user has their own history", async () => {
     seedRecents([
       { id: "abc12", title: "My Real Project", kind: "project", lastViewed: NOW - 60_000, visits: 3 },
     ]);
     render(<PinnedRecentPanels showPinned />);
     expect(await screen.findByText("My Real Project")).toBeInTheDocument();
-    expect(screen.queryByText("Many Labs 2")).toBeNull();
-    expect(screen.queryByText(/New here\? Try an example/)).toBeNull();
+    expect(screen.queryByText(/Many Labs 2/)).toBeNull();
   });
 });
 

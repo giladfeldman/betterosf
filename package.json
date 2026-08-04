@@ -1,15 +1,15 @@
 {
   "name": "betterosf",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "",
   "main": "index.js",
   "directories": {
     "doc": "docs"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 4747",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 4747",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -8,6 +8,20 @@
       "when": 1784313860789,
       "tag": "0000_init_users_bookmarks_prefs_logs",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785000000000,
+      "tag": "0001_email_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785845655647,
+      "tag": "0002_bug_reports",
+      "breakpoints": true
     }
   ]
 }

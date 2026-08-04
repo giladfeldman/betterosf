@@ -7,14 +7,21 @@
  *
  * Usage:
  *   node tests/visual/visual-qa.mjs
+ *   node tests/visual/visual-qa.mjs --local            # http://localhost:4747
  *   node tests/visual/visual-qa.mjs --base-url=https://betterosf-pr-12.vercel.app
- *   BASE_URL=https://localhost:3000 node tests/visual/visual-qa.mjs
+ *   BASE_URL=http://localhost:4747 node tests/visual/visual-qa.mjs
+ *
+ * BetterOSF's local port is 4747, NOT the ecosystem-default 3000 — 3000 is
+ * routinely occupied by another project, and pointing QA at it once produced a
+ * confident but completely wrong result (the probe hit a different app's
+ * server). Prefer `--local` over hand-typing a port.
  *
  * Base URL resolution (highest to lowest priority):
- *   1. --base-url=<url> or --base-url <url> CLI flag
- *   2. BASE_URL env var
- *   3. BETTEROSF_URL env var (legacy, kept for back-compat)
- *   4. https://betterosf.vercel.app (default)
+ *   1. --local flag (http://localhost:4747)
+ *   2. --base-url=<url> or --base-url <url> CLI flag
+ *   3. BASE_URL env var
+ *   4. BETTEROSF_URL env var (legacy, kept for back-compat)
+ *   5. https://betterosf.vercel.app (default)
  *
  * Optional env:
  *   COLOR_SCHEME — "light" | "dark" (default "dark")
@@ -24,9 +31,13 @@
 import { chromium } from "playwright";
 import { mkdir } from "node:fs/promises";
 
+/** BetterOSF's local port. Deliberately NOT 3000 — see the header comment. */
+const LOCAL_PORT = 4747;
+
 function parseBaseUrl(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+    if (a === "--local") return `http://localhost:${LOCAL_PORT}`;
     if (a.startsWith("--base-url=")) return a.slice("--base-url=".length);
     if (a === "--base-url" && i + 1 < argv.length) return argv[i + 1];
   }
