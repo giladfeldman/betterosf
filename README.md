@@ -61,7 +61,7 @@ Production deploys automatically on every push to `main` via the Vercel GitHub i
 - Daily app-token quota tracking; banner appears if BetterOSF is over its OSF API budget for the day.
 - Privacy and About pages; footer links; mobile responsive sweep; focus-visible keyboard rings.
 
-After this release, **provision Vercel KV** at https://vercel.com/your-team/betterosf/stores to enable persistent rate-limit counters across edge regions. Until then the limits work per-instance with in-memory state (still safe — just less aggressive about persistence).
+After this release, **provision Vercel KV** at https://vercel.com/your-team/betterosf/stores to enable persistent, cross-instance rate-limit counters. Until then the limits fall back to per-lambda-instance in-memory state — a real speed bump against a single runaway client on a single warm instance, but not a distributed control: it does not coordinate across concurrent instances and resets on every cold start or deploy. See `KNOWN_ISSUES.md` and `todo.md` for the exact provisioning steps.
 
 ## v0.6.0 (Plan 6: Navigator + Viewers + Dark Mode) — what's new
 

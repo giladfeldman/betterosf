@@ -1,6 +1,10 @@
 import "server-only";
 
 let kvImpl: typeof import("@vercel/kv") | null = null;
+// Returns null whenever KV_REST_API_URL / KV_REST_API_TOKEN aren't both set, which is
+// the case in production today (KV is not provisioned for this project — see
+// todo.md). null here means every caller below silently drops into the in-memory
+// fallback (see memStore comment); there is no separate "unconfigured" signal.
 function getKv() {
   if (kvImpl !== null) return kvImpl;
   if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) return null;
@@ -10,8 +14,17 @@ function getKv() {
   return kvImpl;
 }
 
-// In-memory fallback used when KV isn't configured (dev + tests).
-// Stores { value, expiresAt } per key. Single-process only.
+// In-memory fallback used whenever KV_REST_API_URL / KV_REST_API_TOKEN are absent
+// (currently: production too — Vercel KV is not provisioned for this project as of
+// 2026-08-04). This Map is per-lambda-instance state: it is NOT shared across
+// concurrent instances, does NOT survive a cold start, and resets on every deploy.
+// Every exported function below silently uses this path instead of throwing or
+// warning, so a caller cannot tell from the return value whether a given increment
+// was counted against a real distributed limit or just this one instance's memory.
+// Net effect: this provides a speed bump against a single runaway client hitting a
+// single warm instance — it provides essentially no protection against concurrent
+// requests landing on different instances, or a caller who simply waits out a cold
+// start. Real capacity control requires Vercel KV; see todo.md for the exact steps.
 const memStore = new Map<string, { value: number; expiresAt: number }>();
 
 function memIncr(key: string, ttlSec: number, by = 1): number {
