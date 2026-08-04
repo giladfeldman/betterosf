@@ -62,6 +62,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <span className="flex gap-4">
               <Link href="/about" className="hover:underline">About</Link>
               <Link href="/bookmarklet" className="hover:underline">Bookmarklet</Link>
+              <Link href="/feedback" className="hover:underline">Report a bug</Link>
               <Link href="/privacy" className="hover:underline">Privacy</Link>
               <a href="https://scirenity.com" className="hover:underline">Scirenity</a>
               <a href="https://github.com/giladfeldman/betterosf" className="hover:underline">GitHub</a>

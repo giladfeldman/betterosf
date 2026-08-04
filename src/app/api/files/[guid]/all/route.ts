@@ -1,6 +1,6 @@
 import { isValidGuid } from "@/lib/osf/guid";
 import { fetchAllProjectEntries } from "@/lib/osf/files-recursive";
-import { OsfError } from "@/lib/osf/types";
+import { osfErrorResponse } from "@/lib/osf/error-response";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -18,7 +18,8 @@ export async function GET(
       headers: { "Cache-Control": "private, max-age=60" },
     });
   } catch (e) {
-    if (e instanceof OsfError && e.code === "not_found") return new Response("Not found", { status: 404 });
+    const mapped = osfErrorResponse(e);
+    if (mapped) return mapped;
     console.error(`[files/${guid}/all] error:`, e);
     return new Response("Could not load this project's files. Please try again later.", { status: 500 });
   }

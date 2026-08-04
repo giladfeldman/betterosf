@@ -36,11 +36,11 @@ const OPERATIONAL_FILES = [
   "tests/visual/visual-qa.mjs",
   "tests/setup.ts",
   "tests/e2e/smoke.spec.ts",
-  "README.md",
-  // CLAUDE.md / AGENTS.md are deliberately NOT listed: they explain *why* 3000
-  // is banned and quote the incident, so they must be allowed to name the port.
-  // The repo-wide sweep below exempts them for the same reason. They are still
-  // covered by the "no localhost:3000 command" check further down.
+  // CLAUDE.md / AGENTS.md / README.md are deliberately NOT listed: they explain
+  // *why* 3000 is banned and quote the incident, so they must be allowed to name
+  // the port. The repo-wide sweep below exempts them for the same reason. They
+  // are still covered by the "no runnable 3000 command" check further down,
+  // which is the rule that actually matters for a doc.
 ];
 
 // `localhost:3000`, `:3000`, `port: 3000`, `-p 3000`, `PORT=3000` — but NOT
@@ -101,15 +101,25 @@ function isExempt(relPath: string): boolean {
   if (p.endsWith("package-lock.json")) return true;
   // This guard itself, which must contain the banned string to test for it.
   if (p.endsWith("tests/unit/dev-port.test.ts")) return true;
-  // The two agent-facing docs explain WHY 3000 is banned, quoting the incident.
-  if (p === "CLAUDE.md" || p === "AGENTS.md") return true;
-  // Historical records of decisions already taken. `lessons.md` and `todo.md`
-  // document the port migration itself, so they necessarily name the old port.
-  // Rewriting them to hide it would erase the reason the rule exists.
-  if (p === "todo.md") return true;
+  // Narrative documentation: these explain WHY 3000 is banned and record the
+  // migration, so they necessarily name the old port. Rewriting them to hide it
+  // would erase the reason the rule exists. They are NOT unguarded — the
+  // "no runnable command" suite below covers them, which is the property that
+  // actually matters for prose: an agent copy-pastes commands, not sentences.
+  if (NARRATIVE_DOCS.has(p)) return true;
   if (p.endsWith("_project/lessons.md") || p.endsWith("LESSONS.md")) return true;
   return false;
 }
+
+/** Docs allowed to *mention* 3000 while explaining the ban or the migration. */
+const NARRATIVE_DOCS = new Set([
+  "CLAUDE.md",
+  "AGENTS.md",
+  "README.md",
+  "CHANGELOG.md",
+  "KNOWN_ISSUES.md",
+  "todo.md",
+]);
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -158,12 +168,9 @@ describe("agent docs may explain the 3000 ban but never instruct using it", () =
   // These files are exempt from the blanket scan (they quote the incident), so
   // they get a narrower rule: prose about 3000 is fine, a runnable command that
   // TARGETS 3000 is not — that is what an agent would actually copy and paste.
-  for (const file of [
-    "CLAUDE.md",
-    "AGENTS.md",
-    "todo.md",
-    ".claude/skills/_project/lessons.md",
-  ]) {
+  // Derived from the exemption set, so exempting a doc can never leave it
+  // unguarded — the two lists cannot drift apart.
+  for (const file of [...NARRATIVE_DOCS, ".claude/skills/_project/lessons.md"]) {
     it(`${file} contains no runnable command pointing at port 3000`, () => {
       const source = read(file);
       const bad = [

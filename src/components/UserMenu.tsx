@@ -30,10 +30,20 @@ export async function UserMenu() {
       <Link href={"/me" as Route} className="hover:underline">
         Dashboard
       </Link>
+      {/* Signed-in-only shortcut: previously users had to know the
+          ?scope=user:me query string to search their own projects. */}
+      <Link href={"/search?scope=user:me" as Route} className="hover:underline">
+        My projects
+      </Link>
       {admin && (
-        <Link href={"/admin/logs" as Route} className="hover:underline">
-          Admin
-        </Link>
+        <>
+          <Link href={"/admin/logs" as Route} className="hover:underline">
+            Logs
+          </Link>
+          <Link href={"/admin/feedback" as Route} className="hover:underline">
+            Feedback
+          </Link>
+        </>
       )}
       <form
         action={async () => {

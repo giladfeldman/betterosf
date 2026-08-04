@@ -18,7 +18,6 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { PinButton } from "@/components/PinButton";
 import { RecordView } from "@/components/RecordView";
 import { CitationExport } from "@/components/CitationExport";
-import { getCitation, getStyledCitation, toBibTeX, toRIS } from "@/lib/osf/citation";
 import { SplitPane } from "@/components/SplitPane";
 import { UnifiedTree } from "@/components/UnifiedTree";
 import { UploadFilesButton } from "@/components/UploadFilesButton";
@@ -248,15 +247,11 @@ export default async function ProjectPage({
   const sortedRegs = sortRegistrations(regs, regSort);
   const regPag = parsePagination(sp, "regSize", "regPage");
 
-  // Citation
-  const citation = await getCitation(guid).catch(() => null);
-  const [apa, mla, chicago] = await Promise.all([
-    getStyledCitation(guid, "apa").catch(() => ""),
-    getStyledCitation(guid, "mla").catch(() => ""),
-    getStyledCitation(guid, "chicago-author-date").catch(() => ""),
-  ]);
-  const bibtex = citation ? toBibTeX(citation, guid) : "";
-  const ris = citation ? toRIS(citation, guid) : "";
+  // Citations are NOT fetched here on purpose. They used to cost 4 blocking OSF
+  // calls per overview render (~40% of the page's OSF budget) for a panel most
+  // visitors never scroll to, which made this page far more likely to trip OSF's
+  // rate limit. CitationExport now loads them on demand via
+  // /api/osf/citation/<guid>.
 
   const cappedNote =
     fullTree.totalComponents > fullTree.components.filter((c) => !c.skipped).length
@@ -502,7 +497,7 @@ export default async function ProjectPage({
             </a>
             <p className="text-xs text-neutral-500 mt-1">Bundles every storage provider, every component, every linked project. Per-provider archives are nested inside the outer ZIP.</p>
           </div>
-          <CitationExport apa={apa} mla={mla} chicago={chicago} bibtex={bibtex} ris={ris} />
+          <CitationExport guid={guid} />
         </aside>
       </div>
     </article>

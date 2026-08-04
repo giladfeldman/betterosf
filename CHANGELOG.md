@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.7.1 — 2026-08-04
+
+Backlog reconciliation: everything in `todo.md` that could be done in-session was
+done, and what remains is now split into "blocked on you" vs "deferred by choice"
+at the top of that file rather than buried in 300 lines of history.
+
+### Fixed
+- **`/api/files/[guid]/folder` mapped an expired OSF token to a 500.** This route is
+  called on *every* tree expand, and the tree renders its message verbatim — so a
+  signed-in user with an expired token saw "Could not load this folder. Please try
+  again later.", advice that can never succeed because retrying does not renew a
+  token. New shared `src/lib/osf/error-response.ts` maps 401/403/429/502 honestly
+  across the folder, skeleton and all-files routes; unknown errors still 500 so real
+  bugs stay loud.
+
+### Changed
+- **Citations are no longer fetched during overview render.** Measured **9 → 5 OSF
+  calls per overview (44% fewer)**. `CitationExport` now loads from
+  `/api/osf/citation/<guid>` on click, so the page paints sooner and is materially
+  less likely to trip OSF's rate limit.
+- **`/feedback` reachable from the footer**, and the admin menu now links the
+  Feedback inbox alongside Logs.
+- **"My projects" in the user menu** — a signed-in shortcut to
+  `/search?scope=user:me`, which previously required knowing the query string.
+- **`drizzle/meta` snapshot resynced.** `drizzle-kit generate` previously emitted a
+  `CREATE TABLE email_events` for a table that already exists in production, which
+  would have failed if applied; it now reports "No schema changes, nothing to
+  migrate".
+- **`betterosf-qa/SKILL.md` trimmed** 382 → 335 lines by extracting
+  `references/destructive-gates.md`. Every safety-critical rule is pinned by a test,
+  so the trim provably dropped nothing.
+
+### Notes
+- Two backlog items ("registration file-view breadcrumb", "per-registration expand
+  state") turned out to be **already implemented** — the entries were stale. Both are
+  now pinned by tests rather than simply ticked off.
+
 ## 1.7.0 — 2026-08-04
 
 ### Fixed
