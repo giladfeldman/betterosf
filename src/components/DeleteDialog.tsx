@@ -20,9 +20,9 @@ import type { TreeSelectionPayload, TreeUploadTarget } from "./tree-types";
 import { OSF_UPLOAD_SCOPE } from "@/lib/auth/osf-provider";
 import { signIn } from "next-auth/react";
 import {
-  TERMS_CLAUSES,
   TERMS_VERSION,
-  DIALOG_CLAUSE_HEADINGS,
+  DIALOG_CLAUSE_IDS,
+  clausesByIds,
   confirmationPhrase,
   confirmationMatches,
   requiresAcknowledgement,
@@ -249,7 +249,11 @@ export function DeleteDialog({ guid, projectTitle, items, restoreTarget, onClose
     }
   }
 
-  const dialogClauses = TERMS_CLAUSES.filter((c) => DIALOG_CLAUSE_HEADINGS.includes(c.heading));
+  // Selected by id, and `clausesByIds` throws on an unknown one. The previous
+  // heading-based filter degraded silently: reword a heading and the clickwrap renders
+  // one clause short while still collecting the typed confirmation — a consent record
+  // for terms that were never shown.
+  const dialogClauses = clausesByIds(DIALOG_CLAUSE_IDS);
 
   return (
     <div

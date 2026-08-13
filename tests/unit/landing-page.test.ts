@@ -74,6 +74,22 @@ describe("the landing page explains what BetterOSF is", () => {
     expect(landing).toContain("/feedback");
   });
 
+  it("surfaces the OSF transition, which is why most visitors now arrive", () => {
+    // Cleanup 2026-08-13: v1.8.0 shipped the whole transition toolkit and the landing page
+    // did not mention it anywhere. Under-selling is drift too — a researcher arriving
+    // because they heard OSF is shutting down must not have to hunt for the one page that
+    // helps them.
+    expect(landing).toMatch(/\/transition/);
+    expect(landing).toMatch(/2027/);
+  });
+
+  it("does not claim that nothing is ever copied off OSF", () => {
+    // That sentence was true until v1.8.0 and is now false: export and transfer copy data
+    // to the user's computer and, optionally, to Zenodo. A stale absolute on the landing
+    // page is a false claim to the public, not a docs nit.
+    expect(landing).not.toMatch(/nothing is copied\s+anywhere else/i);
+  });
+
   it("does not promise features that were never built", () => {
     // Guards against marketing drift: these are things BetterOSF does NOT do.
     const forbidden = [

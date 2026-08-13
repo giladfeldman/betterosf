@@ -122,6 +122,8 @@ const PAGES = [
   { name: "16b-bookmarklet", url: "/bookmarklet" },
   { name: "17-privacy", url: "/privacy" },
   { name: "17b-terms", url: "/terms" },
+  { name: "17c-transition", url: "/transition" },
+  { name: "17d-transition-project", url: `/transition/${MANY_LABS_GUID}` },
   { name: "18-404", url: "/notarealroute/files" },
   ...GUID_TYPES.map((g) => ({ name: `19-guidtype-${g.kind}`, url: `/${g.guid}` })),
 ];
@@ -176,6 +178,12 @@ async function main() {
     const consoleOk = consoleErrors.length === 0;
     record(`${name} HTTP ${status}`, httpOk);
     if (!consoleOk) record(`${name} console errors`, false, `${consoleErrors.length}: ${consoleErrors[0] ?? ""}`);
+    // NOTE: this stores the LIVE array by reference on purpose — a late-arriving console
+    // error (one fired after the per-page check ran, e.g. during a client-side redirect)
+    // still lands in it. The final sweep below re-checks every page at end of run, which
+    // is what makes those late errors gate the build instead of merely appearing in the
+    // summary. Before that sweep existed, a page could print "console-errors:3" and the
+    // suite would still report 93/93 passed. (Found by /ship cleanup, 2026-08-13.)
     collected.push({ name, url, status, consoleErrors });
   }
 
@@ -747,6 +755,70 @@ async function main() {
   await page.waitForTimeout(1500);
   const anonRowDeletes = await page.locator('[role="tree"] button', { hasText: /^delete/i }).count();
   record("anonymous file tree exposes NO row delete buttons", anonRowDeletes === 0, `deleteButtons=${anonRowDeletes}`);
+
+  // --- OSF Transition Toolkit (v1.8.0) ---------------------------------------
+  //
+  // The transition surface reads a user's whole project list and can deposit their data
+  // into a third-party repository, so the thing worth asserting anonymously is that a
+  // signed-out visitor sees NONE of it. `client-components-are-not-an-auth-gate` is the
+  // loaded critical rule here: TransitionGate is a client component, so it is an
+  // affordance, not a control — these checks confirm the affordance holds AND that the
+  // server-side routes refuse independently.
+  await page.goto(`${BASE}/transition`, { waitUntil: "domcontentloaded" });
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  await page.waitForTimeout(1000);
+
+  // The announced dates are the page's whole reason to exist; a blank timeline would be
+  // a silent regression nobody would notice until someone missed a deadline.
+  const transitionBody = await page.locator("body").innerText();
+  record(
+    "transition page states both announced OSF deadlines",
+    transitionBody.includes("2026-11-16") && transitionBody.includes("2027-02-19"),
+    "2026-11-16 + 2027-02-19",
+  );
+  record(
+    "transition page labels the dates as reported, not as advice",
+    /not advice/i.test(transitionBody),
+  );
+
+  // Anonymous must reach the gate, never the inventory.
+  const anonInventoryRows = await page.locator("text=/Check DOIs, wikis and add-ons/i").count();
+  record("anonymous sees NO project inventory on /transition", anonInventoryRows === 0);
+  record(
+    "anonymous is offered sign-in on /transition",
+    /sign in with osf/i.test(transitionBody),
+  );
+  // Least privilege: this feature only reads, and says so.
+  record(
+    "transition sign-in advertises READ-ONLY access",
+    /read-only/i.test(transitionBody),
+  );
+
+  // The server-side gate is the real control. Assert it independently of the UI.
+  //
+  // Probed through Playwright's request context, NOT page.evaluate(fetch). An in-page
+  // fetch that (correctly) 401s emits a console error, and the console listener attached
+  // to the last visited page is still live — so three intentional refusals were being
+  // misattributed to `19-guidtype-file` as if that page were broken. The request context
+  // bypasses the page entirely: same assertion, no phantom console noise.
+  for (const [label, path] of [
+    ["inventory", "/api/transition/inventory"],
+    ["plan", `/api/transition/plan/${MANY_LABS_GUID}`],
+    ["wiki", "/api/transition/wiki/mu4tr"],
+  ]) {
+    const res = await page.request.get(`${BASE}${path}`, { failOnStatusCode: false });
+    record(`anonymous ${label} API is refused (401)`, res.status() === 401, `HTTP ${res.status()}`);
+  }
+
+  // /api/health must stay anonymous and truthful — deploy-drift-check depends on it, and
+  // a health endpoint that needs auth is a health endpoint that cannot be checked.
+  const healthRes = await page.request.get(`${BASE}/api/health`, { failOnStatusCode: false });
+  const healthBody = await healthRes.json().catch(() => null);
+  record(
+    "/api/health is anonymous and reports a version",
+    healthRes.status() === 200 && typeof healthBody?.version === "string",
+    `HTTP ${healthRes.status()} version=${healthBody?.version}`,
+  );
   // Rename is gated on the same deleteUrl presence as Delete — a leaked Rename button
   // for a signed-out visitor would be the same class of bug as the 2026-08-03 incident.
   const anonRowRenames = await page.locator('[role="tree"] button', { hasText: /^rename/i }).count();
@@ -771,6 +843,18 @@ async function main() {
   console.log("\n--- HTTP summary ---");
   for (const c of collected) {
     console.log(`${String(c.status).padStart(3)} ${c.name.padEnd(34)} ${c.consoleErrors.length > 0 ? "console-errors:" + c.consoleErrors.length : ""}`);
+  }
+
+  // Final console-error sweep. Late errors mutate the arrays captured above, so this is
+  // the only place that sees the true total for every page.
+  for (const c of collected) {
+    if (c.consoleErrors.length > 0) {
+      record(
+        `${c.name} console errors (final sweep)`,
+        false,
+        `${c.consoleErrors.length}: ${c.consoleErrors[0] ?? ""}`,
+      );
+    }
   }
 
   const failures = checks.filter((c) => !c.ok);

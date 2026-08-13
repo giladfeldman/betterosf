@@ -4,6 +4,7 @@ import {
   timestamp,
   jsonb,
   uuid,
+  integer,
   uniqueIndex,
   index,
 } from "drizzle-orm/pg-core";
@@ -134,6 +135,44 @@ export const bugReports = pgTable(
   (t) => [
     index("bug_reports_created_idx").on(t.createdAt),
     index("bug_reports_status_created_idx").on(t.status, t.createdAt),
+  ],
+);
+
+/**
+ * Evidence of agreement to the OSF Transition Toolkit terms.
+ *
+ * Only this one transition table exists so far, on purpose. The inventory, job, and
+ * per-file tables land with the features that actually populate them — a declared
+ * column no code writes is a promise to every future reader that the data is there.
+ *
+ * `userId` is nullable with `set null` and `osfUserId` is retained separately, matching
+ * `bug_reports`: a consent record whose subject was deleted still has to be readable as
+ * evidence, and cascading it away would destroy exactly the artifact it exists to be.
+ */
+export const transitionConsents = pgTable(
+  "transition_consents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Nulled rather than deleted if the app user row goes away. */
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    /** Durable identity of who agreed, independent of our own user table. */
+    osfUserId: text("osf_user_id").notNull(),
+    /** Exact TERMS_VERSION agreed to. Matched exactly — never "same or newer". */
+    termsVersion: text("terms_version").notNull(),
+    /** "toolkit" | "job" | "publish" — see src/lib/transition/consent.ts. */
+    scope: text("scope").notNull(),
+    /** Set for job- and publish-scoped consents; null for the toolkit clickwrap. */
+    jobId: text("job_id"),
+    /** The phrase actually typed, for publish scope. Evidence, so stored verbatim. */
+    typedPhrase: text("typed_phrase"),
+    /** The count the user was shown and had to type. Null outside publish scope. */
+    itemCount: integer("item_count"),
+    userAgent: text("user_agent"),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("transition_consents_osf_user_idx").on(t.osfUserId, t.acceptedAt),
+    index("transition_consents_scope_idx").on(t.osfUserId, t.scope, t.termsVersion),
   ],
 );
 

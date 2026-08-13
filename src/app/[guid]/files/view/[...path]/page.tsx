@@ -166,6 +166,10 @@ export default async function FileViewerPage({
             size: null,
             modified: "",
             materializedPath: `/${rest.join("/")}`,
+            // Synthesised from the URL because OSF's listing came back empty; there is
+            // no OSF metadata behind it, so there are no checksums to report.
+            md5: null,
+            sha256: null,
             downloadUrl: directWaterbutlerFileUrl(guid, provider, rest),
           },
         };

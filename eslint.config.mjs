@@ -39,9 +39,19 @@ const eslintConfig = [
   },
   {
     // Test files use `any` for fixtures/mocks — pragmatic and isolated from app code.
+    //
+    // `ignoreRestSiblings` covers the omit-via-rest idiom used to build a fixture that
+    // LACKS a property — `const { deleteUrl: _d, ...readOnly } = writable` in
+    // unified-tree-node.test.tsx. The binding is unused by design; that is the whole
+    // point of the destructure. Without this, the fix people reach for is to delete the
+    // property afterwards, which no longer type-checks the absence.
     files: ["**/*.test.{ts,tsx}", "tests/**/*.{ts,tsx}"],
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { ignoreRestSiblings: true, argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
     },
   },
   {

@@ -19,7 +19,7 @@ function makeIO(seed: Record<string, { name: string; size: number; kind: "file" 
     list: vi.fn(async (t) => (store[t.listingUrl] ?? []).map((e) =>
       e.kind === "folder"
         ? { kind: "folder" as const, id: e.name, name: e.name, materializedPath: `${t.path}${e.name}/`, listingUrl: childUrl(t.listingUrl, e.name), uploadUrl: `wb:${e.name}`, newFolderUrl: `wbnf:${e.name}` }
-        : { kind: "file" as const, id: e.name, name: e.name, size: e.size, modified: "", materializedPath: `${t.path}${e.name}`, downloadUrl: "" }
+        : { kind: "file" as const, id: e.name, name: e.name, size: e.size, modified: "", materializedPath: `${t.path}${e.name}`, downloadUrl: "", md5: null, sha256: null }
     )),
     createFolder: vi.fn(async (t, name) => {
       (store[t.listingUrl] ??= []).push({ name, size: 0, kind: "folder" });

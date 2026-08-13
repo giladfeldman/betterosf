@@ -19,6 +19,17 @@ Double-click `start_app.bat` — it soft-kills anything on port 4747, runs `next
     npm test          # unit + integration
     npm run test:e2e  # Playwright smoke (needs network)
 
+Two suites are deliberately NOT part of `npm test`, CI, or `/ship`, because they act on
+real services. Each is opt-in by environment variable:
+
+    npm run test:destructive   # creates and deletes a throwaway OSF project
+    npm run test:live-zenodo   # round-trips a real deposit on sandbox.zenodo.org
+
+`test:live-zenodo` needs `BETTEROSF_LIVE_ZENODO=i-understand` and a
+`ZENODO_SANDBOX_TOKEN` from a throwaway sandbox account. It refuses to run against
+production Zenodo, never publishes (publishing mints a permanent DOI), and deletes the
+drafts it creates.
+
 ## Deploy
 
 Production deploys automatically on every push to `main` via the Vercel GitHub integration. To deploy manually:
@@ -153,6 +164,30 @@ After this release, **provision Vercel KV** at https://vercel.com/your-team/bett
 - Deletion terms at `/terms`, also shown inline in the delete dialog; the typed
   confirmation is recorded as an electronic signature.
 - Registrations remain immutable — no delete affordance anywhere.
+
+## v1.8.0 (OSF Transition Toolkit) — what's new
+
+COS is winding OSF Projects down — no new projects from **2026-11-16**, everything
+read-only from **2027-02-19**. Public projects stay online read-only indefinitely;
+private-project removal is anticipated later. OSF offers no wiki export and no
+cross-project view, so:
+
+- **`/transition`** — an inventory of every project you can reach, with a recommendation
+  and its reasons per project. Loads in two tiers so hundreds of projects are readable
+  immediately. The default recommendation is **leave it alone**: a public project stays on
+  OSF at the same URL and DOI, and mirroring it elsewhere mints a second DOI.
+- **`/transition/[guid]`** — a checksum-verified export as a BagIt bag with RO-Crate
+  metadata: files *plus* wikis, project metadata and contributors, with a SHA-256
+  manifest, a link crosswalk CSV for repairing citations, and a disclaimer that travels
+  inside the archive.
+- **A Zenodo deposit client**, verified end to end against sandbox.zenodo.org.
+
+File bytes go **browser → OSF** and **browser → Zenodo** directly, so no research data
+passes through BetterOSF's servers at any project size.
+
+An export is only reported as complete when every expected file is accounted for. Files
+OSF supplies no checksum for — normal for Dropbox/Drive/S3 add-on storage — are reported
+as *unverifiable*, never as verified, and are listed individually.
 
 ## v1.7.0 (Landing page, version badge, bug reports) — what's new
 

@@ -21,6 +21,17 @@ export type FileEntry =
       downloadUrl: string;
       /** OSF's own Waterbutler delete link. Optional: absent means no delete affordance. */
       deleteUrl?: string;
+      /**
+       * Checksums OSF reports for this file, when it has them.
+       *
+       * osfstorage supplies both; add-on providers (Dropbox, Drive, S3, GitHub) generally
+       * supply NEITHER, because OSF only proxies those bytes and never hashes them. That
+       * absence is load-bearing: the export verifier uses it to mark a file
+       * `unverifiable` rather than pretending it was checked, so these must stay
+       * `null` when missing and must never be defaulted to an empty string.
+       */
+      md5: string | null;
+      sha256: string | null;
     }
   | {
       kind: "folder";
@@ -44,6 +55,7 @@ type RawEntry = {
     size?: number | null;
     modified?: string;
     materialized_path?: string;
+    extra?: { hashes?: { md5?: string; sha256?: string } };
   };
   relationships?: { files?: { links?: { related?: { href?: string } } } };
   links?: { download?: string; upload?: string; new_folder?: string; delete?: string };
@@ -73,6 +85,8 @@ function parseEntry(raw: RawEntry): FileEntry {
     materializedPath: String(raw.attributes.materialized_path ?? ""),
     downloadUrl: raw.links?.download ?? "",
     deleteUrl: raw.links?.delete,
+    md5: raw.attributes.extra?.hashes?.md5 ?? null,
+    sha256: raw.attributes.extra?.hashes?.sha256 ?? null,
   };
 }
 

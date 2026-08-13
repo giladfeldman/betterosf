@@ -1,5 +1,83 @@
 # Changelog
 
+## 1.8.0 — 2026-08-13
+
+**The OSF Transition Toolkit.** On 2026-08-13 the Center for Open Science announced
+that OSF Projects is being wound down: no new projects or components from
+**2026-11-16**, and every project — public and private — becomes **read-only on
+2027-02-19**, with many API write functions deprecated. Public projects stay online
+read-only indefinitely; COS has said it anticipates removing private projects later,
+with 12 months' notice. Registrations and preprints are unaffected.
+
+OSF offers no wiki export, no cross-project view, and only per-folder "Download as
+Zip". This release is BetterOSF's answer to that.
+
+### Added
+- **`/transition` — an inventory of every project you can reach**, with a computed
+  recommendation per project and the reasons behind it. Loads in two tiers so hundreds
+  of projects are readable in seconds, then enriches (DOI, wikis, add-ons, size) in
+  batches behind a progress line. A row that has not been checked says so; it never
+  shows a blank or a zero that would read as a fact.
+- **`/transition/[guid]` — a complete, checksum-verified export** as a BagIt bag with
+  RO-Crate metadata: files *plus* wikis, project metadata and contributors. Includes a
+  SHA-256 manifest, `Payload-Oxum`, the full report, an `osf-to-destination.csv`
+  crosswalk for repairing links in papers and READMEs, and a `DISCLAIMER.txt` that
+  travels with the data.
+- **OSF readers for everything BetterOSF could not previously see**: wikis (content
+  and version history), comments, activity logs, contributors with ORCID, identifiers,
+  institutions, add-ons, per-file version history, and node storage.
+- **A Zenodo deposit client**, verified end to end against sandbox.zenodo.org, with a
+  guarded live round-trip test (`npm run test:live-zenodo` — sandbox only, opt-in,
+  never publishes, cleans up after itself).
+- **Transition terms and a consent gate.** `src/lib/terms.ts` now has three clause
+  groups (general / delete / transition) and eight new transition clauses. Consent is
+  recorded per terms version in a new `transition_consents` table; no transition API
+  route serves an unconsented caller.
+
+### Changed
+- **Sign-in for the transition toolkit asks for READ-ONLY OSF scope.** Export never
+  writes to OSF, so requesting write would be over-permissioned.
+- **`FileEntry` now carries OSF's `md5`/`sha256`.** They were being parsed away.
+  Absence is preserved as `null` — that is what marks a file `unverifiable` instead of
+  pretending it was checked.
+- **`/terms` renders all three clause groups** with continuous numbering and
+  per-clause anchors.
+
+### Fixed
+- **`DeleteDialog` selected its clickwrap clauses by heading text**, using a filter
+  that silently drops unmatched entries. Rewording a heading would have rendered the
+  dialog a clause short while still collecting the typed confirmation — a consent
+  record for terms the user never saw. Clauses now have stable ids and `clausesByIds`
+  throws on an unknown one.
+- **`npm run lint` was already failing on `main`** (4 warnings against
+  `--max-warnings 0`, in files unrelated to this work). Fixed rather than suppressed.
+
+### Corrected
+- **`docs/osf-exit-strategy.md` §1 and the matching `todo.md` entry were backwards.**
+  They recommended building against figshare first because Zenodo's CORS was believed
+  broken. Live probes on 2026-08-13 found the opposite: **Zenodo works browser-direct**
+  (`ACAO: *`, `authorization` allowed, `PUT` on both `/api/records` and
+  `/api/files/{bucket}/{name}`), while **figshare sends no `Access-Control-Allow-Origin`
+  header at all**. Both documents now record the measurement and why the original call
+  was wrong — it came from documentation and issue trackers rather than a request.
+
+### Verified by live probe, not assumed
+- Waterbutler allows `Range` + `Authorization` from a browser origin and returns 206,
+  so downloads are genuinely resumable client-side.
+- `api.osf.io` sends **no CORS headers at all**, so metadata must be proxied — which is
+  why inventory enrichment is batched (~25× fewer function invocations).
+- Zenodo accepts `/` in file keys, so deposits keep OSF's folder structure.
+- Zenodo multipart upload is **live**, with per-part URLs that **expire after 14 days**.
+- ORCID lives at `external_identity.ORCID`, not `social.orcid` — a 50-user sample found
+  zero users with the latter set. Only VERIFIED ORCIDs are asserted.
+
+### Notes
+- No research bytes pass through Vercel: browser ↔ Waterbutler and browser ↔ Zenodo,
+  both direct. A 200 GB migration costs no server bandwidth.
+- The recommendation engine's default is **do nothing**. Public projects stay on OSF at
+  the same URL and DOI; mirroring them elsewhere mints a second DOI and splits the
+  citation record.
+
 ## 1.7.1 — 2026-08-04
 
 Backlog reconciliation: everything in `todo.md` that could be done in-session was

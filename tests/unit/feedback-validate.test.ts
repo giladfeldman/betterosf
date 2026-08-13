@@ -99,7 +99,6 @@ describe("optional fields are sanitised, never trusted", () => {
   it("drops a javascript: page URL so it can never render as a link in the admin UI", () => {
     const r = validateFeedback({
       message: "check this out",
-      // eslint-disable-next-line no-script-url
       pageUrl: "javascript:alert(1)",
     });
     expect(r.ok && r.value.pageUrl).toBeNull();

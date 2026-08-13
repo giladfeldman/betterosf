@@ -34,6 +34,19 @@ export default function PrivacyPage() {
           counts and daily app-token usage. These expire automatically.
         </li>
         <li>
+          <strong>A record of your agreement to the transition terms</strong>, if you use the export and
+          transfer tools. It stores your OSF user id, which version of the terms you agreed to, when, your
+          browser&apos;s user-agent string, and — where a typed confirmation was required — the phrase you
+          typed and the number of items it covered. This is evidence that you were shown the terms before an
+          irreversible step, so it is kept rather than deleted, and it survives with your OSF id attached even
+          if your BetterOSF account row is removed.
+        </li>
+        <li>
+          <strong>Nothing about the contents of an export.</strong> Files, wikis and metadata you export or
+          transfer move directly between your browser and OSF or the destination repository. They do not pass
+          through BetterOSF&apos;s servers and are not stored by us at any size.
+        </li>
+        <li>
           <strong>Browser localStorage</strong> on your device for preferences, split-pane width, pins, recent
           items, and theme choices (also used when you are signed out; signed-in users sync bookmarks and
           key prefs to Neon).

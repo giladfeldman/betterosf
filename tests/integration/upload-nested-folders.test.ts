@@ -45,7 +45,7 @@ function makeStoreIO(): UploadIO {
       // Mirror OSF so the orchestrator's verify (re-list) finds the file.
       (store[t.listingUrl] ??= []).push({
         kind: "file", id: file.name, name: file.name, size: file.size,
-        modified: "", materializedPath: `${t.path}${file.name}`, downloadUrl: "",
+        modified: "", materializedPath: `${t.path}${file.name}`, downloadUrl: "", md5: null, sha256: null,
       });
     },
   };

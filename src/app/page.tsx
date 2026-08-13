@@ -24,6 +24,11 @@ export const metadata = {
 
 const CAPABILITIES = [
   {
+    title: "Get your projects out before OSF freezes",
+    body:
+      "OSF Projects becomes read-only on 19 February 2027. BetterOSF gives you an inventory of every project you can reach, tells you which ones actually need moving (most public ones do not), and takes a checksum-verified copy of files, wikis, metadata and contributors — the things OSF offers no way to export.",
+  },
+  {
     title: "One tree, every provider",
     body: "OSF splits files across osfstorage, GitHub, Dropbox, Google Drive and more, each behind its own tab. BetterOSF merges them into a single navigator you can expand, filter, and depth-limit.",
   },
@@ -90,6 +95,28 @@ export default function Landing() {
         </p>
       </section>
 
+      {/*
+        The transition banner sits above the fold on purpose. A researcher arriving because
+        they heard OSF is shutting down should not have to scan a capability grid to find
+        the one page that helps them, and the deadline is real.
+      */}
+      <section className="mb-12 rounded-lg border border-amber-300 bg-amber-50 p-5 dark:border-amber-800 dark:bg-amber-950">
+        <h2 className="text-lg font-semibold text-amber-900 dark:text-amber-200">
+          OSF Projects is winding down
+        </h2>
+        <p className="mt-1 text-sm text-amber-900 dark:text-amber-200">
+          No new projects from 16 November 2026; everything becomes read-only on 19 February 2027.
+          Public projects stay online at the same links, so many need nothing at all — but private
+          ones are worth a verified copy.
+        </p>
+        <Link
+          href="/transition"
+          className="mt-3 inline-block rounded bg-amber-900 px-4 py-2 text-sm font-medium text-white dark:bg-amber-200 dark:text-amber-950"
+        >
+          See what your projects need
+        </Link>
+      </section>
+
       {/* Workspace — only renders once the visitor has history of their own. */}
       <div className="mb-12">
         <PinnedRecentPanels showPinned />
@@ -99,8 +126,9 @@ export default function Landing() {
       <section className="mb-12">
         <h2 className="mb-1 text-2xl font-semibold">What it does</h2>
         <p className="mb-6 text-neutral-600 dark:text-neutral-400">
-          BetterOSF is a reader for OSF, not a replacement. Your data stays on OSF; nothing is copied
-          anywhere else.
+          BetterOSF is a reader for OSF, not a replacement. Browsing copies nothing. When you ask it to
+          export or transfer a project, the files move directly between your browser and OSF or the
+          destination repository — never through our servers.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
           {CAPABILITIES.map((c) => (

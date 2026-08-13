@@ -12,6 +12,8 @@ export type LogType =
   | "upload"
   | "delete"
   | "rename"
+  /** OSF Transition Toolkit: consent, inventory crawls, export and deposit runs. */
+  | "transition"
   | "db"
   | "admin"
   | "uncaught"
