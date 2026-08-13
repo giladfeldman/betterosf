@@ -4,13 +4,16 @@ import { useCallback, useEffect, useState } from "react";
 import { signIn } from "next-auth/react";
 import { TransitionClickwrap } from "./TransitionClickwrap";
 import { OSF_READ_SCOPE } from "@/lib/auth/osf-provider";
+import { readApiError, networkError, type ApiError } from "@/lib/api-error";
+import { ErrorNotice } from "@/components/ErrorNotice";
+import { Working } from "@/components/Progress";
 
 type ConsentState =
   | { phase: "loading" }
   | { phase: "signed-out" }
   | { phase: "needs-consent" }
   | { phase: "ready" }
-  | { phase: "error"; message: string };
+  | { phase: "error"; error: ApiError };
 
 /**
  * Decides what the transition page shows: sign-in, the clickwrap, or the tool.
@@ -27,15 +30,15 @@ export function TransitionGate({ children }: { children: React.ReactNode }) {
     try {
       const res = await fetch("/api/transition/consent", { cache: "no-store" });
       if (!res.ok) {
-        setState({ phase: "error", message: "Could not check your consent status." });
+        setState({ phase: "error", error: await readApiError(res, "/api/transition/consent") });
         return;
       }
       const data: { signedIn: boolean; consented: boolean } = await res.json();
       if (!data.signedIn) setState({ phase: "signed-out" });
       else if (!data.consented) setState({ phase: "needs-consent" });
       else setState({ phase: "ready" });
-    } catch {
-      setState({ phase: "error", message: "Could not reach BetterOSF." });
+    } catch (e) {
+      setState({ phase: "error", error: networkError("/api/transition/consent", e) });
     }
   }, []);
 
@@ -44,17 +47,16 @@ export function TransitionGate({ children }: { children: React.ReactNode }) {
   }, [check]);
 
   if (state.phase === "loading") {
-    return <p className="text-sm text-neutral-600 dark:text-neutral-400">Checking your account…</p>;
+    return <Working>Checking your account…</Working>;
   }
 
   if (state.phase === "error") {
     return (
-      <div className="rounded border border-red-300 bg-red-50 p-4 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-        <p>{state.message}</p>
-        <button type="button" onClick={() => void check()} className="mt-2 underline">
-          Try again
-        </button>
-      </div>
+      <ErrorNotice
+        error={state.error}
+        title="Could not check your account"
+        onRetry={() => void check()}
+      />
     );
   }
 

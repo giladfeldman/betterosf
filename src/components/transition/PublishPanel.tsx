@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { clausesByIds } from "@/lib/terms";
+import { readApiError, networkError, type ApiError } from "@/lib/api-error";
+import { ErrorNotice } from "@/components/ErrorNotice";
+import { Spinner } from "@/components/Progress";
 
 type RecordSummary = { recordId: string; draftUrl: string; futureRecordUrl: string; fileCount: number };
 
@@ -10,7 +13,7 @@ type PublishState =
   | { phase: "loading" }
   | { phase: "confirming"; recordId: string; phrase: string; fileCount: number }
   | { phase: "publishing"; recordId: string }
-  | { phase: "error"; message: string };
+  | { phase: "error"; error: ApiError };
 
 type Published = { doi: string | null; url: string };
 
@@ -59,14 +62,14 @@ export function PublishPanel({
         `/api/transition/publish?jobId=${encodeURIComponent(jobId)}&recordId=${encodeURIComponent(recordId)}`,
         { cache: "no-store" },
       );
-      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setState({ phase: "error", message: body.error ?? `Could not prepare publishing (HTTP ${res.status}).` });
+        setState({ phase: "error", error: await readApiError(res, "/api/transition/publish") });
         return;
       }
+      const body = await res.json().catch(() => ({}));
       setState({ phase: "confirming", recordId, phrase: body.phrase, fileCount: body.fileCount });
-    } catch {
-      setState({ phase: "error", message: "Could not reach BetterOSF." });
+    } catch (e) {
+      setState({ phase: "error", error: networkError("/api/transition/publish", e) });
     }
   }
 
@@ -78,15 +81,16 @@ export function PublishPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId, recordId, typedPhrase: typed }),
       });
-      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setState({ phase: "error", message: body.error ?? `Zenodo refused to publish (HTTP ${res.status}).` });
+        setState({ phase: "error", error: await readApiError(res, "/api/transition/publish") });
         return;
       }
+      const body = await res.json().catch(() => ({}));
       setPublished((prev) => ({ ...prev, [recordId]: { doi: body.doi, url: body.url } }));
       setState({ phase: "idle" });
-    } catch {
-      setState({ phase: "error", message: "Could not reach BetterOSF. Nothing was published." });
+    } catch (e) {
+      const err = networkError("/api/transition/publish", e);
+      setState({ phase: "error", error: { ...err, action: "Nothing was published." } });
     }
   }
 
@@ -128,9 +132,9 @@ export function PublishPanel({
       </p>
 
       {state.phase === "error" ? (
-        <p className="mt-3 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-          {state.message}
-        </p>
+        <div className="mt-3">
+          <ErrorNotice error={state.error} title="Could not publish" />
+        </div>
       ) : null}
 
       {allPublished ? (
@@ -208,11 +212,15 @@ export function PublishPanel({
                 type="button"
                 disabled={state.phase === "loading" || state.phase === "publishing"}
                 onClick={() => void beginPublish(r.recordId)}
-                className="mt-2 rounded border border-neutral-400 px-3 py-1 text-sm disabled:opacity-40 dark:border-neutral-600"
+                className="mt-2 inline-flex items-center gap-2 rounded border border-neutral-400 px-3 py-1 text-sm disabled:opacity-40 dark:border-neutral-600"
               >
-                {state.phase === "publishing" && state.recordId === r.recordId
-                  ? "Publishing…"
-                  : "Publish this record…"}
+                {state.phase === "publishing" && state.recordId === r.recordId ? (
+                  <>
+                    <Spinner /> Publishing…
+                  </>
+                ) : (
+                  "Publish this record…"
+                )}
               </button>
             )}
           </li>

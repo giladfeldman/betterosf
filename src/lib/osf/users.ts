@@ -61,8 +61,22 @@ type RawNode = Parameters<typeof parseNode>[0]["data"];
 
 type NodeCollectionResponse = {
   data: RawNode[];
-  links: { next: string | null };
+  /**
+   * ⚠️ The collection total is at **`links.meta.total`**, not top-level `meta`.
+   *
+   * Measured live 2026-08-13: top-level `meta` is `{"version":"2.0"}`, while
+   * `links.meta` is `{"total":443,"per_page":10}`. Code that read `raw.meta.total`
+   * therefore always fell through to `data.length` and reported one PAGE as the
+   * whole count — an unknown wearing the costume of a fact.
+   */
+  links: { next: string | null; meta?: { total?: number; per_page?: number } };
 };
+
+/** OSF's own count of a collection, or null when it did not say. Never a page length. */
+function collectionTotal(links: NodeCollectionResponse["links"]): number | null {
+  const total = links?.meta?.total;
+  return typeof total === "number" && Number.isFinite(total) ? total : null;
+}
 
 export async function searchUserNodes(
   userId: string,
@@ -114,13 +128,47 @@ export async function searchUserNodes(
 /** First page (up to 100) of a user's PUBLIC projects, with the total count.
  *  Bounded to one request so a prolific user's profile doesn't fan out. */
 export async function getUserNodes(userId: string): Promise<{ results: NodeView[]; total: number }> {
-  const raw = await osfGet<NodeCollectionResponse & { meta?: { total?: number } }>(
-    `/users/${userId}/nodes/?page[size]=100`,
-    { tags: [`user:${userId}`], revalidate: 300 },
-  );
+  const raw = await osfGet<NodeCollectionResponse>(`/users/${userId}/nodes/?page[size]=100`, {
+    tags: [`user:${userId}`],
+    revalidate: 300,
+  });
   return {
     results: raw.data.map((r) => parseNode({ data: r })),
-    total: raw.meta?.total ?? raw.data.length,
+    // Falls back to the page length only when OSF gave no total — in which case
+    // it is the honest floor, not a claim about the collection.
+    total: collectionTotal(raw.links) ?? raw.data.length,
+  };
+}
+
+export type MyProjectsPage = {
+  nodes: NodeView[];
+  /** URL for the next page, verbatim from OSF. Null on the last page. */
+  next: string | null;
+  /** OSF's count of the whole collection, or null when it did not report one. */
+  total: number | null;
+};
+
+/**
+ * ONE page of the signed-in user's projects.
+ *
+ * The paged form exists because the all-at-once form is a 27-second silent wait
+ * on a 443-project account (measured 2026-08-13, 5–7s per upstream page). The
+ * inventory now asks for pages and renders each as it lands, so the first
+ * hundred projects are on screen in seconds and the progress bar has a real
+ * denominator instead of a guess.
+ */
+export async function getMyProjectsPage(cursor?: string): Promise<MyProjectsPage> {
+  const raw = cursor
+    ? await osfGetUrl<NodeCollectionResponse>(cursor, { tags: ["users:me"], revalidate: 60 })
+    : await osfGet<NodeCollectionResponse>("/users/me/nodes/?page[size]=100", {
+        tags: ["users:me"],
+        revalidate: 60,
+      });
+
+  return {
+    nodes: raw.data.map((r) => parseNode({ data: r })),
+    next: raw.links?.next ?? null,
+    total: collectionTotal(raw.links),
   };
 }
 

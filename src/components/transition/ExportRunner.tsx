@@ -8,6 +8,9 @@ import { downloadBlob } from "@/lib/backup/download";
 import { keepScreenAwake } from "@/lib/transition/wake-lock";
 import { ZenodoTransferPanel } from "./ZenodoTransferPanel";
 import { formatBytes } from "@/lib/transition/format";
+import { readApiError, networkError, type ApiError } from "@/lib/api-error";
+import { ErrorNotice } from "@/components/ErrorNotice";
+import { Working } from "@/components/Progress";
 import { fetchExtras } from "./plan-extras";
 import { Stat } from "./Stat";
 import type { PlanResponse } from "./plan-types";
@@ -27,7 +30,7 @@ type Destination = "local" | "zenodo";
 export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: string }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [plan, setPlan] = useState<PlanResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [result, setResult] = useState<ExportResult | null>(null);
@@ -40,15 +43,14 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
     try {
       const res = await fetch(`/api/transition/plan/${guid}`, { cache: "no-store" });
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setError(body.error ?? `Could not read this project (HTTP ${res.status}).`);
+        setError(await readApiError(res, `/api/transition/plan/${guid}`));
         setPhase("error");
         return;
       }
       setPlan(await res.json());
       setPhase("preflight");
-    } catch {
-      setError("Could not reach BetterOSF.");
+    } catch (e) {
+      setError(networkError(`/api/transition/plan/${guid}`, e));
       setPhase("error");
     }
   }, [guid]);
@@ -80,8 +82,8 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
       // arrived through /transition.
       const tokenRes = await fetch("/api/transition/osf-token", { cache: "no-store" });
       if (!tokenRes.ok) {
-        const body = await tokenRes.json().catch(() => ({}));
-        throw new Error(body.error ?? "Could not get an OSF access token. Sign in again and retry.");
+        const err = await readApiError(tokenRes, "/api/transition/osf-token");
+        throw new Error(err.action ? `${err.message} ${err.action}` : err.message);
       }
       const { token } = await tokenRes.json();
 
@@ -113,7 +115,16 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
       setResult(r);
       setPhase("done");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "The export failed.");
+      setError({
+        message: e instanceof Error ? e.message : "The export failed.",
+        action: "Nothing on OSF was changed. Anything already downloaded is still on your computer.",
+        code: "export_failed",
+        status: 0,
+        detail: e instanceof Error ? `${e.name}: ${e.message}` : null,
+        requestId: null,
+        at: new Date().toISOString(),
+        endpoint: null,
+      });
       setPhase("error");
     } finally {
       await wakeLock.release();
@@ -121,19 +132,15 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
   }
 
   if (phase === "loading") {
-    return <p className="text-sm text-neutral-600 dark:text-neutral-400">Reading this project from OSF…</p>;
+    return (
+      <Working>
+        Reading this project from OSF — files, wikis, contributors and checksums…
+      </Working>
+    );
   }
 
-  if (phase === "error") {
-    return (
-      <div className="rounded border border-red-300 bg-red-50 p-4 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-        <p>{error}</p>
-        <p className="mt-2">Nothing on OSF was changed.</p>
-        <button type="button" onClick={() => void load()} className="mt-2 underline">
-          Try again
-        </button>
-      </div>
-    );
+  if (phase === "error" && error) {
+    return <ErrorNotice error={error} title="Could not read this project" onRetry={() => void load()} />;
   }
 
   if (!plan) return null;

@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { recommend, actionLabel, type Action, type ProjectFacts } from "@/lib/transition/recommend";
 import { describeStorageUnknown, type StorageUsage } from "@/lib/transition/storage-usage";
+import { readApiError, networkError, type ApiError } from "@/lib/api-error";
+import { ErrorNotice } from "@/components/ErrorNotice";
+import { ProgressBar, Spinner } from "@/components/Progress";
 
 type Project = {
   guid: string;
@@ -29,21 +32,33 @@ const BATCH = 10;
 /**
  * The inventory.
  *
- * Two tiers, because a researcher with 300 projects should not stare at a spinner. Tier 1
- * (title, visibility, dates) renders as soon as it arrives; tier 2 (DOI, add-ons, wikis,
- * size) fills in batch by batch behind a visible progress line. A row that has not been
- * enriched yet says so — it never shows a blank or a zero that would read as a fact.
+ * Two tiers, because a researcher with 400 projects should not stare at a spinner. Tier 1
+ * (title, visibility, dates) renders PAGE BY PAGE as it arrives; tier 2 (DOI, add-ons,
+ * wikis, size) fills in batch by batch behind a visible progress bar. A row that has not
+ * been enriched yet says so — it never shows a blank or a zero that would read as a fact.
  *
- * Enrichment is sequential by batch on purpose. Firing 30 batches at once would be faster
+ * Tier 1 used to arrive all at once, which on a real 443-project account meant **27
+ * seconds** behind a single static line of text (measured 2026-08-13). That is
+ * indistinguishable from a hang, and was reported as one. Now each page renders on
+ * arrival, against a denominator OSF itself supplies, so the wait is visibly a wait.
+ *
+ * Enrichment is sequential by batch on purpose. Firing 40 batches at once would be faster
  * for one user and a good way to trip OSF's rate limiter for everyone.
  */
 export function InventoryTable() {
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [enriched, setEnriched] = useState<Record<string, Enrichment>>({});
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [enrichDone, setEnrichDone] = useState(0);
   const [enriching, setEnriching] = useState(false);
   const [filter, setFilter] = useState<Action | "all">("all");
+  /** OSF's own count of the collection, so the bar has a real denominator. */
+  const [expectedTotal, setExpectedTotal] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  /** Batches that failed. Those rows stay "not checked" — a gap, never a zero. */
+  const [enrichFailures, setEnrichFailures] = useState(0);
+  /** Non-null when some pages loaded and a later one failed — a PARTIAL list. */
+  const [partial, setPartial] = useState<ApiError | null>(null);
   const cancelled = useRef(false);
 
   useEffect(() => {
@@ -55,17 +70,71 @@ export function InventoryTable() {
 
   const load = useCallback(async () => {
     setLoadError(null);
+    setPartial(null);
+    setProjects(null);
+    setEnriched({});
+    setEnrichDone(0);
+    setExpectedTotal(null);
+    setLoadingMore(true);
+
+    const collected: Project[] = [];
+    let cursor: string | null = null;
+    // A cap, so a broken `next` link cannot spin forever. 100 pages x 100 =
+    // 10,000 projects, far beyond any real account; hitting it is reported, not
+    // silently truncated.
+    const MAX_PAGES = 100;
+
     try {
-      const res = await fetch("/api/transition/inventory", { cache: "no-store" });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setLoadError(body.error ?? `Could not load your projects (HTTP ${res.status}).`);
-        return;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        if (cancelled.current) return;
+        const endpoint = `/api/transition/inventory${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`;
+
+        let res: Response;
+        try {
+          res = await fetch(endpoint, { cache: "no-store" });
+        } catch (e) {
+          const err = networkError("/api/transition/inventory", e);
+          if (collected.length > 0) setPartial(err);
+          else setLoadError(err);
+          return;
+        }
+
+        if (!res.ok) {
+          const err = await readApiError(res, "/api/transition/inventory");
+          // A failure AFTER some pages landed is different from a failure with
+          // nothing: the list on screen is real but incomplete, and saying so is
+          // the whole point of this feature.
+          if (collected.length > 0) setPartial(err);
+          else setLoadError(err);
+          return;
+        }
+
+        const data: { projects: Project[]; nextCursor: string | null; total: number | null } =
+          await res.json();
+
+        collected.push(...data.projects);
+        if (data.total !== null) setExpectedTotal(data.total);
+        // Render what has arrived, every page, rather than at the end.
+        setProjects([...collected]);
+
+        cursor = data.nextCursor;
+        if (!cursor) return;
+
+        if (page === MAX_PAGES - 1) {
+          setPartial({
+            message: `Stopped after ${MAX_PAGES} pages. This list is not complete.`,
+            action: "Report this — an account this large is worth handling properly.",
+            code: "page_cap",
+            status: 0,
+            detail: `Collected ${collected.length} projects before stopping.`,
+            requestId: null,
+            at: new Date().toISOString(),
+            endpoint: "/api/transition/inventory",
+          });
+        }
       }
-      const data: { projects: Project[] } = await res.json();
-      setProjects(data.projects);
-    } catch {
-      setLoadError("Could not reach BetterOSF.");
+    } finally {
+      setLoadingMore(false);
     }
   }, []);
 
@@ -77,6 +146,7 @@ export function InventoryTable() {
     if (!projects) return;
     setEnriching(true);
     setEnrichDone(0);
+    setEnrichFailures(0);
     const pending = projects.map((p) => p.guid);
 
     for (let i = 0; i < pending.length; i += BATCH) {
@@ -95,11 +165,14 @@ export function InventoryTable() {
             for (const p of data.projects) next[p.guid] = p;
             return next;
           });
+        } else {
+          // A failed batch leaves those rows un-enriched, which the table shows
+          // as "not checked". Better a visible gap than a fabricated value — but
+          // the gap has to be COUNTED, or the run looks like it succeeded.
+          setEnrichFailures((n) => n + 1);
         }
-        // A failed batch leaves those rows un-enriched, which the table shows as
-        // "not checked". Better a visible gap than a fabricated value.
       } catch {
-        /* same reasoning — leave the rows un-enriched */
+        setEnrichFailures((n) => n + 1);
       }
       setEnrichDone(Math.min(i + BATCH, pending.length));
     }
@@ -152,17 +225,25 @@ export function InventoryTable() {
 
   if (loadError) {
     return (
-      <div className="rounded border border-red-300 bg-red-50 p-4 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-        <p>{loadError}</p>
-        <button type="button" onClick={() => void load()} className="mt-2 underline">
-          Try again
-        </button>
-      </div>
+      <ErrorNotice
+        error={loadError}
+        title="Could not load your projects"
+        onRetry={() => void load()}
+      >
+        <p>Nothing on OSF was changed. Your projects are unaffected — this is only the list.</p>
+      </ErrorNotice>
     );
   }
 
   if (!projects) {
-    return <p className="text-sm text-neutral-600 dark:text-neutral-400">Loading your projects…</p>;
+    return (
+      <ProgressBar
+        done={0}
+        total={expectedTotal}
+        label="Reading your projects from OSF…"
+        sublabel="OSF returns them a hundred at a time. They appear here as each page arrives."
+      />
+    );
   }
 
   if (projects.length === 0) {
@@ -177,17 +258,52 @@ export function InventoryTable() {
 
   return (
     <div>
+      {loadingMore ? (
+        <div className="mb-4">
+          <ProgressBar
+            done={projects.length}
+            total={expectedTotal}
+            label="Loading your projects…"
+            sublabel="You can start reading the ones below while the rest arrive."
+          />
+        </div>
+      ) : null}
+
+      {partial ? (
+        <div className="mb-4">
+          <ErrorNotice
+            error={partial}
+            title="This list is incomplete"
+            onRetry={() => void load()}
+            retryLabel="Reload the whole list"
+          >
+            <p>
+              {projects.length}
+              {expectedTotal ? ` of ${expectedTotal}` : ""} projects loaded before this failed. What
+              is shown is real, but do not treat it as everything you have.
+            </p>
+          </ErrorNotice>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-sm text-neutral-700 dark:text-neutral-300">
           <strong>{projects.length}</strong> {projects.length === 1 ? "project" : "projects"}
+          {loadingMore && expectedTotal ? (
+            <span className="text-neutral-500"> of {expectedTotal} so far</span>
+          ) : null}
         </p>
         <button
           type="button"
           onClick={() => void enrichAll()}
-          disabled={enriching}
-          className="rounded border border-neutral-400 px-3 py-1 text-sm disabled:opacity-50 dark:border-neutral-600"
+          disabled={enriching || loadingMore}
+          className="inline-flex items-center gap-2 rounded border border-neutral-400 px-3 py-1 text-sm disabled:opacity-50 dark:border-neutral-600"
+          title={loadingMore ? "Waiting for the full list first" : undefined}
         >
-          {enriching ? `Checking… ${enrichDone}/${projects.length}` : "Check DOIs, wikis and add-ons"}
+          {enriching ? <Spinner /> : null}
+          {enriching
+            ? `Checking… ${enrichDone} of ${projects.length}`
+            : "Check DOIs, wikis and add-ons"}
         </button>
         {Object.keys(counts).length > 0 ? (
           <div className="flex flex-wrap gap-2 text-xs">
@@ -204,6 +320,28 @@ export function InventoryTable() {
           </div>
         ) : null}
       </div>
+
+      {enriching ? (
+        <div className="mt-4">
+          <ProgressBar
+            done={enrichDone}
+            total={projects.length}
+            label="Checking DOIs, wikis and add-ons…"
+            sublabel={
+              enrichFailures > 0
+                ? `${enrichFailures} batch(es) failed so far — those rows stay "not checked" rather than showing a made-up value.`
+                : "Done in batches of 10, deliberately, so this does not trip OSF's rate limiter."
+            }
+          />
+        </div>
+      ) : null}
+
+      {!enriching && enrichFailures > 0 ? (
+        <p className="mt-3 rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          {enrichFailures} batch(es) could not be checked, so some rows below still say &ldquo;not
+          checked yet&rdquo;. That is a gap, not a zero — run the check again to fill them in.
+        </p>
+      ) : null}
 
       <p className="mt-3 text-xs text-neutral-600 dark:text-neutral-400">
         Suggestions are generated automatically from project metadata. They are not advice, and

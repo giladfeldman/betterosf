@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.9.1 — 2026-08-13
+
+**Errors that say what happened, and waits that look like waits.** Both reported from
+production within an hour of v1.9.0.
+
+### Fixed
+- **Every OSF error message in the app was being thrown away.** `osfErrorResponse` returned
+  a plain-**text** body while every caller reads errors with `res.json()` — the parse threw,
+  the catch swallowed it, and a carefully written "Your OSF connection expired. Reconnect
+  OSF and try again." reached the user as **"Could not load your projects (HTTP 401)"**. The
+  server had worked out exactly what was wrong and the answer never got out. Six routes were
+  affected. Error bodies are now JSON with `error`, `code`, `action`, `detail`, `requestId`
+  and `at`, and the client reads the body as text *first* so it can never lose a message
+  again — JSON, plain text, or an HTML page from a gateway.
+- **`/transition` looked hung for accounts with many projects.** It walked every page of the
+  node list in one request before rendering anything: measured on a real 443-project
+  account, **5 upstream pages, 27 seconds**, behind one static line of text. It was also
+  unsafe — five pages at up to 16s each could exceed the function's 60s ceiling and die with
+  a 504. The inventory now fetches one page per request and renders each on arrival, so the
+  first hundred projects appear in about six seconds.
+- **`getUserNodes` reported a page length as the collection total.** OSF puts the count at
+  `links.meta.total`, not top-level `meta` (measured: `{"total":443,"per_page":10}`), so the
+  lookup always missed and fell through to `data.length` — a user with 443 public projects
+  was shown "100".
+
+### Added
+- **A shared error surface** (`ErrorNotice`): what happened, what to do about it, and a
+  collapsed *Technical details* panel with status, code, endpoint, timestamp and a request
+  id, with a copy button. The id is written to the server log in the same breath, and
+  `/admin/logs` already searches log context — so a user quoting `req_ab12cd34` is enough
+  for an admin to find the full entry, including the upstream body the browser never sees.
+  A test pins that seam, because each half can be correct while the pair is useless.
+- **An expired OSF token now offers a Reconnect button**, not just a retry that cannot work.
+- **Real progress affordances** (`ProgressBar`, `Spinner`, `Working`): determinate where a
+  denominator genuinely exists, indeterminate with a live count where it does not, and
+  `prefers-reduced-motion` respected. Wired into the inventory load, the enrichment pass,
+  the consent check, the project preflight, the Zenodo connection check and publishing.
+- **Enrichment failures are counted and shown.** Failed batches already left rows saying
+  "not checked" rather than inventing a value, but nothing said how many — so a partly
+  failed pass looked like a complete one.
+- **A partly loaded list says so.** If page 3 of 5 fails, the projects on screen are real and
+  the banner says the list is incomplete rather than letting it read as everything.
+
 ## 1.9.0 — 2026-08-13
 
 **The transfer leg.** v1.8.0 shipped the half that gets data *out* of OSF (a verified

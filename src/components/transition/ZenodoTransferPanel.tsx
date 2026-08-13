@@ -11,6 +11,9 @@ import { keepScreenAwake, wakeLockSupported } from "@/lib/transition/wake-lock";
 import { clausesByIds, TERMS_VERSION } from "@/lib/terms";
 import { formatBytes } from "@/lib/transition/format";
 import { downloadBlob } from "@/lib/backup/download";
+import { readApiError, networkError, type ApiError } from "@/lib/api-error";
+import { ErrorNotice } from "@/components/ErrorNotice";
+import { Working } from "@/components/Progress";
 import { fetchExtras } from "./plan-extras";
 import { Stat } from "./Stat";
 import { PublishPanel } from "./PublishPanel";
@@ -46,7 +49,7 @@ export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; 
   const [runPhase, setRunPhase] = useState<RunPhase>("idle");
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [result, setResult] = useState<TransferResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
   const [resumable, setResumable] = useState<{ jobId: string; records: { recordId: string }[] } | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
@@ -54,16 +57,12 @@ export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; 
   const checkConnection = useCallback(async () => {
     try {
       const res = await fetch("/api/zenodo/session", { cache: "no-store" });
-      if (res.status === 503) {
-        const body = await res.json().catch(() => ({}));
-        setConnection({
-          phase: "unavailable",
-          message: body.error ?? "Zenodo is not configured on this deployment.",
-        });
-        return;
-      }
       if (!res.ok) {
-        setConnection({ phase: "unavailable", message: "Could not check your Zenodo connection." });
+        // 503 means the deployment has no Zenodo credentials; anything else is a
+        // real failure. Both read the same way to the user, and the server's own
+        // wording says which it was.
+        const err = await readApiError(res, "/api/zenodo/session");
+        setConnection({ phase: "unavailable", message: `${err.message} ${err.action ?? ""}`.trim() });
         return;
       }
       const body: { connected: boolean; site: string; env: string; expiresAt: number | null } = await res.json();
@@ -72,8 +71,9 @@ export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; 
           ? { phase: "connected", site: body.site, env: body.env, expiresAt: body.expiresAt }
           : { phase: "disconnected", site: body.site, env: body.env },
       );
-    } catch {
-      setConnection({ phase: "unavailable", message: "Could not reach BetterOSF." });
+    } catch (e) {
+      const err = networkError("/api/zenodo/session", e);
+      setConnection({ phase: "unavailable", message: `${err.message} ${err.action ?? ""}`.trim() });
     }
   }, []);
 
@@ -151,12 +151,12 @@ export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; 
         fetch("/api/zenodo/token", { cache: "no-store" }),
       ]);
       if (!osfTokenRes.ok) {
-        const body = await osfTokenRes.json().catch(() => ({}));
-        throw new Error(body.error ?? "Could not get an OSF access token. Sign in again and retry.");
+        const err = await readApiError(osfTokenRes, "/api/transition/osf-token");
+        throw new Error(err.action ? `${err.message} ${err.action}` : err.message);
       }
       if (!zenodoTokenRes.ok) {
-        const body = await zenodoTokenRes.json().catch(() => ({}));
-        throw new Error(body.error ?? "Your Zenodo connection is not usable. Connect again and retry.");
+        const err = await readApiError(zenodoTokenRes, "/api/zenodo/token");
+        throw new Error(err.action ? `${err.message} ${err.action}` : err.message);
       }
       const { token: osfToken } = await osfTokenRes.json();
       const { token: zenodoToken, env } = await zenodoTokenRes.json();
@@ -205,13 +205,21 @@ export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; 
       // aborted without reason") makes a deliberate act look like a crash — and hides the
       // one thing they need to know, which is that the run can be picked up again.
       const stopped = e instanceof DOMException && e.name === "AbortError";
-      setError(
-        stopped
-          ? "Transfer stopped. The Zenodo draft keeps everything already verified — starting again continues from there."
+      setError({
+        message: stopped
+          ? "Transfer stopped."
           : e instanceof Error
             ? e.message
             : "The transfer failed.",
-      );
+        action:
+          "Nothing on OSF was changed. The Zenodo draft keeps every file already verified, so starting again continues from there rather than re-uploading.",
+        code: stopped ? "stopped_by_user" : "transfer_failed",
+        status: 0,
+        detail: stopped ? null : e instanceof Error ? `${e.name}: ${e.message}` : null,
+        requestId: null,
+        at: new Date().toISOString(),
+        endpoint: null,
+      });
       setRunPhase("error");
 
       // Offer to continue, but only with the record ids the ledger actually holds. A
@@ -237,7 +245,11 @@ export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; 
   }
 
   if (connection.phase === "checking") {
-    return <p className="mt-4 text-sm text-neutral-600 dark:text-neutral-400">Checking your Zenodo connection…</p>;
+    return (
+      <div className="mt-4">
+        <Working>Checking your Zenodo connection…</Working>
+      </div>
+    );
   }
 
   if (connection.phase === "unavailable") {
@@ -390,12 +402,8 @@ export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; 
   return (
     <div className="mt-4">
       {runPhase === "error" && error ? (
-        <div className="mb-4 rounded border border-red-300 bg-red-50 p-4 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-          <p>{error}</p>
-          <p className="mt-2">
-            Nothing on OSF was changed. Any draft already created is still in your Zenodo account — starting
-            again picks up where this left off.
-          </p>
+        <div className="mb-4">
+          <ErrorNotice error={error} title="The transfer did not finish" />
         </div>
       ) : null}
 

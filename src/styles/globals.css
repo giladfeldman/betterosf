@@ -62,3 +62,27 @@ html, body { font-family: ui-sans-serif, system-ui, sans-serif; }
     display: block !important;
   }
 }
+
+/*
+  Indeterminate progress stripe (src/components/Progress.tsx).
+
+  Used only when the denominator is genuinely unknown — a bar that guesses a
+  percentage is worse than one that admits it cannot. Respects
+  prefers-reduced-motion: the stripe stops moving and simply sits there, which
+  still reads as "in progress" without animating for someone who asked us not to.
+*/
+@keyframes indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[indeterminate_1\.4s_ease-in-out_infinite\] {
+    animation: none;
+    transform: translateX(100%);
+  }
+}
