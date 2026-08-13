@@ -18,6 +18,13 @@ type Project = {
   parentId: string | null;
 };
 
+/** A recorded export or transfer, so a 443-project list can say what is finished. */
+type DoneRun = {
+  destination: "local" | "zenodo";
+  status: string;
+  updatedAt: string;
+};
+
 type Enrichment = {
   hasDoi: boolean | null;
   doi: string | null;
@@ -57,6 +64,8 @@ export function InventoryTable() {
   const [loadingMore, setLoadingMore] = useState(false);
   /** Batches that failed. Those rows stay "not checked" — a gap, never a zero. */
   const [enrichFailures, setEnrichFailures] = useState(0);
+  /** Runs already recorded for these projects, so the list says what is done. */
+  const [doneByGuid, setDoneByGuid] = useState<Record<string, DoneRun>>({});
   /** Non-null when some pages loaded and a later one failed — a PARTIAL list. */
   const [partial, setPartial] = useState<ApiError | null>(null);
   const cancelled = useRef(false);
@@ -141,6 +150,37 @@ export function InventoryTable() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // What has already been done. Best-effort and non-blocking: the inventory is
+  // useful without it, and a missing history must never be shown as "nothing done"
+  // — the rows simply carry no badge, which claims nothing either way.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/transition/jobs", { cache: "no-store" });
+        if (!res.ok) return;
+        const data: {
+          jobs: { guid: string; destination: string; status: string; updatedAt: string }[];
+        } = await res.json();
+        const latest: Record<string, DoneRun> = {};
+        for (const j of data.jobs) {
+          const prev = latest[j.guid];
+          // Newest run per project wins: re-running after a failure is the normal
+          // way to fix one, and the old failure is not the current state.
+          if (!prev || j.updatedAt > prev.updatedAt) {
+            latest[j.guid] = {
+              destination: j.destination === "zenodo" ? "zenodo" : "local",
+              status: j.status,
+              updatedAt: j.updatedAt,
+            };
+          }
+        }
+        setDoneByGuid(latest);
+      } catch {
+        /* no history is not an error, and must not be shown as "none done" */
+      }
+    })();
+  }, []);
 
   const enrichAll = useCallback(async () => {
     if (!projects) return;
@@ -286,6 +326,14 @@ export function InventoryTable() {
         </div>
       ) : null}
 
+      {!loadingMore ? <NextSteps
+        total={projects.length}
+        needsAttention={(counts.back_up ?? 0) + (counts.migrate ?? 0) + (counts.review ?? 0)}
+        enrichedAny={Object.keys(enriched).length > 0}
+        doneCount={Object.keys(doneByGuid).length}
+        onShowAttention={() => setFilter(counts.migrate ? "migrate" : counts.back_up ? "back_up" : "review")}
+      /> : null}
+
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-sm text-neutral-700 dark:text-neutral-300">
           <strong>{projects.length}</strong> {projects.length === 1 ? "project" : "projects"}
@@ -360,13 +408,36 @@ export function InventoryTable() {
                   {project.public ? "public" : "private"}
                 </span>
               </h3>
-              <span className={badgeClass(recommendation.action)}>
-                {actionLabel(recommendation.action)}
-              </span>
+              <div className="flex items-center gap-2">
+                {doneByGuid[project.guid] ? <DoneBadge run={doneByGuid[project.guid]!} /> : null}
+                <span className={badgeClass(recommendation.action)}>
+                  {actionLabel(recommendation.action)}
+                </span>
+              </div>
             </div>
 
             <p className="mt-1 text-sm text-neutral-700 dark:text-neutral-300">
               {recommendation.headline}
+            </p>
+
+            {/*
+              The link that was missing. Until this shipped, /transition/[guid] — the
+              export and Zenodo transfer, the entire point of the toolkit — had no entry
+              point anywhere in the app: the only way in was to type the URL. An inventory
+              that recommends an action and then offers no way to take it is a list, not a
+              tool.
+            */}
+            <p className="mt-2">
+              <Link
+                href={`/transition/${project.guid}`}
+                className={
+                  recommendation.action === "leave"
+                    ? "text-sm underline"
+                    : "inline-block rounded bg-neutral-900 px-3 py-1 text-sm font-medium text-white dark:bg-white dark:text-neutral-900"
+                }
+              >
+                {rowActionLabel(recommendation.action, Boolean(doneByGuid[project.guid]))}
+              </Link>
             </p>
 
             <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-neutral-600 dark:text-neutral-400">
@@ -502,4 +573,124 @@ export function formatBytes(bytes: number): string {
   const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / 1024 ** i;
   return `${i === 0 ? value : value.toFixed(value < 10 ? 1 : 0)} ${units[i]}`;
+}
+
+/**
+ * The call to action per row.
+ *
+ * Every one of them goes to the same place — the per-project page, where the export and
+ * the Zenodo transfer live. Only the wording changes, so the button reads as the answer to
+ * the suggestion beside it rather than as generic navigation.
+ *
+ * "Leave it" still gets a link, deliberately, and a quiet one. The recommendation to leave
+ * a finished public project on OSF is a real recommendation, not a locked door: someone who
+ * wants a copy of it anyway is entitled to one without hunting for the way in.
+ */
+function rowActionLabel(action: Action, alreadyDone: boolean): string {
+  if (alreadyDone) return "Open it again →";
+  switch (action) {
+    case "back_up":
+      return "Back it up →";
+    case "migrate":
+      return "Move it →";
+    case "review":
+      return "Take a look →";
+    case "leave":
+      return "Take a copy anyway →";
+  }
+}
+
+/** What a previous run did, stated plainly — including when it did not finish. */
+function DoneBadge({ run }: { run: DoneRun }) {
+  const complete = run.status === "complete";
+  const where = run.destination === "zenodo" ? "Transferred" : "Exported";
+  const when = run.updatedAt.slice(0, 10);
+  return (
+    <span
+      title={`${where} ${when} — run reported "${run.status}"`}
+      className={`rounded px-2 py-0.5 text-xs font-medium ${
+        complete
+          ? "bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-200"
+          : "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+      }`}
+    >
+      {complete ? `${where} ${when}` : `${where} — incomplete`}
+    </span>
+  );
+}
+
+/**
+ * The orientation panel: what to actually do with 443 rows.
+ *
+ * It exists because the inventory answered "what does BetterOSF think about each of these"
+ * and never answered "so what do I do now", which is the only question a researcher opening
+ * this page actually has. The numbered steps are the real workflow, and the counts make the
+ * job finite: most projects need nothing, and the ones that do are a much shorter list.
+ */
+function NextSteps({
+  total,
+  needsAttention,
+  enrichedAny,
+  doneCount,
+  onShowAttention,
+}: {
+  total: number;
+  needsAttention: number;
+  enrichedAny: boolean;
+  doneCount: number;
+  onShowAttention: () => void;
+}) {
+  return (
+    <div className="mb-6 rounded border border-neutral-300 bg-neutral-50 p-4 dark:border-neutral-700 dark:bg-neutral-900">
+      <h2 className="text-sm font-semibold">What to do now</h2>
+      <ol className="mt-2 space-y-2 text-sm text-neutral-700 dark:text-neutral-300">
+        <li>
+          <strong>1. Sharpen the suggestions.</strong>{" "}
+          {enrichedAny ? (
+            <span>
+              Done — the checked rows now use real DOI, wiki, add-on and size information.
+            </span>
+          ) : (
+            <span>
+              Press <em>Check DOIs, wikis and add-ons</em> above. Until then every suggestion is
+              based on visibility and dates alone, and each row says which facts it has not
+              checked.
+            </span>
+          )}
+        </li>
+        <li>
+          <strong>2. Work through the ones that need something.</strong>{" "}
+          {needsAttention > 0 ? (
+            <>
+              <button type="button" onClick={onShowAttention} className="underline">
+                {needsAttention} of your {total} projects
+              </button>{" "}
+              have a suggestion other than &ldquo;leave it&rdquo;. The rest can stay on OSF exactly
+              where they are.
+            </>
+          ) : (
+            <>
+              Nothing here is flagged: all {total} can stay on OSF at the same link. You can still
+              take a copy of anything you want one of.
+            </>
+          )}
+        </li>
+        <li>
+          <strong>3. Open a project to export or transfer it.</strong> Each row has a button that
+          opens its own page, where you choose between downloading a checksum-verified archive and
+          transferring it to Zenodo. BetterOSF handles one project at a time — there is no bulk
+          run, deliberately, because each one needs its own decision about where it should go.
+        </li>
+      </ol>
+      {doneCount > 0 ? (
+        <p className="mt-3 text-sm text-neutral-700 dark:text-neutral-300">
+          <strong>{doneCount}</strong> {doneCount === 1 ? "project has" : "projects have"} a recorded
+          run — those rows are badged so you can see where you got to.
+        </p>
+      ) : null}
+      <p className="mt-3 text-xs text-neutral-600 dark:text-neutral-400">
+        Nothing on this page changes anything on OSF, and BetterOSF never deletes anything from it.
+      </p>
+    </div>
+  );
 }

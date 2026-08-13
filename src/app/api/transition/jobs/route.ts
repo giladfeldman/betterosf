@@ -16,8 +16,17 @@ export const runtime = "nodejs";
 const jobSchema = z.object({
   jobId: z.string().uuid(),
   guid: z.string().min(1).max(20),
-  destination: z.literal("zenodo"),
-  env: z.enum(["sandbox", "production"]),
+  /**
+   * "local" — a verified export downloaded to the researcher's own computer.
+   * "zenodo" — a deposit in their Zenodo account.
+   *
+   * Both are recorded, because the question the inventory has to answer for a
+   * 443-project account is "which of these have I already dealt with", and an
+   * answer that silently omitted every local export would be worse than none.
+   */
+  destination: z.enum(["local", "zenodo"]),
+  /** "none" is a local export, which has no Zenodo instance. Never "sandbox" by default. */
+  env: z.enum(["sandbox", "production", "none"]),
   status: z.enum(["running", "complete", "incomplete", "abandoned"]),
   records: z
     .array(z.object({ recordId: z.string().min(1).max(64), fileCount: z.number().int().min(0) }))

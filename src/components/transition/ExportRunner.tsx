@@ -6,6 +6,7 @@ import { opfsAvailable } from "@/lib/transition/stage-opfs";
 import { clausesByIds, TRANSITION_DIALOG_CLAUSE_IDS, TERMS_VERSION } from "@/lib/terms";
 import { downloadBlob } from "@/lib/backup/download";
 import { keepScreenAwake } from "@/lib/transition/wake-lock";
+import { createBrowserLedger } from "@/lib/transition/ledger";
 import { ZenodoTransferPanel } from "./ZenodoTransferPanel";
 import { formatBytes } from "@/lib/transition/format";
 import { readApiError, networkError, type ApiError } from "@/lib/api-error";
@@ -114,6 +115,26 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
       });
       setResult(r);
       setPhase("done");
+
+      // Record the run, so the inventory can answer "which of these have I already
+      // dealt with" for an account with hundreds of projects. Best-effort: a
+      // checkpoint that fails must never turn a completed export into an error, and
+      // the archive is already in the browser either way.
+      await createBrowserLedger()
+        .saveJob({
+          jobId: crypto.randomUUID(),
+          guid: plan.guid,
+          destination: "local",
+          // A local export has no Zenodo instance, and saying "sandbox" would be a
+          // false statement about where this person's data went.
+          env: "none",
+          status: r.verdict.status === "complete" ? "complete" : "incomplete",
+          records: [],
+          fileCount: plan.files.length,
+          bytesTotal: totalBytes,
+          updatedAt: new Date().toISOString(),
+        })
+        .catch(() => {});
     } catch (e) {
       setError({
         message: e instanceof Error ? e.message : "The export failed.",

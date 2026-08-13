@@ -78,7 +78,17 @@ export type TransferProgress = {
 export type TransferJobSnapshot = {
   jobId: string;
   guid: string;
-  env: ZenodoAuth["env"];
+  /** Where the copy went. A local export is a run too, and counts as one. */
+  destination: "local" | "zenodo";
+  /**
+   * Which Zenodo instance — or `"none"` for a local export, which has none.
+   *
+   * Writing "sandbox" here for a download would be a false statement about where
+   * somebody's data went, and the publish route reads this field to refuse a
+   * cross-environment publish. "none" is the honest value and it fails that
+   * check closed, which is the correct outcome: a local export cannot be published.
+   */
+  env: ZenodoAuth["env"] | "none";
   status: "running" | "complete" | "incomplete" | "abandoned";
   /**
    * Record id per shard, in shard order. File paths are deliberately NOT stored: shard
@@ -240,6 +250,7 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
       .saveJob({
         jobId: opts.jobId,
         guid: plan.guid,
+        destination: "zenodo",
         env: zenodo.env,
         status,
         records: records.map((r) => ({ recordId: r.recordId, fileCount: r.paths.length })),

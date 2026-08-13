@@ -214,7 +214,7 @@ export function createBrowserLedger(options: { syncToServer?: boolean } = {}): B
           body: JSON.stringify({
             jobId: job.jobId,
             guid: job.guid,
-            destination: "zenodo",
+            destination: job.destination,
             env: job.env,
             status: job.status,
             records: job.records,

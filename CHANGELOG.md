@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.10.0 — 2026-08-13
+
+**The inventory now leads somewhere.** Reported by the user, looking at 443 loaded
+projects: *"now what do I do? where is the actual transitioning?"*
+
+### Fixed
+- **🚨 Nothing in the app linked to `/transition/[guid]`.** The export and the Zenodo
+  transfer — everything v1.8.0 and v1.9.0 built — were reachable only by typing the URL.
+  The inventory listed every project with a recommendation and then offered no way to act
+  on it, and the project title linked to the ordinary browse page instead. The feature was
+  deployed, tested, and unreachable. This is the UI form of a rule the project already
+  had: *a module imported only by its own test is not shipped*; a page nothing links to is
+  not shipped either. Every row now has a button that opens its own transition page,
+  labelled as the suggestion beside it — *Back it up →*, *Move it →*, *Take a look →* —
+  and "leave it" gets a quiet *Take a copy anyway →*, because leaving a project on OSF is a
+  recommendation, not a locked door. A test fails if the last link to the feature is ever
+  removed again, and was verified by deleting the link and watching it go red.
+
+### Added
+- **A "What to do now" panel.** The inventory answered "what does BetterOSF think of each
+  of these" and never "so what do I do", which is the only question someone opening it
+  actually has. Three numbered steps — check the facts, work through the ones that need
+  something, open a project to export or transfer it — with the counts that make the job
+  finite. It also states plainly that there is no bulk run, and why: each project needs its
+  own decision about where it should go.
+- **Rows show what you have already done.** For an account with hundreds of projects,
+  "where did I get to" is the question that makes the list workable. Completed runs are
+  badged with the destination and date, and an incomplete run is badged as **incomplete**
+  rather than quietly counted as done. A missing history shows no badge at all rather than
+  claiming nothing was done.
+- **Local exports are recorded too.** Only Zenodo transfers were, so the progress view
+  would have silently omitted every download — the more common action of the two. A local
+  run stores `env: "none"`, because writing "sandbox" would be a false statement about
+  where somebody's data went, and it fails the publish route's environment check closed,
+  which is the correct outcome for a download.
+
 ## 1.9.1 — 2026-08-13
 
 **Errors that say what happened, and waits that look like waits.** Both reported from
