@@ -240,6 +240,19 @@ export type ReconciliationInput = {
   results: FileVerification[];
   /** Destination keys observed after the run, when the destination can be listed. */
   destinationKeys?: string[] | null;
+  /**
+   * Reasons this run cannot be called complete, whatever the per-file counts say.
+   *
+   * For checks that did not RUN, as opposed to checks that failed. The case that created
+   * this: the destination listing could not be fetched, so `destinationKeys` was `null` —
+   * an honest "no third opinion" that nonetheless let every remaining condition pass and
+   * reported COMPLETE. A sub-check whose failure renders as a clean result is the exact
+   * defect this module exists to prevent, and counting it as a file failure would be a
+   * different lie (no file failed).
+   *
+   * (Codex consult 2026-08-13; reproduced in tests/integration/transition-transfer.test.ts.)
+   */
+  blockers?: string[];
 };
 
 export type ReconciliationVerdict = {
@@ -250,6 +263,19 @@ export type ReconciliationVerdict = {
   extra: string[];
   failed: { path: string; problems: string[] }[];
   unverifiable: string[];
+  /** Checks that could not run. Non-empty means the run is `incomplete` by definition. */
+  blockers: string[];
+  /**
+   * Destination keys that more than one source file maps to, NFC-normalised.
+   *
+   * Machine-readable, unlike the prose entry in `failed`, because a caller has to be able
+   * to find the affected rows and refuse to describe them as verified. A file that another
+   * one overwrote passed its own checks at the moment it ran — so its `FileVerification`
+   * honestly says `verified`, and any artefact that repeats that without the collision
+   * context is telling a researcher their file is fine when its bytes are gone.
+   * (Sonnet consult 2026-08-13; reproduced in the crosswalk CSV before fixing.)
+   */
+  collisions: string[];
   /** Plain-English summary, safe to show verbatim. */
   summary: string;
 };
@@ -263,6 +289,7 @@ export type ReconciliationVerdict = {
  * looked at nothing.
  */
 export function reconcile(input: ReconciliationInput): ReconciliationVerdict {
+  const blockers = input.blockers ?? [];
   const expectedIds = new Set(input.expected.map((f) => f.osfFileId));
   const resultIds = new Set(input.results.map((r) => r.osfFileId));
 
@@ -290,6 +317,8 @@ export function reconcile(input: ReconciliationInput): ReconciliationVerdict {
       extra,
       failed: [],
       unverifiable: [],
+      blockers,
+      collisions: [],
       summary:
         "Nothing was transferred: the plan contained no files. This is NOT a successful export — " +
         "check that the right project and content types were selected.",
@@ -308,6 +337,8 @@ export function reconcile(input: ReconciliationInput): ReconciliationVerdict {
   const transferred = [...verified, ...unverifiable];
   const destinationMissing: string[] = [];
   const collisions: string[] = [];
+  /** The colliding keys themselves, for callers that must find the affected rows. */
+  const collidingKeys: string[] = [];
 
   if (input.destinationKeys) {
     const keys = new Set(input.destinationKeys);
@@ -328,11 +359,13 @@ export function reconcile(input: ReconciliationInput): ReconciliationVerdict {
   }
   for (const [path, count] of seenPaths) {
     if (count > 1) {
+      collidingKeys.push(path);
       collisions.push(`${path} (${count} source files map to this one destination key)`);
     }
   }
 
   const complete =
+    blockers.length === 0 &&
     missing.length === 0 &&
     extra.length === 0 &&
     failed.length === 0 &&
@@ -355,6 +388,8 @@ export function reconcile(input: ReconciliationInput): ReconciliationVerdict {
       })),
     ],
     unverifiable: unverifiable.map((u) => u.path),
+    blockers,
+    collisions: collidingKeys,
     summary: complete
       ? unverifiable.length > 0
         ? `All ${input.expected.length} files transferred. ${verified.length} were checksum-verified; ` +
@@ -363,6 +398,9 @@ export function reconcile(input: ReconciliationInput): ReconciliationVerdict {
         : `All ${input.expected.length} files transferred and checksum-verified.`
       : `INCOMPLETE. ${verified.length} of ${input.expected.length} verified; ` +
         `${failed.length} failed, ${allMissing.length} missing, ${extra.length} unexpected. ` +
+        (blockers.length > 0
+          ? `${blockers.length} check(s) could not be run: ${blockers.join(" ")} `
+          : "") +
         `Do not treat this export as a complete copy.`,
   };
 }

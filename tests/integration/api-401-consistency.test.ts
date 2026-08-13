@@ -50,7 +50,12 @@ describe("/api/files/[guid]/folder maps OSF failures honestly", () => {
     // renew an expired token.
     expect(body).toMatch(/reconnect/i);
     expect(body).not.toMatch(/try again later/i);
-  });
+    // 20 s, not the 5 s default. This is the FIRST test to `import()` the route, so it pays
+    // for compiling that whole module graph, and under a full parallel run it has timed out
+    // at 5 s while passing in 155 ms alone (observed 2026-08-13). The assertion is about a
+    // status code, not latency — and a critical regression test that flakes is worse than a
+    // slow one, because the next person re-runs it and moves on.
+  }, 20_000);
 
   it("returns 403 for a genuinely forbidden folder, distinct from expired auth", async () => {
     getFolderContents.mockRejectedValue(new OsfError(403, "forbidden", "forbidden"));

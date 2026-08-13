@@ -5,7 +5,7 @@ import { getNode } from "@/lib/osf/nodes";
 import { getProviderRoots, getFolderContents, type FileEntry } from "@/lib/osf/files";
 import { getNodeWikis } from "@/lib/osf/wikis";
 import { getNodeContributors } from "@/lib/osf/contributors";
-import { getNodeIdentifiers, findDoi, getNodeAddons } from "@/lib/osf/project-extras";
+import { getNodeIdentifiers, findDoi, getNodeAddons, getNodeLicense } from "@/lib/osf/project-extras";
 import { mapWithConcurrency } from "@/lib/util/concurrency";
 
 export const runtime = "nodejs";
@@ -36,13 +36,18 @@ export async function GET(
   }
 
   try {
-    const [node, providers, wikis, contributors, identifiers, addons] = await Promise.all([
+    const [node, providers, wikis, contributors, identifiers, addons, license] = await Promise.all([
       getNode(guid),
       getProviderRoots(guid),
       getNodeWikis(guid).catch(() => null),
       getNodeContributors(guid).catch(() => null),
       getNodeIdentifiers(guid).catch(() => null),
       getNodeAddons(guid).catch(() => null),
+      // `undefined` distinguishes "the lookup failed" from `null`, "OSF asserts no
+      // licence". The crosswalk treats the second as "you must choose one before
+      // publishing"; treating a failed lookup the same way would be inventing a fact
+      // about someone's rights statement.
+      getNodeLicense(guid).catch(() => undefined),
     ]);
 
     const files: PlanFile[] = [];
@@ -94,6 +99,9 @@ export async function GET(
         category: node.category,
         doi: identifiers ? findDoi(identifiers) : null,
         addonProviders: addons ? addons.map((a) => a.id) : null,
+        /** `null` = no licence on OSF; `undefined` (absent) = we could not find out. */
+        license: license === undefined ? undefined : license,
+        licenseLookupFailed: license === undefined,
         files,
         wikis: wikis?.map((w) => ({ id: w.id, name: w.name, size: w.size })) ?? null,
         contributors,

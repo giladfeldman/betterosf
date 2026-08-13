@@ -57,6 +57,54 @@ export function zenodoSiteUrl(env: ZenodoEnv): string {
   return env === "sandbox" ? "https://sandbox.zenodo.org" : "https://zenodo.org";
 }
 
+/**
+ * OAuth endpoints. Both measured live against sandbox.zenodo.org on 2026-08-13:
+ * `/oauth/authorize` answers 302 to `/login/?next=…` preserving every query parameter,
+ * and `/oauth/token` returns a Bearer token with `expires_in: 5184000` (60 days).
+ */
+export function zenodoAuthorizeUrl(env: ZenodoEnv): string {
+  return `${zenodoSiteUrl(env)}/oauth/authorize`;
+}
+
+export function zenodoTokenUrl(env: ZenodoEnv): string {
+  return `${zenodoSiteUrl(env)}/oauth/token`;
+}
+
+/** Public record page for a published record. */
+export function zenodoRecordUrl(env: ZenodoEnv, recordId: string): string {
+  return `${zenodoSiteUrl(env)}/records/${recordId}`;
+}
+
+/**
+ * The draft's edit page. Measured: a draft's `links.self_html` is `/uploads/{id}`, NOT
+ * `/records/{id}` — the latter 404s until the record is published.
+ */
+export function zenodoDraftUrl(env: ZenodoEnv, recordId: string): string {
+  return `${zenodoSiteUrl(env)}/uploads/${recordId}`;
+}
+
+/**
+ * The redirect URI, derived from configuration and NEVER from the request Host.
+ *
+ * Zenodo matches this string exactly against the registered value, so a preview
+ * deployment's hostname, a proxy's `X-Forwarded-Host`, or a spoofed `Host` header would
+ * all fail — and taking it from the request would additionally let an attacker steer the
+ * code somewhere else. Registered today: `https://betterosf.vercel.app/...` and
+ * `http://localhost:4747/...` (port 4747, never 3000).
+ */
+export function zenodoRedirectUri(
+  input: Record<string, string | undefined> = process.env as Record<string, string | undefined>,
+): string {
+  const base = input.NEXT_PUBLIC_BASE_URL?.trim();
+  if (!base) {
+    throw new Error(
+      "NEXT_PUBLIC_BASE_URL is not set, so the Zenodo OAuth redirect URI cannot be derived. " +
+        "It must exactly match a URI registered on the Zenodo application.",
+    );
+  }
+  return `${base.replace(/\/+$/, "")}/api/zenodo/oauth/callback`;
+}
+
 export type ZenodoOAuthCredentials = { clientId: string; clientSecret: string };
 
 /**

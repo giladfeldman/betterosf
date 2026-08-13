@@ -165,6 +165,32 @@ After this release, **provision Vercel KV** at https://vercel.com/your-team/bett
   confirmation is recorded as an electronic signature.
 - Registrations remain immutable — no delete affordance anywhere.
 
+## v1.9.0 (Transfer to Zenodo) — what's new
+
+v1.8.0 got data *out* of OSF. This puts it somewhere it can keep living.
+
+- **Choose a destination** at `/transition/[guid]`: download a verified archive, or
+  transfer to **Zenodo**. Connect your own Zenodo account by OAuth; the deposit is yours,
+  in your account, under your name.
+- **Three independent checksum comparisons per file** — local↔OSF sha256, local↔OSF md5,
+  and Zenodo↔local md5. What OSF says it holds is checked *before* anything is uploaded, so
+  bytes that do not match are never pushed into an archive meant to outlive OSF.
+- **A private draft, never published.** Publishing is a separate step behind a typed phrase
+  the server re-derives from Zenodo's own listing of the draft, and BetterOSF refuses to
+  publish a run that did not reconcile as complete.
+- **Runs survive a closed tab.** The full record lives in your browser; the server takes
+  coarse checkpoints so a run can be resumed, including on another device. A resumed file
+  is skipped only when our recorded verification and Zenodo's current checksum agree.
+- **Projects over Zenodo's 100-file / 50 GB per-record limit** become several linked
+  records (DataCite `IsPartOf`) rather than zipped bundles, so per-file verification
+  survives the split. The record count is shown before anything starts.
+- Each record also receives the verification report, the link-crosswalk CSV, the RO-Crate
+  description and the wikis OSF offers no export for.
+
+Zenodo is configured per deployment (`ZENODO_ENV` plus that instance's OAuth credentials).
+Where it is not configured, `/transition` still offers the verified local export and says
+plainly that the destination is unavailable.
+
 ## v1.8.0 (OSF Transition Toolkit) — what's new
 
 COS is winding OSF Projects down — no new projects from **2026-11-16**, everything

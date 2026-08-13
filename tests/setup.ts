@@ -42,6 +42,48 @@ if (!localStorageAvailable) {
   }
 }
 
+// jsdom's Blob has `arrayBuffer`, `text` and `slice` but NO `stream()` — measured, not
+// assumed (probe run 2026-08-13). Every browser that can run BetterOSF has it, and both
+// the export and transfer paths depend on it: client-zip streams the archive rather than
+// buffering it, which is what makes a multi-gigabyte export possible at all.
+//
+// Without this, those paths cannot be tested here, and "untestable" quietly becomes
+// "untested" — the local export's packaging step has never had an end-to-end test for
+// exactly this reason.
+if (typeof Blob !== "undefined" && typeof Blob.prototype.stream !== "function") {
+  Object.defineProperty(Blob.prototype, "stream", {
+    configurable: true,
+    writable: true,
+    value(this: Blob): ReadableStream<Uint8Array> {
+      const bytes = this.arrayBuffer();
+      return new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(new Uint8Array(await bytes));
+          controller.close();
+        },
+      });
+    },
+  });
+}
+
+// Under vitest's jsdom environment, `TextEncoder` comes from Node's realm while
+// `Uint8Array` is jsdom's, so `new TextEncoder().encode("x") instanceof Uint8Array` is
+// FALSE (measured 2026-08-13). Nothing in a browser behaves that way — there is one realm
+// — but here it makes any `instanceof Uint8Array` check silently take the wrong branch.
+// client-zip does exactly that check and fell through to treating the bytes as a stream.
+//
+// Re-wrapping in the jsdom realm's Uint8Array costs one copy per encode in tests and makes
+// the environment match the browsers this code actually runs in.
+if (typeof TextEncoder !== "undefined" && !(new TextEncoder().encode("x") instanceof Uint8Array)) {
+  const ForeignTextEncoder = globalThis.TextEncoder;
+  class SameRealmTextEncoder extends ForeignTextEncoder {
+    encode(input?: string): Uint8Array<ArrayBuffer> {
+      return new Uint8Array(super.encode(input)) as Uint8Array<ArrayBuffer>;
+    }
+  }
+  globalThis.TextEncoder = SameRealmTextEncoder as unknown as typeof TextEncoder;
+}
+
 // Set env vars BEFORE any test imports env.ts (which caches the parsed env on first call).
 // Setting them in a per-test beforeEach is too late — the first test wins forever.
 process.env.OSF_APP_TOKEN = "test-token";

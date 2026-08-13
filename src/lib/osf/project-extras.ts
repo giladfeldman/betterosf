@@ -192,6 +192,56 @@ export async function getNodeAddons(guid: string): Promise<AddonView[]> {
   return raw.data.map((a) => ({ id: a.id, nodeHasAuth: Boolean(a.attributes?.node_has_auth) }));
 }
 
+// -------------------------------------------------------------------------- licence
+
+export type NodeLicenseView = {
+  /** OSF's licence id, e.g. "563c1cf88c5e4a3877f9e96a". */
+  id: string;
+  /** VERBATIM OSF licence name. The crosswalk matches on this exactly — never retype it. */
+  name: string;
+  /** Full licence text OSF stores, used when no exact Zenodo id matches. */
+  text: string | null;
+  /** `node_license`: who holds copyright and for what year. Free-form, often blank. */
+  copyrightHolders: string[];
+  year: string | null;
+};
+
+/**
+ * The licence a project asserts, read with `?embed=license`.
+ *
+ * Measured live on 2026-08-13 against `3kmr9` and `ezcuj`: the licence NAME lives at
+ * `data.embeds.license.data.attributes.name` (e.g. "CC-By Attribution 4.0 International" —
+ * note the capital B, which is why `mapLicence` lowercases before matching), while
+ * `attributes.node_license` carries only `{copyright_holders, year}` and never the name.
+ * A project with no licence set has no `license` relationship at all.
+ *
+ * Returns null when nothing is set. Null here means "OSF asserts no licence", which the
+ * crosswalk turns into "choose one before publishing" — never into a guessed licence.
+ */
+export async function getNodeLicense(guid: string): Promise<NodeLicenseView | null> {
+  const raw = await osfGet<{
+    data: {
+      attributes?: { node_license?: { copyright_holders?: string[]; year?: string | null } };
+      embeds?: {
+        license?: { data?: { id?: string; attributes?: { name?: string; text?: string } } };
+      };
+    };
+  }>(`/nodes/${guid}/?embed=license`, { tags: [`node:${guid}`] });
+
+  const embedded = raw.data.embeds?.license?.data;
+  const name = embedded?.attributes?.name?.trim();
+  if (!embedded || !name) return null;
+
+  const nodeLicense = raw.data.attributes?.node_license;
+  return {
+    id: String(embedded.id ?? ""),
+    name,
+    text: embedded.attributes?.text ?? null,
+    copyrightHolders: (nodeLicense?.copyright_holders ?? []).filter((h) => h.trim().length > 0),
+    year: nodeLicense?.year?.trim() || null,
+  };
+}
+
 // -------------------------------------------------------------------- file versions
 
 export type FileVersionView = {

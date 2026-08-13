@@ -47,6 +47,22 @@ export default function PrivacyPage() {
           through BetterOSF&apos;s servers and are not stored by us at any size.
         </li>
         <li>
+          <strong>A record of each transfer run</strong>, if you transfer a project to a repository such as
+          Zenodo. Your browser keeps the full running record; the EU database receives periodic checkpoints so
+          a run can be resumed on another device and so the evidence of what was verified survives a browser
+          that clears its storage. Those checkpoints hold the OSF project id, the destination record ids, and
+          one row per file with its <em>path</em>, size, verification state and checksums — <strong>never its
+          contents</strong>. File paths can themselves be descriptive, so treat them as you would a directory
+          listing of the project.
+        </li>
+        <li>
+          <strong>Your Zenodo connection, in an encrypted cookie</strong> — not in the database. If you connect
+          a Zenodo account, the access token Zenodo issues is encrypted, tied to your OSF account, and stored
+          only in a cookie your browser sends back to us; it is handed to the page for the duration of a
+          transfer and never written to our database. Disconnecting deletes our copy. Nothing changes on your
+          Zenodo account when you disconnect.
+        </li>
+        <li>
           <strong>Browser localStorage</strong> on your device for preferences, split-pane width, pins, recent
           items, and theme choices (also used when you are signed out; signed-in users sync bookmarks and
           key prefs to Neon).

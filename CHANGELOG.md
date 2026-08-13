@@ -1,5 +1,105 @@
 # Changelog
 
+## 1.9.0 — 2026-08-13
+
+**The transfer leg.** v1.8.0 shipped the half that gets data *out* of OSF (a verified
+export to disk). This is the half that puts it somewhere it can keep living: a signed-in
+researcher can now pick Zenodo as the destination, connect their own Zenodo account, and
+have every file transferred with the **same three-way checksum verification** — ending in
+a reconciliation verdict and a private **draft** that BetterOSF never publishes on its own.
+
+### Added
+- **Zenodo transfer** (`src/lib/transition/run-transfer.ts`). Files go browser → Zenodo
+  directly; no research byte touches Vercel at any size. Each file is staged, hashed,
+  checked against OSF's own checksums **before** it is uploaded, committed, then verified
+  a second time against the checksum Zenodo reports for what it stored. This is the only
+  path that sets `destinationExpected: true`, which makes a commit with no parseable
+  checksum a **failure** rather than a skipped check.
+- **Zenodo OAuth** (`/api/zenodo/oauth/start`, `/callback`, `/session`, `/token`). The
+  access token is sealed with AES-256-GCM into an httpOnly cookie bound to the OSF user
+  and the Zenodo environment, and handed to the browser only for the duration of a run —
+  the same posture as `/api/osf/upload-token`. No refresh token is stored: Zenodo's tokens
+  last ~60 days, and an untestable refresh path guarding a deposit credential is worse
+  than a two-click reconnect.
+- **Splitting large deposits across linked records.** A project over Zenodo's 100-file /
+  50 GB per-record limit becomes several records tied together with DataCite
+  `IsPartOf` — *not* archives (which would replace hundreds of per-file checksums with one
+  checksum of a container OSF never held) and never Zenodo *versions* (which mean
+  revisions of the same work). The count is shown in the preflight, before anything starts.
+- **A durable ledger, so a run survives a closed tab.** IndexedDB is primary and written
+  per file; Neon (`transition_jobs`, `transition_items`) takes coarse batched checkpoints
+  roughly every 25 files or 30 seconds, which is what lets a run resume on another device.
+  A resumed file is skipped **only** when our stored verification and Zenodo's *current*
+  checksum agree — a stored "it was verified" is a memory, not a measurement.
+- **Publishing, behind a phrase the server re-derives** (`/api/transition/publish`). The
+  file count in the phrase comes from Zenodo's own listing of the draft at the moment of
+  publishing, so a draft that changed under an open dialog no longer matches. Consent is
+  recorded *before* the act. A run that did not reconcile as `complete` cannot be published
+  from BetterOSF at all.
+- **A report bundle deposited on every record** — the verification report, the crosswalk
+  CSV, the RO-Crate description, the disclaimer, and the wikis and project metadata OSF
+  offers no export for. Its own success is reported separately and never folded into the
+  data verdict.
+- **Screen Wake Lock** during long runs, with the UI saying plainly when the browser does
+  not support it rather than implying the run is protected.
+- **The licence OSF asserts** is now read (`?embed=license`) and carried into the deposit,
+  exactly matched or kept as verbatim custom text — never mapped to a neighbouring licence.
+- **Zenodo's resource-type vocabulary** (all 43 ids, copied from the live endpoint) offered
+  as an explicit choice. Never inferred from OSF's category; `npm run test:live-zenodo`
+  re-checks every id against the service.
+
+### Fixed
+- **Export was broken for everyone who signed in through `/transition`.** `ExportRunner`
+  asked `/api/osf/upload-token`, which requires `session.osfCanWrite`, while the transition
+  gate signs users in with **read-only** scope on purpose. Those users got a 403 the moment
+  they pressed Start — on the headline feature of v1.8.0. New consent-gated
+  `/api/transition/osf-token` returns the token a read-only session already has, and a test
+  fails if any transition surface reaches for the write-scoped route again.
+- **A critical regression test was load-flaky.** The 401-consistency probe pays for
+  compiling a route's module graph inside the default 5 s budget and timed out under a full
+  parallel run while passing in 155 ms alone. Given an explicit 20 s budget: a flaky
+  regression test is worse than a slow one, because the next person re-runs it and moves on.
+
+### Found by review, before shipping
+Three second-model reviews (Codex and Sonnet, 2026-08-13) found six real defects in the new
+code. Each was **reproduced against the unfixed code first**, and each fix has a test that
+was watched going from red to green:
+- A resumed run reused a stored verification for a file that had been **edited on OSF**
+  between attempts — same id, same path, same length, different bytes. The fast path now
+  also requires OSF's current checksums to match the ones we hashed last time.
+- A Zenodo listing that could not be fetched left `destinationKeys` null and every other
+  condition passing, so the run reported **COMPLETE** with the independent check skipped.
+  `reconcile()` grew `blockers` — checks that did not *run*, as distinct from checks that
+  failed — and refuses to call such a run complete.
+- The **crosswalk CSV** printed `verified` for a file that another file had overwritten at
+  the destination. Report rows are now keyed by OSF's immutable file id rather than by path
+  (the rule the module already stated), and a collided file is reported as `overwritten`.
+- A replayed publish request called Zenodo again. The publish is now **claimed in the
+  database first**, so a second request is refused by us rather than by behaviour at Zenodo
+  we have never measured.
+- A publish whose draft had lost files since the run is refused (`draft_shrank`).
+- A non-numeric `expiresAt` in the sealed cookie read as "never expires", because
+  `NaN <= now` is false.
+
+The publish route's own docstring was also corrected: `job.status` is a client checkpoint,
+so "only a complete run may publish" is a safety interlock against an accidental publish,
+**not** an authorisation control. Overstating it in a comment is the same defect class the
+module exists to prevent.
+
+### Database
+`drizzle/0004_transition_jobs_items.sql` and `0005_transition_published_records.sql` were
+**applied to production Neon on 2026-08-13** and verified present. Do not re-apply. Both are
+additive: two new tables, three indexes, two foreign keys, one column.
+
+### Testing
+- `runTransfer` is tested end to end against a fake Zenodo that **hashes the bytes it
+  receives** rather than echoing a checksum it was handed, with the real deposit client in
+  the loop. The `destinationExpected` guard and the publish guards were each verified by
+  breaking the code they guard and watching the tests go red.
+- Two jsdom gaps that silently break byte-handling code are now polyfilled in
+  `tests/setup.ts` and documented there: `Blob.prototype.stream` is absent, and
+  `TextEncoder` returns a foreign-realm `Uint8Array` so `instanceof Uint8Array` is false.
+
 ## 1.8.0 — 2026-08-13
 
 **The OSF Transition Toolkit.** On 2026-08-13 the Center for Open Science announced

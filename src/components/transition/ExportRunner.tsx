@@ -5,27 +5,17 @@ import { runExport, type ExportPlan, type ExportProgress, type ExportResult } fr
 import { opfsAvailable } from "@/lib/transition/stage-opfs";
 import { clausesByIds, TRANSITION_DIALOG_CLAUSE_IDS, TERMS_VERSION } from "@/lib/terms";
 import { downloadBlob } from "@/lib/backup/download";
-import type { ContributorView } from "@/lib/osf/contributors";
-
-type PlanResponse = {
-  guid: string;
-  title: string;
-  description: string;
-  osfUrl: string;
-  dateCreated: string;
-  dateModified: string;
-  tags: string[];
-  doi: string | null;
-  addonProviders: string[] | null;
-  files: { osfFileId: string; path: string; size: number; downloadUrl: string; md5: string | null; sha256: string | null }[];
-  wikis: { id: string; name: string; size: number }[] | null;
-  contributors: ContributorView[] | null;
-  truncated: boolean;
-  limits: { maxFiles: number; maxDepth: number };
-  unverifiableCount: number;
-};
+import { keepScreenAwake } from "@/lib/transition/wake-lock";
+import { ZenodoTransferPanel } from "./ZenodoTransferPanel";
+import { formatBytes } from "@/lib/transition/format";
+import { fetchExtras } from "./plan-extras";
+import { Stat } from "./Stat";
+import type { PlanResponse } from "./plan-types";
 
 type Phase = "loading" | "preflight" | "running" | "done" | "error";
+
+/** Where a project's copy is going. "Leave it alone" is always the third option. */
+type Destination = "local" | "zenodo";
 
 /**
  * Preflight and run for a single-project export.
@@ -41,6 +31,7 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
   const [acknowledged, setAcknowledged] = useState(false);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [result, setResult] = useState<ExportResult | null>(null);
+  const [destination, setDestination] = useState<Destination>("local");
   const abort = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
@@ -80,10 +71,17 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
     setError(null);
     abort.current = new AbortController();
 
+    // Best-effort: a laptop that sleeps mid-run stalls the transfer. Released in `finally`.
+    const wakeLock = await keepScreenAwake();
+
     try {
-      const tokenRes = await fetch("/api/osf/upload-token", { cache: "no-store" });
+      // READ scope, deliberately: /api/osf/upload-token requires write, which the
+      // transition sign-in does not ask for — so using it here 403'd every user who
+      // arrived through /transition.
+      const tokenRes = await fetch("/api/transition/osf-token", { cache: "no-store" });
       if (!tokenRes.ok) {
-        throw new Error("Could not get an OSF access token. Sign in again and retry.");
+        const body = await tokenRes.json().catch(() => ({}));
+        throw new Error(body.error ?? "Could not get an OSF access token. Sign in again and retry.");
       }
       const { token } = await tokenRes.json();
 
@@ -117,6 +115,8 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
     } catch (e) {
       setError(e instanceof Error ? e.message : "The export failed.");
       setPhase("error");
+    } finally {
+      await wakeLock.release();
     }
   }
 
@@ -244,7 +244,7 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
   const clauses = clausesByIds(TRANSITION_DIALOG_CLAUSE_IDS.slice(0, 3));
   return (
     <div>
-      <h2 className="text-base font-semibold">Export {plan.title}</h2>
+      <h2 className="text-base font-semibold">Take a copy of {plan.title}</h2>
       <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
         {/* Plain anchor, not next/link: this is an external OSF URL, and typed routes
             reject it. */}
@@ -291,6 +291,55 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
         </p>
       ) : null}
 
+      <fieldset className="mt-6 rounded border border-neutral-300 p-4 dark:border-neutral-700">
+        <legend className="px-1 text-sm font-semibold">Where should the copy go?</legend>
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="radio"
+            name="destination"
+            value="local"
+            checked={destination === "local"}
+            onChange={() => setDestination("local")}
+            className="mt-1 h-4 w-4 shrink-0"
+          />
+          <span>
+            <strong>Download it to this computer.</strong> A BagIt archive with a SHA-256 manifest,
+            an RO-Crate description and the full verification report. Nothing leaves your machine.
+          </span>
+        </label>
+        <label className="mt-3 flex items-start gap-2 text-sm">
+          <input
+            type="radio"
+            name="destination"
+            value="zenodo"
+            checked={destination === "zenodo"}
+            onChange={() => setDestination("zenodo")}
+            className="mt-1 h-4 w-4 shrink-0"
+          />
+          <span>
+            <strong>Transfer it to Zenodo.</strong> Creates a private <em>draft</em> in your own Zenodo
+            account, file by file, each one checksum-verified. Nothing is published and no DOI is minted
+            until you separately confirm it.
+          </span>
+        </label>
+        {/*
+          The recommendation default is "leave it alone" — public projects stay on OSF at
+          the same URL and DOI after the transition, and a frictionless "migrate all" would
+          duplicate content COS keeps online while splitting the citation record.
+        */}
+        <p className="mt-3 text-xs text-neutral-600 dark:text-neutral-400">
+          You may not need either. Public projects, registrations and preprints stay on OSF at the same
+          URL and DOI. The deadlines affect what you can <em>change</em>, not whether public work stays
+          readable.
+        </p>
+      </fieldset>
+
+      {destination === "zenodo" ? (
+        <ZenodoTransferPanel plan={plan} appVersion={appVersion} />
+      ) : null}
+
+      {destination === "local" ? (
+        <>
       <div className="mt-6 rounded border border-neutral-300 bg-neutral-50 p-4 dark:border-neutral-700 dark:bg-neutral-900">
         <h3 className="text-sm font-semibold">Before you start</h3>
         <ul className="mt-2 space-y-2 text-sm text-neutral-700 dark:text-neutral-300">
@@ -322,65 +371,9 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
       >
         Start export
       </button>
+        </>
+      ) : null}
     </div>
   );
 }
 
-/** Fetch the non-file content that OSF offers no export for. */
-async function fetchExtras(plan: PlanResponse): Promise<{ path: string; text: string }[]> {
-  const extras: { path: string; text: string }[] = [];
-
-  for (const wiki of plan.wikis ?? []) {
-    try {
-      const res = await fetch(`/api/transition/wiki/${wiki.id}`, { cache: "no-store" });
-      if (res.ok) {
-        extras.push({ path: `wikis/${safeName(wiki.name)}.md`, text: await res.text() });
-      }
-    } catch {
-      /* a missing wiki is recorded by its absence from the manifest, not faked */
-    }
-  }
-
-  extras.push({
-    path: "metadata/osf-project.json",
-    text: JSON.stringify(
-      {
-        guid: plan.guid,
-        title: plan.title,
-        description: plan.description,
-        url: plan.osfUrl,
-        doi: plan.doi,
-        dateCreated: plan.dateCreated,
-        dateModified: plan.dateModified,
-        tags: plan.tags,
-        addonProviders: plan.addonProviders,
-        contributors: plan.contributors,
-      },
-      null,
-      2,
-    ),
-  });
-
-  return extras;
-}
-
-function safeName(name: string): string {
-  return name.replace(/[^\w. -]+/g, "_").slice(0, 80) || "untitled";
-}
-
-function Stat({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded border border-neutral-200 p-2 dark:border-neutral-800">
-      <dt className="text-xs text-neutral-600 dark:text-neutral-400">{label}</dt>
-      <dd className="text-sm font-medium">{children}</dd>
-    </div>
-  );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 bytes";
-  const units = ["bytes", "KB", "MB", "GB", "TB"];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const value = bytes / 1024 ** i;
-  return `${i === 0 ? value : value.toFixed(value < 10 ? 1 : 0)} ${units[i]}`;
-}

@@ -248,13 +248,83 @@ export function parseChecksum(value: unknown): string | null {
   return m ? m[1]!.toLowerCase() : null;
 }
 
-/** List the files currently on a draft — the independent check that they really landed. */
-export async function listDraftFiles(auth: ZenodoAuth, recordId: string): Promise<string[]> {
+export type DraftFileEntry = {
+  key: string;
+  /** "completed" once committed; "pending" while declared but not yet committed. */
+  status: string;
+  /**
+   * Bytes Zenodo says it holds, or `null` when it did not say.
+   *
+   * Null rather than 0: a missing size coerced to zero is an unknown wearing the costume
+   * of a fact, and it would satisfy a resume's `size === file.size` check for any
+   * genuinely empty file. (Codex consult 2026-08-13.)
+   */
+  size: number | null;
+  /** Bare hex md5, or null when Zenodo reported none (a pending entry has none). */
+  md5: string | null;
+};
+
+/**
+ * Every file entry on a draft, with the state Zenodo believes it is in.
+ *
+ * This is what makes a resumed run safe. A file that is already `completed` with a
+ * checksum matching what we hold locally does not need re-uploading; one that is
+ * `pending` was declared and never committed, and must be redone. Deciding that from our
+ * own notes alone would trust a record of the past over the destination's account of the
+ * present.
+ */
+export async function listDraftFileEntries(
+  auth: ZenodoAuth,
+  recordId: string,
+): Promise<DraftFileEntry[]> {
   const res = await zfetch(auth, `/records/${recordId}/draft/files`);
   const json = await res.json();
-  return (json.entries ?? [])
-    .filter((e: { status?: string }) => e.status === "completed")
-    .map((e: { key: string }) => e.key);
+  return ((json.entries ?? []) as { key?: string; status?: string; size?: number; checksum?: unknown }[])
+    .filter((e) => typeof e.key === "string")
+    .map((e) => ({
+      key: String(e.key),
+      status: String(e.status ?? ""),
+      size: typeof e.size === "number" && Number.isFinite(e.size) ? e.size : null,
+      md5: parseChecksum(e.checksum),
+    }));
+}
+
+/** List the files currently on a draft — the independent check that they really landed. */
+export async function listDraftFiles(auth: ZenodoAuth, recordId: string): Promise<string[]> {
+  const entries = await listDraftFileEntries(auth, recordId);
+  return entries.filter((e) => e.status === "completed").map((e) => e.key);
+}
+
+/**
+ * Replace a draft's metadata.
+ *
+ * **The body must be `{metadata}` alone.** Measured against sandbox.zenodo.org on
+ * 2026-08-13: `PUT` with the record object echoed back from `GET .../draft` returns a
+ * **500** (Invenio rejects the read-only fields it just sent you), while `{metadata}` — or
+ * `{metadata, access, files}` — returns 200 and the change is visible on a subsequent GET.
+ * Do not "improve" this by round-tripping the full record.
+ *
+ * Used to link shard records to each other once every shard id is known.
+ */
+export async function updateDraftMetadata(
+  auth: ZenodoAuth,
+  recordId: string,
+  metadata: ZenodoMetadata,
+): Promise<void> {
+  await zfetch(auth, `/records/${recordId}/draft`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ metadata }),
+  });
+}
+
+/** Delete one declared-but-unwanted file entry from a draft. */
+export async function deleteDraftFile(
+  auth: ZenodoAuth,
+  recordId: string,
+  key: string,
+): Promise<void> {
+  await zfetch(auth, `/records/${recordId}/draft/files/${encodeFileKey(key)}`, { method: "DELETE" });
 }
 
 /**
@@ -310,4 +380,98 @@ export function planCapacity(files: { size: number }[]): CapacityPlan {
     };
   }
   return { fits: true, files: count, bytes };
+}
+
+export type ShardLimits = { maxFiles: number; maxBytes: number };
+
+export type ShardPlan<T> = {
+  /** One entry per record that will be created, in order. Never empty unless there is nothing to send. */
+  shards: T[][];
+  /** Files that fit in NO record, with the reason. Reported; never silently dropped. */
+  unplaceable: { file: T; reason: string }[];
+};
+
+/**
+ * Split a deposit across as many Zenodo records as its caps require.
+ *
+ * **The decision, made 2026-08-13:** a project that exceeds 100 files or 50 GB becomes
+ * SEVERAL linked records — not archives, and never Zenodo *versions* (a version means a
+ * revision of the same work, which would be a false statement about the data).
+ *
+ * Linked records over archive-per-subtree, because the toolkit's entire claim is per-file
+ * verification: zipping a folder replaces 400 checksums that can each be compared against
+ * OSF with one checksum of a container OSF never held. The cost is N records instead of
+ * one, and N DOIs if published — stated in the preflight before anything starts. The
+ * records are tied together with DataCite `HasPart`/`IsPartOf`, which is what that
+ * vocabulary is actually for.
+ *
+ * Input order is preserved rather than optimised. The plan comes from a depth-first walk,
+ * so keeping the order keeps folders together; repacking for tighter fits would scatter a
+ * directory across records and make a resumed run's shard assignment unstable.
+ */
+export function planShards<T extends { path: string; size: number }>(
+  files: T[],
+  limits: ShardLimits = { maxFiles: ZENODO_MAX_FILES_PER_RECORD, maxBytes: ZENODO_MAX_BYTES_PER_RECORD },
+): ShardPlan<T> {
+  const shards: T[][] = [];
+  const unplaceable: { file: T; reason: string }[] = [];
+  let current: T[] = [];
+  let currentBytes = 0;
+
+  for (const file of files) {
+    if (!Number.isFinite(file.size) || file.size < 0) {
+      // An unknown size cannot be planned around. Saying "it fits" would be inventing a
+      // fact; putting it somewhere and hoping would surface at upload time as a rejected
+      // record halfway through a run.
+      unplaceable.push({
+        file,
+        reason: `OSF reported no usable size for this file (${file.size}), so it cannot be fitted to a record.`,
+      });
+      continue;
+    }
+    if (file.size > limits.maxBytes) {
+      unplaceable.push({
+        file,
+        reason: `This single file is ${(file.size / 1024 ** 3).toFixed(1)} GB, larger than Zenodo's ${Math.round(limits.maxBytes / 1024 ** 3)} GB per-record limit.`,
+      });
+      continue;
+    }
+
+    const wouldExceed =
+      current.length + 1 > limits.maxFiles || currentBytes + file.size > limits.maxBytes;
+    if (wouldExceed && current.length > 0) {
+      shards.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(file);
+    currentBytes += file.size;
+  }
+
+  if (current.length > 0) shards.push(current);
+  return { shards, unplaceable };
+}
+
+/**
+ * Sibling links for one shard: `IsPartOf` every other record in the set.
+ *
+ * Emitted only when there is more than one record — a lone deposit that declared itself
+ * part of a set of one would be a puzzle rather than a fact.
+ */
+export function shardRelatedIdentifiers(
+  recordUrls: string[],
+  selfIndex: number,
+): { identifier: string; scheme: string; relation_type: { id: string } }[] {
+  if (recordUrls.length < 2) return [];
+  return recordUrls
+    .map((identifier, i) => ({ identifier, i }))
+    .filter(({ i }) => i !== selfIndex)
+    .map(({ identifier }) => ({
+      identifier,
+      scheme: "url",
+      // "ispartof" both ways: every shard is part of the same deposit, and no shard is the
+      // privileged whole. Nominating one as the parent would make the others look like
+      // supplements to it.
+      relation_type: { id: "ispartof" },
+    }));
 }

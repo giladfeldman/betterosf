@@ -116,6 +116,19 @@ export function renderReportMarkdown(input: ReportInput): string {
     "",
   ];
 
+  if (v.blockers.length > 0) {
+    // First, and before the per-file detail: a check that did not run is not a check that
+    // passed, and the counts below cannot be read as an all-clear while one is outstanding.
+    lines.push(
+      "### Checks that could not be run",
+      "",
+      "These are not file failures — they are things BetterOSF was unable to confirm. The",
+      "run is reported as incomplete because of them, whatever the counts say.",
+      "",
+      ...v.blockers.map((b) => `- ${b}`),
+      "",
+    );
+  }
   if (v.missing.length > 0) {
     lines.push("### Missing", "", ...v.missing.map((p) => `- \`${p}\``), "");
   }

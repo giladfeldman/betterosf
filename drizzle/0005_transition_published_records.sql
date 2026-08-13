@@ -1,0 +1,1 @@
+ALTER TABLE "transition_jobs" ADD COLUMN "published_records" jsonb DEFAULT '[]'::jsonb NOT NULL;

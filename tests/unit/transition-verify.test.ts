@@ -346,3 +346,54 @@ describe("codex-consult 2026-08-13 — reproduced false greens", () => {
     expect(r.state).toBe("verified");
   });
 });
+
+/**
+ * Blockers: checks that did not RUN, as opposed to checks that failed.
+ *
+ * Added 2026-08-13 after a Codex review found that a destination listing which could not
+ * be fetched left `destinationKeys` null — an honest "no third opinion" that nonetheless
+ * let every other condition pass and reported COMPLETE.
+ */
+describe("reconcile — blockers", () => {
+  const oneVerifiedFile = {
+    expected: [{ osfFileId: "f1", path: "a.csv", size: 3 }],
+    results: [
+      { osfFileId: "f1", path: "a.csv", state: "verified" as const, checks: [], problems: [] },
+    ],
+  };
+
+  it("is complete with no blockers", () => {
+    expect(reconcile({ ...oneVerifiedFile, destinationKeys: ["a.csv"] }).status).toBe("complete");
+  });
+
+  it("refuses complete when a check could not be run, however good the counts are", () => {
+    const verdict = reconcile({
+      ...oneVerifiedFile,
+      destinationKeys: null,
+      blockers: ["Could not read what Zenodo holds for record 555."],
+    });
+    expect(verdict.status).toBe("incomplete");
+    expect(verdict.counts.verified).toBe(1);
+    expect(verdict.counts.failed).toBe(0);
+    expect(verdict.blockers).toHaveLength(1);
+  });
+
+  it("names the blocker in the summary, so the reason is never only in a field", () => {
+    const verdict = reconcile({
+      ...oneVerifiedFile,
+      blockers: ["Could not read what Zenodo holds for record 555."],
+    });
+    expect(verdict.summary).toContain("could not be run");
+    expect(verdict.summary).toContain("record 555");
+  });
+
+  it("carries blockers through the empty verdict too", () => {
+    const verdict = reconcile({ expected: [], results: [], blockers: ["listing failed"] });
+    expect(verdict.status).toBe("empty");
+    expect(verdict.blockers).toEqual(["listing failed"]);
+  });
+
+  it("defaults to no blockers, so existing callers are unaffected", () => {
+    expect(reconcile(oneVerifiedFile).blockers).toEqual([]);
+  });
+});

@@ -5,6 +5,7 @@ import {
   jsonb,
   uuid,
   integer,
+  bigint,
   uniqueIndex,
   index,
 } from "drizzle-orm/pg-core";
@@ -173,6 +174,96 @@ export const transitionConsents = pgTable(
   (t) => [
     index("transition_consents_osf_user_idx").on(t.osfUserId, t.acceptedAt),
     index("transition_consents_scope_idx").on(t.osfUserId, t.scope, t.termsVersion),
+  ],
+);
+
+/**
+ * Coarse checkpoints for a transfer run.
+ *
+ * **IndexedDB is the primary ledger; this is the checkpoint.** A run writes every file
+ * result to the browser as it goes, and pushes a batch here roughly every 25 files or
+ * 30 seconds. That split is a cost decision the standing "no paid tiers, no meaningful
+ * Vercel usage" rule forces, and it is also the honest one: the browser is where the run
+ * actually is, so the browser is where its state belongs. This table exists so a run can
+ * be found again from another device, and so the evidence of what was verified survives
+ * a browser that clears its storage.
+ *
+ * `records` deliberately holds only `{recordId, fileCount}` per shard — never the file
+ * paths. Shard assignment is recomputed deterministically by `planShards`, and writing
+ * five thousand paths into a jsonb column on every checkpoint would be both wasteful and
+ * a second copy of the truth.
+ */
+export const transitionJobs = pgTable(
+  "transition_jobs",
+  {
+    /** Client-generated so the browser can start a run before it can reach the server. */
+    id: text("id").primaryKey(),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    osfUserId: text("osf_user_id").notNull(),
+    /** OSF project this run is copying. */
+    guid: text("guid").notNull(),
+    /** "zenodo" today. Named rather than assumed, so a second target cannot be silent. */
+    destination: text("destination").notNull(),
+    /** "sandbox" | "production" — a sandbox deposit is wipeable and mints no real DOI. */
+    env: text("env").notNull(),
+    /** "running" | "complete" | "incomplete" | "abandoned". Set from reconcile()'s verdict. */
+    status: text("status").notNull(),
+    records: jsonb("records").$type<{ recordId: string; fileCount: number }[]>().notNull().default([]),
+    /**
+     * Records this run has already published, written ONLY by the publish route and never
+     * by a client checkpoint — which is why it is a separate column from `records` rather
+     * than a field inside it. Publishing mints a permanent DOI, so a replayed request must
+     * be refused by us rather than by whatever Zenodo happens to do about it, which this
+     * codebase has never measured.
+     * (Sonnet consult 2026-08-13.)
+     */
+    publishedRecords: jsonb("published_records")
+      .$type<{ recordId: string; doi: string | null; publishedAt: string }[]>()
+      .notNull()
+      .default([]),
+    fileCount: integer("file_count").notNull().default(0),
+    bytesTotal: bigint("bytes_total", { mode: "number" }).notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("transition_jobs_user_updated_idx").on(t.osfUserId, t.updatedAt)],
+);
+
+/**
+ * Per-file evidence for a transfer run.
+ *
+ * One row per file, upserted on `(job_id, osf_file_id)` — bound by OSF's immutable file
+ * id, never by path, the same rule the verifier follows.
+ *
+ * Both checksums are kept because a resumed run RE-TESTS them against what the destination
+ * reports at the time it resumes. A stored "this was verified" that is never re-checked
+ * would be a memory presented as a measurement.
+ */
+export const transitionItems = pgTable(
+  "transition_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => transitionJobs.id, { onDelete: "cascade" }),
+    /** Denormalised so an item row can be authorised without a join. */
+    osfUserId: text("osf_user_id").notNull(),
+    osfFileId: text("osf_file_id").notNull(),
+    path: text("path").notNull(),
+    size: bigint("size", { mode: "number" }).notNull().default(0),
+    /** "verified" | "unverifiable" | "failed" — verify.ts's VerificationState, verbatim. */
+    state: text("state").notNull(),
+    localSha256: text("local_sha256"),
+    localMd5: text("local_md5"),
+    /** What the destination said it stored. Null is a real answer: "it told us nothing". */
+    remoteMd5: text("remote_md5"),
+    shardIndex: integer("shard_index").notNull().default(0),
+    problems: jsonb("problems").$type<string[]>().notNull().default([]),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("transition_items_job_file_uidx").on(t.jobId, t.osfFileId),
+    index("transition_items_job_idx").on(t.jobId),
   ],
 );
 

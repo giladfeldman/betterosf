@@ -27,8 +27,10 @@ import {
   listDraftFiles,
   deleteDraft,
   parseChecksum,
+  updateDraftMetadata,
   type ZenodoAuth,
 } from "@/lib/transition/targets/zenodo";
+import { RESOURCE_TYPES } from "@/lib/transition/resource-types";
 import { hashBytes } from "@/lib/transition/hash";
 import { verifyFile, reconcile } from "@/lib/transition/verify";
 import { crosswalk } from "@/lib/transition/crosswalk";
@@ -157,6 +159,64 @@ describe.skipIf(!enabled)("Zenodo sandbox round trip", () => {
       expect(declared[0]!.parts?.[0]?.expiration).toBeTruthy();
     } finally {
       await deleteDraft(auth, draft.id);
+    }
+  });
+
+  it("still accepts a metadata-only PUT on a draft, which is how shards get linked", async () => {
+    // Measured 2026-08-13: `{metadata}` alone returns 200, while echoing back the record
+    // object from `GET .../draft` returns a **500**. A split deposit's IsPartOf links ride
+    // on this call, so if Zenodo changes it the shards silently stop being related.
+    const draft = await createDraft(auth, {
+      title: "BetterOSF shard-link probe — safe to delete",
+      publication_date: "2026-08-13",
+      resource_type: { id: "dataset" },
+      creators: [{ person_or_org: { type: "personal", family_name: "Probe" } }],
+    });
+
+    try {
+      const sibling = "https://sandbox.zenodo.org/records/999999";
+      await updateDraftMetadata(auth, draft.id, {
+        title: "BetterOSF shard-link probe — safe to delete",
+        publication_date: "2026-08-13",
+        resource_type: { id: "dataset" },
+        creators: [{ person_or_org: { type: "personal", family_name: "Probe" } }],
+        related_identifiers: [
+          { identifier: sibling, scheme: "url", relation_type: { id: "ispartof" } },
+        ],
+      });
+
+      // Read it back rather than trusting the 200: the point is that it PERSISTED.
+      const res = await fetch(`https://sandbox.zenodo.org/api/records/${draft.id}/draft`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      const related = (json.metadata?.related_identifiers ?? []) as { identifier: string }[];
+      expect(related.map((r) => r.identifier)).toContain(sibling);
+    } finally {
+      await deleteDraft(auth, draft.id);
+    }
+  });
+
+  it("still publishes every resource-type id we offer", async () => {
+    // The licence-map lesson, applied to a second vocabulary: an id that no longer exists
+    // does not fail loudly — Zenodo rejects the deposit at create time, after the user has
+    // chosen it. Checked against the live vocabulary rather than against our own copy.
+    const res = await fetch("https://sandbox.zenodo.org/api/vocabularies/resourcetypes?size=200");
+    expect(res.ok).toBe(true);
+    const json = await res.json();
+    const live = new Set(
+      ((json.hits?.hits ?? []) as { id: string }[]).map((h) => h.id),
+    );
+    expect(live.size).toBeGreaterThan(0);
+
+    const missing = RESOURCE_TYPES.filter((t) => !live.has(t.id)).map((t) => t.id);
+    expect(missing).toEqual([]);
+
+    // And the reverse: a type Zenodo added that we never offer. Not a failure, but it
+    // should be visible rather than silently absent from the picker forever.
+    const unoffered = [...live].filter((id) => !RESOURCE_TYPES.some((t) => t.id === id));
+    if (unoffered.length > 0) {
+      console.warn(`Zenodo now offers resource types BetterOSF does not list: ${unoffered.join(", ")}`);
     }
   });
 
