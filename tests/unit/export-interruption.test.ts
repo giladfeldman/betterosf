@@ -29,6 +29,7 @@ vi.mock("@/lib/transition/stage-opfs", () => ({
   }),
   stagedBlob: vi.fn(async (id: string) => new Blob([staged.get(id)!.body])),
   discardStaged: vi.fn(async () => {}),
+  clearStaging: vi.fn(async () => {}),
 }));
 
 import { runExport } from "@/lib/transition/run-export";
@@ -133,6 +134,76 @@ describe("a connection torn down mid-run", () => {
 
     expect(stageCalls.filter((id) => id === "f0").length).toBe(1);
     expect(result.verdict.status).toBe("incomplete");
+  });
+});
+
+describe("the staged files are still readable when the archive is built", () => {
+  it("does not delete a staged file before the ZIP reads it", async () => {
+    // THE BUG, shipped since v1.8.0: each file's Blob was pushed into the archive and the
+    // backing OPFS file deleted immediately afterwards, under a comment claiming "peak
+    // disk stays at one file". The ZIP is only assembled at the END, so every one of those
+    // Blobs was dangling by then and packaging failed — as `AbortError` in Firefox, naming
+    // neither the cause nor a file.
+    const p = plan(3);
+    const { discardStaged, stagedBlob } = await import("@/lib/transition/stage-opfs");
+
+    const discardedBeforeRead = new Set<string>();
+    vi.mocked(discardStaged).mockImplementation(async (id: string) => {
+      discardedBeforeRead.add(id);
+    });
+    vi.mocked(stagedBlob).mockImplementation(async (id: string) => {
+      if (discardedBeforeRead.has(id)) {
+        throw new DOMException("The operation was aborted.", "AbortError");
+      }
+      return new Blob([staged.get(id)!.body]);
+    });
+
+    const result = await run(p);
+
+    expect(result.verdict.status).toBe("complete");
+    expect(result.blob.size).toBeGreaterThan(0);
+  });
+});
+
+describe("the run log", () => {
+  it("records each file, so a failure names one instead of just 'aborted'", async () => {
+    const p = plan(2);
+    failures.set("f1", () => new Error("Staged 3 bytes but OSF declared 9999."));
+    const log: import("@/lib/transition/run-export").RunLogEntry[] = [];
+
+    await runExport({
+      plan: p,
+      token: "t",
+      appVersion: "test",
+      now: () => new Date("2026-08-14T00:00:00Z"),
+      log,
+    });
+
+    expect(log.some((e) => e.phase === "plan")).toBe(true);
+    expect(log.some((e) => e.phase === "package")).toBe(true);
+    expect(log.some((e) => e.phase === "done")).toBe(true);
+    const failed = log.find((e) => e.error);
+    expect(failed?.path).toBe("osfstorage/file1.csv");
+    expect(failed?.index).toBe(2);
+  });
+
+  it("survives a run that throws, because the caller owns the array", async () => {
+    const p = plan(1);
+    const log: import("@/lib/transition/run-export").RunLogEntry[] = [];
+    const { stagedBlob } = await import("@/lib/transition/stage-opfs");
+    vi.mocked(stagedBlob).mockRejectedValue(new Error("packaging blew up"));
+
+    await runExport({
+      plan: p,
+      token: "t",
+      appVersion: "test",
+      now: () => new Date("2026-08-14T00:00:00Z"),
+      log,
+    }).catch(() => {});
+
+    // The diary is still here even though the run did not return one.
+    expect(log.length).toBeGreaterThan(0);
+    expect(log[0]!.phase).toBe("plan");
   });
 });
 

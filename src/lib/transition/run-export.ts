@@ -16,7 +16,14 @@
  */
 
 import { downloadZip } from "client-zip";
-import { stageFile, stagedBlob, discardStaged, requestPersistence, opfsAvailable } from "./stage-opfs";
+import {
+  stageFile,
+  stagedBlob,
+  discardStaged,
+  clearStaging,
+  requestPersistence,
+  opfsAvailable,
+} from "./stage-opfs";
 import { verifyFile, reconcile, type FileVerification, type ReconciliationVerdict } from "./verify";
 import { buildBagTagFiles, type BagFile, type BagInfo } from "./package-bagit";
 import { buildRoCrate, type CrateFile } from "./ro-crate";
@@ -87,6 +94,29 @@ export type ExportResult = {
   crosswalkCsv: string;
 };
 
+/**
+ * One line of the run diary.
+ *
+ * Written as the run goes, into an array the CALLER owns, so it survives even when the run
+ * throws — the case where it is most needed. "AbortError: The operation was aborted" told
+ * us nothing about which file, which phase, or which attempt; this does.
+ */
+export type RunLogEntry = {
+  at: string;
+  /** "plan" | "stage" | "verify" | "package" | "done" — where the run had got to. */
+  phase: string;
+  /** File path, when the line is about one file. */
+  path?: string;
+  /** 1-based file position, so "48 of 79" is readable at a glance. */
+  index?: number;
+  /** Download attempt number, when retrying. */
+  attempt?: number;
+  message: string;
+  /** Error name and message, never a stack — a stack from a minified bundle says nothing. */
+  error?: string;
+  ms?: number;
+};
+
 export type RunExportOptions = {
   plan: ExportPlan;
   token: string;
@@ -95,6 +125,11 @@ export type RunExportOptions = {
   now: () => Date;
   signal?: AbortSignal;
   onProgress?: (p: ExportProgress) => void;
+  /**
+   * Appended to as the run proceeds. Owned by the caller precisely so that a run which
+   * dies still leaves its diary behind.
+   */
+  log?: RunLogEntry[];
 };
 
 /**
@@ -117,7 +152,11 @@ const RETRY_BACKOFF_MS = 1500;
  */
 async function withRetry<T>(
   run: () => Promise<T>,
-  opts: { signal?: AbortSignal; onDiscard: () => Promise<void> },
+  opts: {
+    signal?: AbortSignal;
+    onDiscard: () => Promise<void>;
+    onRetry?: (attempt: number, error: unknown) => void;
+  },
 ): Promise<T> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt++) {
@@ -128,12 +167,19 @@ async function withRetry<T>(
       // The user asked to stop. That is not a transient failure.
       if (opts.signal?.aborted) throw e;
       if (!isTransient(e) || attempt === DOWNLOAD_ATTEMPTS) throw e;
+      opts.onRetry?.(attempt, e);
       // Any partial stage is untrustworthy after a torn connection — start clean.
       await opts.onDiscard();
       await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS * attempt));
     }
   }
   throw lastError;
+}
+
+/** Name + message. Never a stack: a stack from a minified bundle is noise. */
+export function describeError(e: unknown): string {
+  if (e instanceof Error) return `${e.name}: ${e.message}`;
+  return String(e);
 }
 
 /** A dropped connection, and nothing else. */
@@ -162,6 +208,15 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
   await requestPersistence();
 
   const createdAt = now().toISOString();
+  const log = opts.log;
+  const note = (entry: Omit<RunLogEntry, "at">) => {
+    log?.push({ at: new Date().toISOString(), ...entry });
+  };
+  note({
+    phase: "plan",
+    message: `Starting: ${plan.files.length} files, ${plan.extras.length} extras, ${plan.guid}`,
+  });
+
   const verifications: FileVerification[] = [];
   const bagFiles: BagFile[] = [];
   const crateFiles: CrateFile[] = [];
@@ -192,6 +247,9 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
       bytesTotal,
       bytesPerSecond: null,
     });
+
+    const fileStarted = Date.now();
+    note({ phase: "stage", path: file.path, index: index + 1, message: `Downloading (${file.size} bytes)` });
 
     try {
       /**
@@ -224,7 +282,19 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
                 bytesPerSecond: p.bytesPerSecond,
               }),
           }),
-        { signal: opts.signal, onDiscard: () => discardStaged(file.osfFileId).catch(() => {}) },
+        {
+          signal: opts.signal,
+          onDiscard: () => discardStaged(file.osfFileId).catch(() => {}),
+          onRetry: (attempt, e) =>
+            note({
+              phase: "stage",
+              path: file.path,
+              index: index + 1,
+              attempt,
+              message: "Download failed, retrying",
+              error: describeError(e),
+            }),
+        },
       );
 
       const verification = verifyFile({
@@ -248,6 +318,13 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
         destinationExpected: false,
       });
       verifications.push(verification);
+      note({
+        phase: "verify",
+        path: file.path,
+        index: index + 1,
+        message: `${verification.state}${verification.problems.length ? `: ${verification.problems[0]}` : ""}`,
+        ms: Date.now() - fileStarted,
+      });
 
       if (verification.state !== "failed") {
         archiveEntries.push({ name: `data/${file.path}`, input: await stagedBlob(file.osfFileId) });
@@ -269,6 +346,14 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
       // Recorded, not thrown. The run continues so the researcher gets a complete list of
       // what failed instead of only the first thing.
       const message = e instanceof Error ? e.message : "Unknown error";
+      note({
+        phase: "stage",
+        path: file.path,
+        index: index + 1,
+        message: "Failed",
+        error: describeError(e),
+        ms: Date.now() - fileStarted,
+      });
       verifications.push({
         osfFileId: file.osfFileId,
         path: file.path,
@@ -291,10 +376,11 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
         await discardStaged(file.osfFileId).catch(() => {});
         break;
       }
-    } finally {
-      // Release staging immediately: peak disk stays at one file, not the project.
-      await discardStaged(file.osfFileId).catch(() => {});
     }
+    // NOTHING is discarded here. See the note above `clearStaging()` below: the archive
+    // holds a Blob for every staged file and only reads them when the ZIP is assembled at
+    // the end, so deleting a file here leaves a dangling reference that fails at packaging
+    // time — which is exactly what shipped, and what a real export died of.
   }
 
   opts.onProgress?.({
@@ -382,9 +468,32 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
 
   // client-zip streams; JSZip would buffer the whole archive in memory and cannot
   // produce a multi-gigabyte export.
+  //
+  // ⚠️ Every staged file must still EXIST at this moment. `archiveEntries` holds a `Blob`
+  // per file, backed by its OPFS file, and those bytes are read here — not when the entry
+  // was pushed. Discarding each file right after staging it (which the code used to do,
+  // under a comment claiming "peak disk stays at one file") leaves every one of those
+  // Blobs dangling, and the ZIP fails on the first one it reads. In Firefox that surfaces
+  // as `AbortError: The operation was aborted`, which names neither the cause nor the file.
+  //
+  // The honest consequence: peak browser-storage use for a local export is the whole
+  // project, not one file. The preflight says so before the run starts.
+  note({
+    phase: "package",
+    message: `Building the archive from ${archiveEntries.length} entries`,
+  });
+  const packStarted = Date.now();
   const blob = await downloadZip(
     archiveEntries.map((e) => ({ name: e.name, input: e.input })),
   ).blob();
+  note({
+    phase: "package",
+    message: `Archive built: ${blob.size} bytes`,
+    ms: Date.now() - packStarted,
+  });
+
+  // Safe now: the archive has been materialised, so nothing else needs the staged copies.
+  await clearStaging().catch(() => {});
 
   opts.onProgress?.({
     phase: "done",
@@ -394,6 +503,11 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
     bytesDone,
     bytesTotal,
     bytesPerSecond: null,
+  });
+
+  note({
+    phase: "done",
+    message: `${verdict.status}: ${verdict.counts.verified} verified, ${verdict.counts.failed} failed, ${verdict.counts.unverifiable} unverifiable`,
   });
 
   return {

@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.10.4 — 2026-08-14
+
+### Fixed
+- **🚨 The export deleted every file before it packaged them.** This is what the
+  `AbortError` was, and it has been there since v1.8.0. Each staged file's `Blob` was
+  pushed into the archive list and the backing storage deleted **immediately afterwards**,
+  under a comment claiming "peak disk stays at one file". But the ZIP is assembled at the
+  *end*, and that is when those Blobs are read — by which point every one of them was
+  dangling. Firefox reports reading a deleted file as `AbortError: The operation was
+  aborted`, naming neither the cause nor a file, which is why two rounds of fixes aimed at
+  the network missed it. Staged files now live until the archive exists, and are cleared
+  together afterwards.
+  - **The honest consequence, now stated in the preflight:** a local export uses browser
+    storage equal to the whole project, not one file at a time. The old comment described a
+    property the code did not have.
+
+### Added
+- **A run log.** Every step — file, position, phase, retry attempt, duration, and the exact
+  error name and message — recorded as the run goes, shown on both the success and failure
+  screens, and downloadable or copyable in one click. It is kept in an array the *caller*
+  owns, so it survives even a run that throws, which is exactly when it is needed.
+  `AbortError: The operation was aborted` becomes `stage [48] osfstorage/big.csv (attempt
+  3): Download failed — AbortError: …`.
+- **The failure message now names the last thing the run did**, e.g. *Failed during
+  "package" on osfstorage/x.csv*, instead of only repeating the exception.
+- **The error title matches what failed.** An export that died mid-run was headed "Could
+  not read this project", which sends people to look in entirely the wrong place; it now
+  says "The export did not finish" and offers a route back to the preflight rather than a
+  reload.
+
 ## 1.10.3 — 2026-08-14
 
 ### Fixed

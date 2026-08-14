@@ -32,6 +32,7 @@ vi.mock("@/lib/transition/stage-opfs", () => ({
   // fetch; this is the environment gap, spelled out so nobody re-debugs it.
   stagedBlob: vi.fn(async (osfFileId: string) => new NodeBlob([staged.get(osfFileId)!.body])),
   discardStaged: vi.fn(async () => {}),
+  clearStaging: vi.fn(async () => {}),
 }));
 
 // Same environment gap, one layer up: client-zip builds its archive with the global

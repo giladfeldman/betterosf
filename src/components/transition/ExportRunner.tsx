@@ -1,7 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { runExport, type ExportPlan, type ExportProgress, type ExportResult } from "@/lib/transition/run-export";
+import {
+  runExport,
+  describeError,
+  type ExportPlan,
+  type ExportProgress,
+  type ExportResult,
+  type RunLogEntry,
+} from "@/lib/transition/run-export";
 import { opfsAvailable } from "@/lib/transition/stage-opfs";
 import { clausesByIds, TRANSITION_DIALOG_CLAUSE_IDS, TERMS_VERSION } from "@/lib/terms";
 import { downloadBlob } from "@/lib/backup/download";
@@ -38,6 +45,12 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
   const [result, setResult] = useState<ExportResult | null>(null);
   const [destination, setDestination] = useState<Destination>("local");
   const [saveState, setSaveState] = useState<SaveOutcome | null>(null);
+  /**
+   * The run diary. Held in a ref so it survives a throw — the case where it matters —
+   * and mirrored into state at the end so the UI can render it.
+   */
+  const runLog = useRef<RunLogEntry[]>([]);
+  const [logView, setLogView] = useState<RunLogEntry[]>([]);
   const abort = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
@@ -75,6 +88,8 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
     setPhase("running");
     setError(null);
     abort.current = new AbortController();
+    runLog.current = [];
+    setLogView([]);
 
     // Best-effort: a laptop that sleeps mid-run stalls the transfer. Released in `finally`.
     const wakeLock = await keepScreenAwake();
@@ -114,6 +129,7 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
         now: () => new Date(),
         signal: abort.current.signal,
         onProgress: setProgress,
+        log: runLog.current,
       });
       setResult(r);
       setPhase("done");
@@ -138,19 +154,26 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
         })
         .catch(() => {});
     } catch (e) {
+      // The last thing the run managed to do is the most useful sentence in the report.
+      const lastStep = runLog.current.at(-1);
       setError({
         message: e instanceof Error ? e.message : "The export failed.",
-        action: "Nothing on OSF was changed. Anything already downloaded is still on your computer.",
+        action:
+          "Nothing on OSF was changed. Open the run log below and send it with a bug report — it says exactly where this stopped.",
         code: "export_failed",
         status: 0,
-        detail: e instanceof Error ? `${e.name}: ${e.message}` : null,
+        detail: lastStep
+          ? `Failed during "${lastStep.phase}"${lastStep.path ? ` on ${lastStep.path}` : ""}. Last step: ${lastStep.message}. ${describeError(e)}`
+          : describeError(e),
         requestId: null,
         at: new Date().toISOString(),
         endpoint: null,
       });
+      setLogView([...runLog.current]);
       setPhase("error");
     } finally {
       await wakeLock.release();
+      setLogView([...runLog.current]);
     }
   }
 
@@ -163,7 +186,20 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
   }
 
   if (phase === "error" && error) {
-    return <ErrorNotice error={error} title="Could not read this project" onRetry={() => void load()} />;
+    // The title has to match what actually failed: an export that died mid-run is not a
+    // project we could not read, and saying so sends people to look in the wrong place.
+    const isExportFailure = error.code === "export_failed";
+    return (
+      <div>
+        <ErrorNotice
+          error={error}
+          title={isExportFailure ? "The export did not finish" : "Could not read this project"}
+          onRetry={() => (isExportFailure ? setPhase("preflight") : void load())}
+          retryLabel={isExportFailure ? "Back to the preflight" : "Try again"}
+        />
+        <RunLog entries={logView} />
+      </div>
+    );
   }
 
   if (!plan) return null;
@@ -264,6 +300,8 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
             ? "Your browser will ask where to put it."
             : "Your browser will put it wherever it saves downloads — usually your Downloads folder, unless you have set it to ask each time."}
         </p>
+
+        <RunLog entries={logView} />
 
         <details className="mt-4">
           <summary className="cursor-pointer text-sm">Full report</summary>
@@ -379,8 +417,9 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
           <span>
             <strong>Download it to this computer.</strong> A BagIt archive with a SHA-256 manifest,
             an RO-Crate description and the full verification report. Nothing leaves your machine.
-            Files are staged in the browser while it runs and you save the finished archive at the
-            end — {canChooseSaveLocation()
+            Files are staged in the browser while it runs — it needs about{" "}
+            {formatBytes(totalBytes)} of free browser storage — and you save the finished archive at
+            the end — {canChooseSaveLocation()
               ? "your browser will ask you where to put it."
               : "your browser will save it wherever it saves downloads."}
           </span>
@@ -455,3 +494,54 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
   );
 }
 
+
+/**
+ * The run diary, rendered.
+ *
+ * Collapsed, because most runs succeed and nobody wants it then. Present, because when a
+ * run fails the difference between a useful bug report and another round trip is whether
+ * the reporter can say *which file, which phase, which attempt*. "AbortError: The operation
+ * was aborted" is none of those.
+ */
+function RunLog({ entries }: { entries: RunLogEntry[] }) {
+  if (entries.length === 0) return null;
+
+  const text = entries
+    .map((e) => {
+      const where = e.index ? ` [${e.index}]` : "";
+      const path = e.path ? ` ${e.path}` : "";
+      const attempt = e.attempt ? ` (attempt ${e.attempt})` : "";
+      const ms = typeof e.ms === "number" ? ` ${e.ms}ms` : "";
+      const err = e.error ? ` — ${e.error}` : "";
+      return `${e.at} ${e.phase}${where}${path}${attempt}: ${e.message}${ms}${err}`;
+    })
+    .join("\n");
+
+  return (
+    <details className="mt-4">
+      <summary className="cursor-pointer text-sm">Run log ({entries.length} steps)</summary>
+      <pre className="mt-2 max-h-96 overflow-auto rounded bg-neutral-100 p-3 text-xs dark:bg-neutral-900">
+        {text}
+      </pre>
+      <div className="mt-2 flex flex-wrap gap-3">
+        <button
+          type="button"
+          onClick={() => downloadBlob(new Blob([text], { type: "text/plain" }), "betterosf-run-log.txt")}
+          className="text-xs underline"
+        >
+          Download the run log
+        </button>
+        <button
+          type="button"
+          onClick={() => void navigator.clipboard?.writeText(text).catch(() => {})}
+          className="text-xs underline"
+        >
+          Copy the run log
+        </button>
+      </div>
+      <p className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">
+        This is what BetterOSF did, step by step. It contains your file paths and no credentials.
+      </p>
+    </details>
+  );
+}
