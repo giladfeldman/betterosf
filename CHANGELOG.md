@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.11.1 — 2026-08-14
+
+### Fixed
+- **🚨 Our own Content-Security-Policy was blocking every request to Zenodo.**
+  `connect-src` read `'self' https://*.osf.io` — Zenodo was never added when the transfer
+  shipped in v1.9.0 — so the browser refused each fetch to zenodo.org *before it left the
+  page*. A CSP block surfaces to JavaScript as a bare
+  `TypeError: NetworkError when attempting to fetch resource`, naming neither the policy
+  nor the host, and appears in the console only. That is why it read as a network problem
+  through two rounds of investigation: the OSF half kept working (`*.osf.io` was allowed),
+  the OAuth redirect kept working (a navigation, not a fetch), and Zenodo's own CORS was
+  measured clean throughout.
+  - Both Zenodo origins are listed **explicitly**, never `https://*.zenodo.org`, which
+    would authorise the browser to send a deposit credential to any subdomain. Multipart
+    part-upload URLs were measured to be on the same host, so large files are covered.
+  - A test now fails if either origin is dropped, verified by restoring the old line and
+    watching it go red.
+  - The reachability check tells the user to look for a CSP block in the console and report
+    it as a BetterOSF bug — the one cause the app itself can create, and the one I could not
+    distinguish from a blocking extension.
+
 ## 1.11.0 — 2026-08-14
 
 ### Added

@@ -36,8 +36,26 @@ const CSP_BASE_DIRECTIVES = [
   "font-src 'self' data:",
   "frame-src 'self' blob: data:",
   "worker-src 'self' blob:",
-  // The token can only ever be sent to same-origin or OSF — never an attacker origin.
-  "connect-src 'self' https://*.osf.io",
+  /**
+   * Where the browser may send a request at all.
+   *
+   * This is what confines a leaked or mis-targeted credential: the OSF token can only go
+   * to same-origin or OSF, and the Zenodo token only to Zenodo. Widen it by exact host,
+   * never by wildcard — `https://*.zenodo.org` would authorise every subdomain anyone
+   * ever stands up there.
+   *
+   * ⚠️ **A destination the app fetches from MUST be listed here.** The Zenodo transfer
+   * shipped in v1.9.0 without this line being updated, so every request to zenodo.org was
+   * blocked by the browser before it left the page — surfacing as
+   * `TypeError: NetworkError when attempting to fetch resource`, which names neither CSP
+   * nor the host and looks exactly like a network outage. The OSF half kept working, which
+   * made it look like a Zenodo problem. Verified 2026-08-14: Zenodo's own CORS was fine all
+   * along; this header was the block.
+   *
+   * Both Zenodo instances are listed because `ZENODO_ENV` chooses between them at runtime,
+   * and multipart part-upload URLs were measured to be on the same host as the API.
+   */
+  "connect-src 'self' https://*.osf.io https://zenodo.org https://sandbox.zenodo.org",
 ];
 
 function buildCsp(nonce: string): string {

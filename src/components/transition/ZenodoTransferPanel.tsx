@@ -195,7 +195,7 @@ export function ZenodoTransferPanel({
         });
         throw new Error(
           reach.kind === "unreachable"
-            ? `Your browser could not reach ${env === "production" ? "zenodo.org" : "sandbox.zenodo.org"} at all. The request never completed, so this is not a permissions problem — something between the browser and Zenodo is blocking it. Common causes: a privacy or ad-blocking extension, a VPN or corporate proxy, or Zenodo being down. Nothing was created in your Zenodo account.`
+            ? `Your browser could not reach ${env === "production" ? "zenodo.org" : "sandbox.zenodo.org"} at all — the request never completed, so this is not a permissions problem. Open your browser's console: if it says the request was blocked by a Content Security Policy, that is a BetterOSF bug and worth reporting. Otherwise the usual causes are a privacy or ad-blocking extension, a VPN or corporate proxy, or Zenodo being down. Nothing was created in your Zenodo account.`
             : `Zenodo refused the connection (HTTP ${reach.status}). Disconnect and reconnect your Zenodo account, then try again.`,
         );
       }
