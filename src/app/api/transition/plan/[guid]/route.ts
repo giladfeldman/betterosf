@@ -7,6 +7,7 @@ import { getNodeWikis } from "@/lib/osf/wikis";
 import { getNodeContributors } from "@/lib/osf/contributors";
 import { getNodeIdentifiers, findDoi, getNodeAddons, getNodeLicense } from "@/lib/osf/project-extras";
 import { mapWithConcurrency } from "@/lib/util/concurrency";
+import { waterbutlerDownloadUrl } from "@/lib/osf/waterbutler-url";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -68,11 +69,32 @@ export async function GET(
           folders.push({ listingUrl: entry.listingUrl, prefix: `${prefix}${entry.name}/` });
           continue;
         }
+        // The BROWSER fetches these, so the URL has to be one a browser can fetch.
+        // OSF's own `links.download` (osf.io/download/<id>/) sends no CORS headers at
+        // all, so every file failed with "NetworkError when attempting to fetch
+        // resource" — the export never worked on real data. Waterbutler with `?direct=`
+        // is the form that answers the preflight and streams the bytes without a
+        // redirect to a CORS-less storage bucket. Measured 2026-08-14.
+        let downloadUrl: string;
+        try {
+          downloadUrl = waterbutlerDownloadUrl({
+            guid,
+            provider: entry.provider ?? "",
+            path: entry.providerPath ?? "",
+          });
+        } catch {
+          // A file OSF described without a provider or path cannot be fetched by the
+          // browser at all. Skipping it silently would produce an export that looks
+          // complete and is not, so it is planned with no URL and fails loudly during
+          // the run, where reconcile() counts it.
+          downloadUrl = "";
+        }
+
         files.push({
           osfFileId: entry.id,
           path: `${prefix}${entry.name}`,
           size: entry.size ?? 0,
-          downloadUrl: entry.downloadUrl,
+          downloadUrl,
           md5: entry.md5,
           sha256: entry.sha256,
         });

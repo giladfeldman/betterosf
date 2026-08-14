@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.10.2 — 2026-08-14
+
+### Fixed
+- **🚨 The export downloaded nothing. Every file, every project, since v1.8.0.** A 79-file
+  export reported `0 of 79 verified; 79 failed`, each with *"NetworkError when attempting to
+  fetch resource"*. The browser was fetching OSF's `links.download`
+  (`https://osf.io/download/<id>/`), and **that host sends no CORS headers at all** — a
+  `fetch` carrying `Authorization` triggers a preflight, the preflight fails, and no request
+  ever leaves the tab.
+
+  Why it survived a "verified CORS matrix": every *other* consumer of that URL is
+  server-side (the ZIP route, the download proxy), where CORS does not exist — and the
+  matrix itself was measured with a server-side client, which cannot observe CORS either.
+  **Node's `fetch` ignores CORS entirely, so a probe run in Node can only ever confirm that
+  a URL responds, never that a browser may use it.**
+
+  Measured against the real hosts on 2026-08-14:
+  | URL | Preflight | Result |
+  |---|---|---|
+  | `osf.io/download/<id>/` | `ACAO: null` | blocked outright |
+  | `files.osf.io/v1/resources/…` | `ACAO: <origin>`, allows `Range`, `Authorization` | **302 → `storage.googleapis.com`, which sends no CORS headers** — the redirect fails too |
+  | `files.osf.io/v1/resources/…?direct=` | `ACAO: <origin>` | streams the bytes, no redirect ✓ |
+
+  The plan now builds `?direct=` Waterbutler URLs. A file OSF describes without a provider
+  or path gets an empty URL and **fails loudly** rather than being dropped from a plan that
+  would then look complete.
+- **A resumed download is restarted rather than trusted.** Waterbutler's `?direct=` answers
+  a ranged request with `200` and no `Content-Range`. The bytes really are the requested
+  range — verified by comparing them against the whole file — but a server that does not say
+  so cannot be taken at its word, and appending on a guess yields a file of the right length
+  with the wrong contents. `checkRangeResponse` already refused it; it claimed "the transfer
+  restarts instead" while the code actually threw. Now it restarts, so that sentence is true.
+
 ## 1.10.1 — 2026-08-14
 
 ### Fixed

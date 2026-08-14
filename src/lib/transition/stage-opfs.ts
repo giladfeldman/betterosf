@@ -41,6 +41,8 @@ export type StageOptions = {
   declaredSize: number;
   signal?: AbortSignal;
   onProgress?: (p: StageProgress) => void;
+  /** Internal: set when retrying from zero after an unverifiable resume. */
+  forceRestart?: boolean;
 };
 
 export class StagingUnavailableError extends Error {}
@@ -161,8 +163,20 @@ export async function stageFile(opts: StageOptions): Promise<StagedFile> {
   const name = stagingName(opts.osfFileId);
   const dir = await stagingDir();
 
-  let already = await stagedSize(opts.osfFileId);
-  let decision = planRange(already, opts.declaredSize);
+  // An empty URL would `fetch("")`, which resolves against the current page and returns
+  // this app's own HTML — caught downstream by the content-type check, but as a confusing
+  // "that is an error page" rather than the truth. The plan leaves this empty when OSF
+  // described a file without the provider and path a Waterbutler URL needs.
+  if (!opts.url) {
+    throw new Error(
+      "OSF did not say where this file's bytes live, so it cannot be downloaded. It is recorded as failed rather than skipped.",
+    );
+  }
+
+  let already = opts.forceRestart ? 0 : await stagedSize(opts.osfFileId);
+  let decision = opts.forceRestart
+    ? planRange(0, opts.declaredSize)
+    : planRange(already, opts.declaredSize);
 
   if (decision.action === "restart") {
     await discardStaged(opts.osfFileId);
@@ -197,6 +211,17 @@ export async function stageFile(opts: StageOptions): Promise<StagedFile> {
       // Any doubt about what the server sent means the stage is untrustworthy. Throw it
       // away rather than append to it — a wrong file is worse than a slow one.
       await discardStaged(opts.osfFileId);
+
+      // If the only problem is that the resume could not be VERIFIED, start the file
+      // again from zero instead of failing it. Waterbutler's `?direct=` form answers a
+      // ranged request with `200` and no `Content-Range` — the bytes are in fact the
+      // requested range (measured 2026-08-14), but a server that does not say so cannot
+      // be taken at its word. `checkRangeResponse` already said "the transfer restarts
+      // instead"; this is the code that makes that sentence true, rather than throwing
+      // and failing a file that only needed downloading again.
+      if (decision.from > 0) {
+        return stageFile({ ...opts, forceRestart: true });
+      }
       throw new Error(check.problem);
     }
 

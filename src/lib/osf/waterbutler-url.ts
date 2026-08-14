@@ -304,3 +304,55 @@ export function validateUploadTarget(target: UploadTarget): UploadTarget {
     newFolderUrl: cleanOptionalUrl(target.newFolderUrl),
   };
 }
+
+/**
+ * A Waterbutler URL the BROWSER can actually fetch a file's bytes from.
+ *
+ * This exists because the export was fetching `links.download` — `https://osf.io/download/<id>/` —
+ * and **every single file failed** with "NetworkError when attempting to fetch resource".
+ * Measured 2026-08-14, all four facts:
+ *
+ *   - `https://osf.io/download/<id>/` sends **no CORS headers at all** (`ACAO: null` on both
+ *     the preflight and the GET). A browser `fetch` carrying `Authorization` triggers a
+ *     preflight, the preflight fails, and no request is ever made. Server-side callers (the
+ *     ZIP route, the download proxy) are unaffected, which is why this went unnoticed: it
+ *     only breaks in a browser, and only the transition toolkit fetches OSF from one.
+ *   - The Waterbutler URL for the same file answers the preflight with
+ *     `ACAO: <our origin>` and `Access-Control-Allow-Headers: Range, …, Authorization`.
+ *   - **But plain Waterbutler 302s to `storage.googleapis.com`, which sends no CORS headers
+ *     either** — so following the redirect fails too. This is the trap: the redirect makes
+ *     Waterbutler *look* usable when checked with a server-side client, because Node's
+ *     fetch does not enforce CORS at all.
+ *   - **`?direct=` makes Waterbutler stream the bytes itself**, no redirect, CORS intact.
+ *     That is the only form that works from a browser.
+ *
+ * Note the response is then `200` even for a ranged request, with no `Content-Range` — the
+ * bytes ARE the requested range (verified by comparing them against the whole file), but
+ * the server does not say so. `checkRangeResponse` therefore cannot confirm a resume and
+ * restarts the file instead, which is the safe reading of an unverifiable claim.
+ */
+export function waterbutlerDownloadUrl(input: {
+  guid: string;
+  provider: string;
+  /** OSF's `attributes.path`, e.g. "/659f816ef2240f03a732e177". Already leading-slashed. */
+  path: string;
+}): string {
+  if (!isValidGuid(input.guid)) {
+    throw new OsfWriteError(400, "invalid", `Not a valid OSF guid: ${input.guid}`);
+  }
+  const provider = input.provider.trim();
+  if (!provider || provider.includes("/")) {
+    throw new OsfWriteError(400, "invalid", `Not a valid storage provider: ${input.provider}`);
+  }
+  // The path is an opaque provider-side id or path. Encode each segment but keep the
+  // separators, exactly as the file-view page does.
+  const encoded = input.path
+    .split("/")
+    .filter((seg) => seg.length > 0)
+    .map((seg) => encodeURIComponent(safeDecode(seg)))
+    .join("/");
+  if (!encoded) {
+    throw new OsfWriteError(400, "invalid", "Empty file path");
+  }
+  return `${WATERBUTLER_BASE}/${input.guid}/providers/${provider}/${encoded}?direct=`;
+}

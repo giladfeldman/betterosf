@@ -18,7 +18,24 @@ export type FileEntry =
       size: number | null;
       modified: string;
       materializedPath: string;
+      /**
+       * OSF's `links.download` (`https://osf.io/download/<id>/`).
+       *
+       * SERVER-SIDE ONLY. That host sends no CORS headers, so a browser cannot fetch it —
+       * see `waterbutlerDownloadUrl` for the form that works from a browser, and use that
+       * for anything the client will fetch itself.
+       */
       downloadUrl: string;
+      /**
+       * Storage provider ("osfstorage", "dropbox", …) and the provider-side path, both
+       * needed to build a browser-fetchable Waterbutler URL.
+       *
+       * Optional because a few call sites synthesise a FileEntry from a URL they already
+       * hold. A consumer that needs a Waterbutler URL must REFUSE when they are absent
+       * rather than build one from an empty string — see the transition plan route.
+       */
+      provider?: string;
+      providerPath?: string;
       /** OSF's own Waterbutler delete link. Optional: absent means no delete affordance. */
       deleteUrl?: string;
       /**
@@ -52,6 +69,8 @@ type RawEntry = {
     name?: string;
     kind?: "file" | "folder";
     provider?: string;
+    /** Provider-side id/path, e.g. "/659f816…". Needed to build a Waterbutler URL. */
+    path?: string;
     size?: number | null;
     modified?: string;
     materialized_path?: string;
@@ -84,6 +103,8 @@ function parseEntry(raw: RawEntry): FileEntry {
     modified: String(raw.attributes.modified ?? ""),
     materializedPath: String(raw.attributes.materialized_path ?? ""),
     downloadUrl: raw.links?.download ?? "",
+    provider: raw.attributes.provider ?? undefined,
+    providerPath: raw.attributes.path ?? undefined,
     deleteUrl: raw.links?.delete,
     md5: raw.attributes.extra?.hashes?.md5 ?? null,
     sha256: raw.attributes.extra?.hashes?.sha256 ?? null,
