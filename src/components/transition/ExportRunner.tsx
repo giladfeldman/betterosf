@@ -22,6 +22,7 @@ import { ErrorNotice } from "@/components/ErrorNotice";
 import { Working } from "@/components/Progress";
 import { fetchExtras } from "./plan-extras";
 import { Stat } from "./Stat";
+import { RunLog } from "./RunLog";
 import type { PlanResponse } from "./plan-types";
 
 type Phase = "loading" | "preflight" | "running" | "done" | "error";
@@ -43,7 +44,20 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
   const [acknowledged, setAcknowledged] = useState(false);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [result, setResult] = useState<ExportResult | null>(null);
-  const [destination, setDestination] = useState<Destination>("local");
+  /**
+   * Where the copy goes.
+   *
+   * Initialised from the URL so the Zenodo OAuth round trip does not throw the choice
+   * away. Connecting sends the browser to zenodo.org and back, remounting this component;
+   * without this the researcher returns to a reset form and has to re-pick "Transfer to
+   * Zenodo" — having already told us that, and having just granted the permission that
+   * only makes sense if they meant it.
+   */
+  const [destination, setDestination] = useState<Destination>(() => {
+    if (typeof window === "undefined") return "local";
+    const params = new URLSearchParams(window.location.search);
+    return params.get("to") === "zenodo" || params.has("zenodo") ? "zenodo" : "local";
+  });
   const [saveState, setSaveState] = useState<SaveOutcome | null>(null);
   /**
    * The run diary. Held in a ref so it survives a throw — the case where it matters —
@@ -177,6 +191,20 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
     }
   }
 
+  /**
+   * Remember the choice in the URL, so a reload — or the Zenodo OAuth redirect — comes
+   * back to the same place. `replaceState` rather than a navigation: this is a UI
+   * preference, not a new page, and it should not add a history entry to back through.
+   */
+  function selectDestination(next: Destination) {
+    setDestination(next);
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (next === "zenodo") url.searchParams.set("to", "zenodo");
+    else url.searchParams.delete("to");
+    window.history.replaceState(null, "", url);
+  }
+
   if (phase === "loading") {
     return (
       <Working>
@@ -301,6 +329,32 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
             : "Your browser will put it wherever it saves downloads — usually your Downloads folder, unless you have set it to ask each time."}
         </p>
 
+        {/*
+          The two destinations are not exclusive, and the preflight radio implied they
+          were. A verified copy on this computer and a deposit in Zenodo answer different
+          questions — one is a backup you hold, the other is a citable location that
+          outlives OSF — and someone who has just done one is exactly the person best
+          placed to decide about the other, with the file list already read and verified.
+        */}
+        <div className="mt-6 rounded border border-neutral-300 bg-neutral-50 p-4 dark:border-neutral-700 dark:bg-neutral-900">
+          <h3 className="text-sm font-semibold">Also put a copy on Zenodo?</h3>
+          <p className="mt-1 text-sm text-neutral-700 dark:text-neutral-300">
+            The archive you just downloaded lives on this computer, and that is the copy you
+            control. A Zenodo deposit is the other half: a citable location with a DOI that stays
+            readable after OSF goes read-only. Doing both is a reasonable answer.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              selectDestination("zenodo");
+              setPhase("preflight");
+            }}
+            className="mt-3 rounded border border-neutral-400 px-4 py-2 text-sm dark:border-neutral-600"
+          >
+            Transfer this project to Zenodo →
+          </button>
+        </div>
+
         <RunLog entries={logView} />
 
         <details className="mt-4">
@@ -411,7 +465,7 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
             name="destination"
             value="local"
             checked={destination === "local"}
-            onChange={() => setDestination("local")}
+            onChange={() => selectDestination("local")}
             className="mt-1 h-4 w-4 shrink-0"
           />
           <span>
@@ -430,7 +484,7 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
             name="destination"
             value="zenodo"
             checked={destination === "zenodo"}
-            onChange={() => setDestination("zenodo")}
+            onChange={() => selectDestination("zenodo")}
             className="mt-1 h-4 w-4 shrink-0"
           />
           <span>
@@ -452,7 +506,11 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
       </fieldset>
 
       {destination === "zenodo" ? (
-        <ZenodoTransferPanel plan={plan} appVersion={appVersion} />
+        <ZenodoTransferPanel
+          plan={plan}
+          appVersion={appVersion}
+          onSwitchToDownload={() => selectDestination("local")}
+        />
       ) : null}
 
       {destination === "local" ? (
@@ -491,57 +549,5 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
         </>
       ) : null}
     </div>
-  );
-}
-
-
-/**
- * The run diary, rendered.
- *
- * Collapsed, because most runs succeed and nobody wants it then. Present, because when a
- * run fails the difference between a useful bug report and another round trip is whether
- * the reporter can say *which file, which phase, which attempt*. "AbortError: The operation
- * was aborted" is none of those.
- */
-function RunLog({ entries }: { entries: RunLogEntry[] }) {
-  if (entries.length === 0) return null;
-
-  const text = entries
-    .map((e) => {
-      const where = e.index ? ` [${e.index}]` : "";
-      const path = e.path ? ` ${e.path}` : "";
-      const attempt = e.attempt ? ` (attempt ${e.attempt})` : "";
-      const ms = typeof e.ms === "number" ? ` ${e.ms}ms` : "";
-      const err = e.error ? ` — ${e.error}` : "";
-      return `${e.at} ${e.phase}${where}${path}${attempt}: ${e.message}${ms}${err}`;
-    })
-    .join("\n");
-
-  return (
-    <details className="mt-4">
-      <summary className="cursor-pointer text-sm">Run log ({entries.length} steps)</summary>
-      <pre className="mt-2 max-h-96 overflow-auto rounded bg-neutral-100 p-3 text-xs dark:bg-neutral-900">
-        {text}
-      </pre>
-      <div className="mt-2 flex flex-wrap gap-3">
-        <button
-          type="button"
-          onClick={() => downloadBlob(new Blob([text], { type: "text/plain" }), "betterosf-run-log.txt")}
-          className="text-xs underline"
-        >
-          Download the run log
-        </button>
-        <button
-          type="button"
-          onClick={() => void navigator.clipboard?.writeText(text).catch(() => {})}
-          className="text-xs underline"
-        >
-          Copy the run log
-        </button>
-      </div>
-      <p className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">
-        This is what BetterOSF did, step by step. It contains your file paths and no credentials.
-      </p>
-    </details>
   );
 }

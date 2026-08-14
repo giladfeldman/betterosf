@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { runTransfer, FILES_PER_RECORD, type TransferProgress, type TransferResult } from "@/lib/transition/run-transfer";
 import { createBrowserLedger, getLocalJob, listLocalJobs } from "@/lib/transition/ledger";
 import { crosswalk, blockingGaps, type CrosswalkResult } from "@/lib/transition/crosswalk";
-import { planShards, ZENODO_MAX_BYTES_PER_RECORD } from "@/lib/transition/targets/zenodo";
+import { planShards, checkZenodoReachable, ZENODO_MAX_BYTES_PER_RECORD } from "@/lib/transition/targets/zenodo";
 import { RESOURCE_TYPES, DEFAULT_RESOURCE_TYPE_ID, SUGGESTED_RESOURCE_TYPE_IDS } from "@/lib/transition/resource-types";
 import { opfsAvailable } from "@/lib/transition/stage-opfs";
 import { keepScreenAwake, wakeLockSupported } from "@/lib/transition/wake-lock";
@@ -15,10 +15,11 @@ import { readApiError, networkError, type ApiError } from "@/lib/api-error";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { Working } from "@/components/Progress";
 import { fetchExtras } from "./plan-extras";
+import { RunLog } from "./RunLog";
 import { Stat } from "./Stat";
 import { PublishPanel } from "./PublishPanel";
 import type { PlanResponse } from "./plan-types";
-import type { ExportPlan } from "@/lib/transition/run-export";
+import { describeError, type ExportPlan, type RunLogEntry } from "@/lib/transition/run-export";
 
 type Connection =
   | { phase: "checking" }
@@ -41,7 +42,16 @@ type RunPhase = "idle" | "running" | "done" | "error";
  * researcher depositing participant data into a public archive may breach the consent
  * those participants gave, and BetterOSF has no way to know that from the outside.
  */
-export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; appVersion: string }) {
+export function ZenodoTransferPanel({
+  plan,
+  appVersion,
+  onSwitchToDownload,
+}: {
+  plan: PlanResponse;
+  appVersion: string;
+  /** Hands control back to the local-export flow, for the offer after a finished transfer. */
+  onSwitchToDownload: () => void;
+}) {
   const [connection, setConnection] = useState<Connection>({ phase: "checking" });
   const [resourceTypeId, setResourceTypeId] = useState<string>(DEFAULT_RESOURCE_TYPE_ID);
   const [isMirror, setIsMirror] = useState(true);
@@ -52,6 +62,9 @@ export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; 
   const [error, setError] = useState<ApiError | null>(null);
   const [resumable, setResumable] = useState<{ jobId: string; records: { recordId: string }[] } | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  /** Owned here so it survives a throw — the case where it is actually needed. */
+  const runLog = useRef<RunLogEntry[]>([]);
+  const [logView, setLogView] = useState<RunLogEntry[]>([]);
   const abort = useRef<AbortController | null>(null);
 
   const checkConnection = useCallback(async () => {
@@ -142,6 +155,8 @@ export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; 
     setError(null);
     setResult(null);
     abort.current = new AbortController();
+    runLog.current = [];
+    setLogView([]);
     const wakeLock = await keepScreenAwake();
     let runId: string | null = null;
 
@@ -160,6 +175,30 @@ export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; 
       }
       const { token: osfToken } = await osfTokenRes.json();
       const { token: zenodoToken, env } = await zenodoTokenRes.json();
+
+      // Before creating anything in someone's Zenodo account, confirm the browser can
+      // actually reach Zenodo. Otherwise the first sign of trouble is
+      // "NetworkError when attempting to fetch resource" at file 1 of 79, with drafts
+      // already created and no indication of what went wrong.
+      runLog.current.push({
+        at: new Date().toISOString(),
+        phase: "zenodo",
+        message: `Checking this browser can reach ${env === "production" ? "zenodo.org" : "sandbox.zenodo.org"}`,
+      });
+      const reach = await checkZenodoReachable({ accessToken: zenodoToken, env });
+      if (!reach.ok) {
+        runLog.current.push({
+          at: new Date().toISOString(),
+          phase: "zenodo",
+          message: `Reachability check failed (${reach.kind})`,
+          error: reach.detail,
+        });
+        throw new Error(
+          reach.kind === "unreachable"
+            ? `Your browser could not reach ${env === "production" ? "zenodo.org" : "sandbox.zenodo.org"} at all. The request never completed, so this is not a permissions problem — something between the browser and Zenodo is blocking it. Common causes: a privacy or ad-blocking extension, a VPN or corporate proxy, or Zenodo being down. Nothing was created in your Zenodo account.`
+            : `Zenodo refused the connection (HTTP ${reach.status}). Disconnect and reconnect your Zenodo account, then try again.`,
+        );
+      }
 
       const id = resume?.jobId ?? crypto.randomUUID();
       runId = id;
@@ -195,6 +234,7 @@ export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; 
         ledger: createBrowserLedger(),
         resumeRecordIds: resume ? resume.records.map((rec) => rec.recordId) : null,
         onProgress: setProgress,
+        log: runLog.current,
       });
 
       setResult(r);
@@ -215,7 +255,13 @@ export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; 
           "Nothing on OSF was changed. The Zenodo draft keeps every file already verified, so starting again continues from there rather than re-uploading.",
         code: stopped ? "stopped_by_user" : "transfer_failed",
         status: 0,
-        detail: stopped ? null : e instanceof Error ? `${e.name}: ${e.message}` : null,
+        detail: (() => {
+          if (stopped) return null;
+          const last = runLog.current.at(-1);
+          return last
+            ? `Failed during "${last.phase}"${last.path ? ` on ${last.path}` : ""}. Last step: ${last.message}. ${describeError(e)}`
+            : describeError(e);
+        })(),
         requestId: null,
         at: new Date().toISOString(),
         endpoint: null,
@@ -233,6 +279,7 @@ export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; 
       }
     } finally {
       await wakeLock.release();
+      setLogView([...runLog.current]);
     }
   }
 
@@ -382,6 +429,30 @@ export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; 
           />
         ) : null}
 
+        {/*
+          The mirror of the offer on the download screen. A Zenodo deposit is citable and
+          outlives OSF; it is not a copy the researcher personally holds. Someone who has
+          just verified 79 files into Zenodo is well placed to also keep one — and doing so
+          costs them a second download of bytes this browser has already proven correct.
+        */}
+        <div className="mt-6 rounded border border-neutral-300 bg-neutral-50 p-4 dark:border-neutral-700 dark:bg-neutral-900">
+          <h3 className="text-sm font-semibold">Also keep a copy on this computer?</h3>
+          <p className="mt-1 text-sm text-neutral-700 dark:text-neutral-300">
+            Your files are now in your Zenodo account, which is citable and outlives OSF — but it is
+            still somebody else&apos;s server. A local BagIt archive with the SHA-256 manifest is the
+            copy you hold yourself. It re-downloads from OSF, so it takes about as long again.
+          </p>
+          <button
+            type="button"
+            onClick={onSwitchToDownload}
+            className="mt-3 rounded border border-neutral-400 px-4 py-2 text-sm dark:border-neutral-600"
+          >
+            Download a verified archive as well →
+          </button>
+        </div>
+
+        <RunLog entries={logView} />
+
         <details className="mt-4">
           <summary className="cursor-pointer text-sm">Full report</summary>
           <pre className="mt-2 max-h-96 overflow-auto rounded bg-neutral-100 p-3 text-xs dark:bg-neutral-900">
@@ -404,6 +475,7 @@ export function ZenodoTransferPanel({ plan, appVersion }: { plan: PlanResponse; 
       {runPhase === "error" && error ? (
         <div className="mb-4">
           <ErrorNotice error={error} title="The transfer did not finish" />
+          <RunLog entries={logView} />
         </div>
       ) : null}
 

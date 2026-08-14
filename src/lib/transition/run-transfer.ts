@@ -28,7 +28,7 @@ import { hashBytes } from "./hash";
 import { renderReportMarkdown, renderCrosswalkCsv, reportFilename, type ReportInput } from "./report";
 import { buildRoCrate, type CrateFile } from "./ro-crate";
 import { renderDisclaimer } from "./package-bagit";
-import type { ExportPlan } from "./run-export";
+import { describeError, type ExportPlan, type RunLogEntry } from "./run-export";
 import type { FidelityRow, ZenodoMetadata } from "./crosswalk";
 import {
   createDraft,
@@ -156,6 +156,14 @@ export type RunTransferOptions = {
    */
   shardLimits?: ShardLimits;
   onProgress?: (p: TransferProgress) => void;
+  /**
+   * Appended to as the run proceeds, and owned by the CALLER so it survives a throw.
+   *
+   * A transfer touches two services and a dozen distinct calls; "NetworkError when
+   * attempting to fetch resource" identifies none of them. This is what turns that into
+   * "zenodo:createDraft failed".
+   */
+  log?: RunLogEntry[];
 };
 
 export type TransferResult = {
@@ -183,6 +191,29 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
   await requestPersistence();
 
   const createdAt = now().toISOString();
+  const log = opts.log;
+  const note = (entry: Omit<RunLogEntry, "at">) => {
+    log?.push({ at: new Date().toISOString(), ...entry });
+  };
+  /** Run a labelled step, recording success or failure — and re-throwing either way. */
+  const step = async <T,>(phase: string, message: string, fn: () => Promise<T>): Promise<T> => {
+    const started = Date.now();
+    note({ phase, message });
+    try {
+      const value = await fn();
+      note({ phase, message: `${message} — ok`, ms: Date.now() - started });
+      return value;
+    } catch (e) {
+      note({ phase, message: `${message} — FAILED`, error: describeError(e), ms: Date.now() - started });
+      throw e;
+    }
+  };
+
+  note({
+    phase: "plan",
+    message: `Starting: ${plan.files.length} files to Zenodo (${zenodo.env}), project ${plan.guid}`,
+  });
+
   const verifications: FileVerification[] = [];
   /**
    * Every per-file snapshot this run produced, kept for the whole run. The checkpoint
@@ -240,7 +271,9 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
       records.push({ recordId: priorId, paths: files.map((f) => f.path) });
       continue;
     }
-    const draft = await createDraft(zenodo, shardMetadata(opts.metadata, index, shardCount));
+    const draft = await step("zenodo", `createDraft (record ${index + 1} of ${shardCount})`, () =>
+      createDraft(zenodo, shardMetadata(opts.metadata, index, shardCount)),
+    );
     records.push({ recordId: draft.id, paths: files.map((f) => f.path) });
   }
 
@@ -318,7 +351,13 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
     // additional truth.
     let entries: Map<string, DraftFileEntry>;
     try {
-      entries = new Map((await listDraftFileEntries(zenodo, record.recordId)).map((e) => [e.key, e]));
+      entries = new Map(
+        (
+          await step("zenodo", `listDraftFiles (record ${record.recordId})`, () =>
+            listDraftFileEntries(zenodo, record.recordId),
+          )
+        ).map((e) => [e.key, e]),
+      );
     } catch {
       // Unknown is not the same as empty. Treat every file as needing work rather than
       // assuming a clean record — the opposite mistake would skip real uploads.
@@ -338,6 +377,14 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
         shardIndex: shardIndex + 1,
         shardCount,
       });
+
+      note({
+        phase: "transfer",
+        path: file.path,
+        index: globalIndex + 1,
+        message: `Downloading from OSF and uploading to Zenodo (${file.size} bytes)`,
+      });
+      const fileStarted = Date.now();
 
       const outcome = await transferOneFile({
         file,
@@ -360,6 +407,14 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
           }),
       });
 
+      note({
+        phase: "transfer",
+        path: file.path,
+        index: globalIndex + 1,
+        message: outcome.verification.state,
+        error: outcome.verification.problems[0],
+        ms: Date.now() - fileStarted,
+      });
       verifications.push(outcome.verification);
       snapshots.push(outcome.snapshot);
       pendingItems.push(outcome.snapshot);
@@ -507,6 +562,10 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
     incompleteReason: verdict.status === "complete" ? null : verdict.summary,
   });
 
+  note({
+    phase: "done",
+    message: `${verdict.status}: ${verdict.counts.verified} verified, ${verdict.counts.failed} failed, ${records.length} record(s)`,
+  });
   await saveJob(verdict.status === "complete" ? "complete" : "incomplete");
 
   opts.onProgress?.({

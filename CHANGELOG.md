@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.11.0 — 2026-08-14
+
+### Added
+- **The transfer keeps a run log too.** The export gained one in 1.10.4 and it turned the
+  next bug report into a ten-minute diagnosis; the transfer had none, so a Zenodo failure
+  said only `TypeError: NetworkError when attempting to fetch resource` — no host, no call,
+  no file. Every Zenodo call is now labelled (`zenodo: createDraft (record 1 of 1) —
+  FAILED`), shown on both the success and failure screens, downloadable and copyable.
+- **A reachability check before anything is created in your Zenodo account.** It separates
+  the three causes that need three different responses: *unreachable* (the request never
+  completed — a privacy extension, VPN or proxy, or Zenodo down), *rejected* (Zenodo
+  answered no — reconnect), and fine. Previously the first sign of trouble was a
+  `NetworkError` at file 1 of 79, with drafts already littering the account.
+- **Download and transfer are no longer either/or.** After a verified download you are
+  offered the Zenodo transfer; after a transfer you are offered the local archive. They
+  answer different questions — one is a copy you hold, the other is a citable location that
+  outlives OSF — and the radio button implied choosing one ruled out the other.
+
+### Fixed
+- **The Zenodo OAuth round trip no longer forgets what you chose.** Connecting sends the
+  browser to zenodo.org and back, remounting the page — which reset the destination to
+  "download", so you had to re-pick "Transfer to Zenodo" having just granted the permission
+  that only makes sense if you meant it. The choice is now carried in the URL.
+
 ## 1.10.5 — 2026-08-14
 
 ### Fixed

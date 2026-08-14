@@ -475,3 +475,44 @@ export function shardRelatedIdentifiers(
       relation_type: { id: "ispartof" },
     }));
 }
+
+/**
+ * A cheap authenticated call, made BEFORE a transfer starts.
+ *
+ * It exists to turn an opaque failure into a diagnosis. A browser that cannot reach
+ * zenodo.org reports only `TypeError: NetworkError when attempting to fetch resource` —
+ * no host, no status, no clue — and if that arrives at file 1 of 79 after the drafts were
+ * created, the researcher is left with litter in their Zenodo account and no idea why.
+ *
+ * Distinguishes the three things it can be, which need three different responses:
+ *   - `unreachable` — the request never completed. Nothing to do with credentials: an
+ *     extension, a VPN, a corporate proxy or an offline machine.
+ *   - `rejected`    — Zenodo answered, and said no. The token is wrong, expired or revoked.
+ *   - `ok`          — reachable and authenticated.
+ */
+export type ZenodoReachability =
+  | { ok: true }
+  | { ok: false; kind: "unreachable"; detail: string }
+  | { ok: false; kind: "rejected"; status: number; detail: string };
+
+export async function checkZenodoReachable(auth: ZenodoAuth): Promise<ZenodoReachability> {
+  let res: Response;
+  try {
+    res = await fetch(`${zenodoApiBase(auth.env)}/user/records?size=1`, {
+      headers: { Authorization: `Bearer ${auth.accessToken}` },
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      kind: "unreachable",
+      detail: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+    };
+  }
+  if (res.ok) return { ok: true };
+  return {
+    ok: false,
+    kind: "rejected",
+    status: res.status,
+    detail: (await res.text().catch(() => "")).slice(0, 200),
+  };
+}
