@@ -85,7 +85,6 @@ describe("a resume against ?direct= is refused, not trusted", () => {
     const check = checkRangeResponse({
       status: 200,
       requestedFrom: 5000,
-      contentType: "application/octet-stream",
       contentRange: null,
       expectedTotal: 18227,
     });
@@ -97,7 +96,6 @@ describe("a resume against ?direct= is refused, not trusted", () => {
       checkRangeResponse({
         status: 200,
         requestedFrom: 0,
-        contentType: "application/octet-stream",
         contentRange: null,
         expectedTotal: 18227,
       }).ok,

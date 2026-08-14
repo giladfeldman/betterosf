@@ -24,7 +24,7 @@ vi.mock("@/lib/transition/stage-opfs", () => ({
   stageFile: vi.fn(async (opts: { osfFileId: string; declaredSize: number }) => {
     const s = staged.get(opts.osfFileId);
     if (!s) throw new Error(`OSF returned 404 for ${opts.osfFileId}`);
-    return { handleName: opts.osfFileId, size: s.size, digest: { md5: s.md5, sha256: s.sha256 } };
+    return { handleName: opts.osfFileId, size: s.size, digest: { md5: s.md5, sha256: s.sha256 }, contentType: "application/octet-stream" };
   }),
   // A **Node** Blob, not jsdom's. `fetch` here is undici's, and it recognises only its own
   // Blob — handed jsdom's it sends the string "[object Blob]", so every checksum comparison

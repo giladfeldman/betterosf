@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.10.5 — 2026-08-14
+
+### Fixed
+- **🚨 12 of 79 files were failed for a header OSF got wrong.** The export rejected any
+  response typed `text/html` as "an error page rather than file content" — and OSF serves
+  small text-ish files (`.bib`, `.Rmd`, several `.docx`) as `text/html; charset=UTF-8`
+  **with their real, complete bytes**. Measured 2026-08-14: every failure in a real 79-file
+  export was under ~82 KB, every success over ~160 KB, and `grateful-refs.bib` came back as
+  `text/html` containing exactly the BibTeX it should, at exactly its declared size.
+  - A content type is the **server's claim about** the bytes; a checksum is a statement
+    **about the bytes themselves**. The checksum now decides: when OSF's own published hash
+    matches what arrived, the content is provably right and the header is provably wrong,
+    and the run records both rather than discarding the file.
+  - **The protection is not weakened where it was actually needed.** With no checksum to
+    fall back on — add-on storage (Dropbox, Drive, S3, GitHub), which publishes none — a
+    suspect content type stays fatal, because it is then the only signal there is. A file
+    whose bytes do not match OSF's checksum still fails regardless of its header.
+  - The check also moved from fetch time to verify time, since it can only be judged once
+    the bytes exist and can be hashed.
+
 ## 1.10.4 — 2026-08-14
 
 ### Fixed

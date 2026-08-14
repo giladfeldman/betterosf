@@ -69,15 +69,10 @@ describe("checkRangeResponse", () => {
     );
   });
 
-  it("rejects an HTML error page even with a 206", () => {
-    const r = checkRangeResponse({ ...base, contentType: "text/html; charset=utf-8" });
-    expect(r.ok).toBe(false);
-    expect((r as { problem: string }).problem).toMatch(/error page/i);
-  });
 
-  it("rejects a JSON body", () => {
-    expect(checkRangeResponse({ ...base, contentType: "application/json" }).ok).toBe(false);
-  });
+  // Content-type is no longer judged here. OSF serves small text-ish files as text/html
+  // with their real contents (measured 2026-08-14), so the call is made in verifyFile,
+  // after the bytes exist and a checksum can corroborate or refute the header.
 
   it("rejects a server that starts from the wrong offset", () => {
     const r = checkRangeResponse({ ...base, contentRange: "bytes 0-99/100" });

@@ -24,6 +24,11 @@ export type StagedFile = {
   handleName: string;
   size: number;
   digest: DualDigest;
+  /**
+   * What the server SAID the bytes were, carried forward so `verifyFile` can weigh it
+   * against the checksum. Null on a resumed file that made no request this time.
+   */
+  contentType: string | null;
 };
 
 export type StageProgress = {
@@ -160,6 +165,7 @@ export async function stagedBlob(osfFileId: string): Promise<Blob> {
  * compares against OSF's declared hashes and, later, against what the destination stored.
  */
 export async function stageFile(opts: StageOptions): Promise<StagedFile> {
+  let contentType: string | null = null;
   const name = stagingName(opts.osfFileId);
   const dir = await stagingDir();
 
@@ -200,10 +206,11 @@ export async function stageFile(opts: StageOptions): Promise<StagedFile> {
       throw new Error(`OSF returned ${res.status} for this file.`);
     }
 
+    contentType = res.headers.get("content-type");
+
     const check = checkRangeResponse({
       status: res.status,
       requestedFrom: decision.from,
-      contentType: res.headers.get("content-type"),
       contentRange: res.headers.get("content-range"),
       expectedTotal: opts.declaredSize,
     });
@@ -275,6 +282,7 @@ export async function stageFile(opts: StageOptions): Promise<StagedFile> {
     handleName: name,
     size: file.size,
     digest: { md5: digest.md5, sha256: digest.sha256 },
+    contentType,
   };
 }
 

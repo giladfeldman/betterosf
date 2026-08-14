@@ -653,7 +653,7 @@ async function transferOneFile(
       declared: { md5: file.md5, sha256: file.sha256 },
       written: [{ start: 0, end: staged.size }],
       local: staged.digest,
-      contentType: null,
+      contentType: staged.contentType,
       destinationExpected: false,
     });
     if (pre.state === "failed") {
@@ -730,7 +730,7 @@ async function transferOneFile(
       written: [{ start: 0, end: staged.size }],
       local: staged.digest,
       remoteMd5,
-      contentType: null,
+      contentType: staged.contentType,
       destinationExpected: true,
     });
 

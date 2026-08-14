@@ -28,6 +28,28 @@ function input(over: Partial<FileVerificationInput> = {}): FileVerificationInput
   };
 }
 
+describe("a checksum outranks a mislabelled content type", () => {
+  it("verifies real content OSF served as text/html", () => {
+    // Measured 2026-08-14: Waterbutler returns small text-ish files (.bib, .Rmd, several
+    // .docx) as `text/html; charset=UTF-8` with their real, complete bytes. Rejecting on
+    // the header alone failed 12 of 79 files in a real export whose data was perfect.
+    //
+    // A content type is the SERVER'S CLAIM ABOUT the bytes; a checksum is a statement
+    // about the bytes themselves. When OSF's own published hash matches what arrived, the
+    // content is provably right and the header is provably wrong.
+    const r = verifyFile(input({ contentType: "text/html; charset=UTF-8" }));
+    expect(r.state).toBe("verified");
+    expect(r.checks.find((c) => c.name === "content-type")?.detail).toMatch(
+      /bytes match the checksum/i,
+    );
+  });
+
+  it("still records what the server actually said, rather than hiding it", () => {
+    const r = verifyFile(input({ contentType: "text/html; charset=UTF-8" }));
+    expect(r.checks.find((c) => c.name === "content-type")?.detail).toContain("text/html");
+  });
+});
+
 describe("the happy path is genuinely reachable", () => {
   it("verifies a file whose three comparisons all agree", () => {
     const r = verifyFile(input());
@@ -37,16 +59,35 @@ describe("the happy path is genuinely reachable", () => {
 });
 
 describe("false greens that must NOT verify", () => {
-  it("an error page served with HTTP 200", () => {
-    // OSF's links.download drops auth across its redirect and returns a 263-byte
-    // Forbidden page. Both hashes would agree — on the wrong bytes.
-    const r = verifyFile(input({ contentType: "text/html; charset=utf-8" }));
+  it("an error page served with HTTP 200, when OSF published no checksum", () => {
+    // OSF's links.download drops auth across its redirect and returns a 263-byte Forbidden
+    // page. For add-on storage (Dropbox, Drive, S3, GitHub) OSF publishes no checksum, so
+    // the content type is the ONLY signal there is — and it stays fatal.
+    const r = verifyFile(
+      input({
+        contentType: "text/html; charset=utf-8",
+        declared: { md5: null, sha256: null },
+      }),
+    );
     expect(r.state).toBe("failed");
     expect(r.problems.join(" ")).toMatch(/error page/i);
   });
 
-  it("a JSON error body served with HTTP 200", () => {
-    expect(verifyFile(input({ contentType: "application/json" })).state).toBe("failed");
+  it("a JSON error body served with HTTP 200, when OSF published no checksum", () => {
+    expect(
+      verifyFile(input({ contentType: "application/json", declared: { md5: null, sha256: null } }))
+        .state,
+    ).toBe("failed");
+  });
+
+  it("an error page whose bytes do NOT match the checksum OSF published", () => {
+    // The realistic shape of the original attack: a Forbidden page cannot hash to the
+    // value OSF holds for the real file, so the checksum catches it regardless.
+    const r = verifyFile(
+      input({ contentType: "text/html; charset=utf-8", local: { md5: "a".repeat(32), sha256: "b".repeat(64) } }),
+    );
+    expect(r.state).toBe("failed");
+    expect(r.problems.join(" ")).toMatch(/does NOT match/i);
   });
 
   it("a resumed download with a GAP", () => {

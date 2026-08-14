@@ -157,30 +157,19 @@ export function verifyFile(input: FileVerificationInput): FileVerification {
     if (!passed) problems.push(detail);
   };
 
-  // 1. Content sanity — an HTML/JSON body is an error page, whatever the status was.
-  if (input.contentType && SUSPECT_CONTENT_TYPES.some((re) => re.test(input.contentType!))) {
-    add(
-      "content-type",
-      false,
-      `Received ${input.contentType}, which is an error page rather than file content.`,
-    );
-  } else {
-    add("content-type", true, input.contentType ?? "not recorded");
-  }
-
-  // 2. Exact byte coverage — no gaps, no overlaps, exact length.
+  // 1. Exact byte coverage — no gaps, no overlaps, exact length.
   const gaps = coverageProblems(input.written, input.declaredSize);
   if (gaps.length > 0) for (const g of gaps) add("byte-coverage", false, g);
   else add("byte-coverage", true, `All ${input.declaredSize} bytes accounted for exactly once.`);
 
-  // 3. The source must not have moved under us.
+  // 2. The source must not have moved under us.
   if (input.changedDuringTransfer) {
     add("source-stable", false, "The file changed on OSF while it was being transferred.");
   } else {
     add("source-stable", true, "Unchanged on OSF during transfer.");
   }
 
-  // 4. Local vs OSF — the comparison that proves we received the right bytes.
+  // 3. Local vs OSF — the comparison that proves we received the right bytes.
   const haveDeclared = Boolean(input.declared.sha256 || input.declared.md5);
   if (!haveDeclared) {
     add(
@@ -197,6 +186,41 @@ export function verifyFile(input: FileVerificationInput): FileVerification {
       const ok = eqHash(input.local.md5, input.declared.md5);
       add("md5", ok, ok ? "Matches the MD5 OSF reported." : "MD5 does NOT match OSF's.");
     }
+  }
+
+  // 4. Content sanity — but ONLY as a fallback, because it is the weakest signal we have.
+  //
+  // An HTML body served with HTTP 200 really can be an error page saved under the name of
+  // a research file, which is why this check exists. But a content type is a *claim by the
+  // server about the bytes*, and OSF demonstrably gets it wrong: measured 2026-08-14,
+  // Waterbutler serves small text-ish files (`.bib`, `.Rmd`, and several `.docx`) as
+  // `text/html; charset=UTF-8` while returning their real, complete contents. Rejecting on
+  // that alone failed 12 of 79 files in a real export whose bytes were perfect.
+  //
+  // A checksum is a statement about the bytes themselves, and it outranks a header every
+  // time: an error page cannot hash to the value OSF published for the file. So when the
+  // checksums corroborate the content, the header is recorded and disregarded. When there
+  // is NO checksum to fall back on — add-on storage, which publishes none — the header is
+  // all we have, and it stays fatal.
+  const suspectType =
+    Boolean(input.contentType) &&
+    SUSPECT_CONTENT_TYPES.some((re) => re.test(input.contentType!));
+  const checksumCorroborates = haveDeclared && !problems.some((p) => /does NOT match/i.test(p));
+
+  if (!suspectType) {
+    add("content-type", true, input.contentType ?? "not recorded");
+  } else if (checksumCorroborates) {
+    add(
+      "content-type",
+      true,
+      `OSF served this as ${input.contentType}, which is usually an error page — but the bytes match the checksum OSF published for this file, so the content is right and the header is wrong.`,
+    );
+  } else {
+    add(
+      "content-type",
+      false,
+      `Received ${input.contentType}, which is an error page rather than file content, and there is no checksum to prove otherwise.`,
+    );
   }
 
   // 5. Destination vs local — only meaningful once the above passed.

@@ -307,11 +307,11 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
         // that invariant, because an invariant nobody checks is a comment.
         written: [{ start: 0, end: staged.size }],
         local: staged.digest,
-        // Not recorded here on purpose: the response Content-Type is validated at fetch
-        // time by checkRangeResponse in stage-opfs.ts, which refuses an HTML/JSON body
-        // BEFORE a byte is written. Re-asserting it here would require carrying the
-        // header through staging for no additional guarantee.
-        contentType: null,
+        // Carried through from the response, and judged HERE rather than at fetch time.
+        // A header is a claim about the bytes; a checksum is a statement about them. OSF
+        // mislabels small text files as text/html, so verifyFile only treats a suspect
+        // type as fatal when no checksum can corroborate the content.
+        contentType: staged.contentType,
         // A local export has no destination, so there is no third checksum to compare.
         // The transfer path sets this true, which makes a missing destination checksum a
         // failure rather than a skipped check.

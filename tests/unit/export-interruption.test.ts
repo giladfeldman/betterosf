@@ -25,7 +25,7 @@ vi.mock("@/lib/transition/stage-opfs", () => ({
     const fail = failures.get(opts.osfFileId);
     if (fail) throw fail();
     const s = staged.get(opts.osfFileId)!;
-    return { handleName: opts.osfFileId, size: s.size, digest: { md5: s.md5, sha256: s.sha256 } };
+    return { handleName: opts.osfFileId, size: s.size, digest: { md5: s.md5, sha256: s.sha256 }, contentType: "application/octet-stream" };
   }),
   stagedBlob: vi.fn(async (id: string) => new Blob([staged.get(id)!.body])),
   discardStaged: vi.fn(async () => {}),
@@ -217,7 +217,7 @@ describe("a user-requested stop", () => {
       stageCalls.push(opts.osfFileId);
       if (stageCalls.length >= 2) controller.abort();
       const s = staged.get(opts.osfFileId)!;
-      return { handleName: opts.osfFileId, size: s.size, digest: { md5: s.md5, sha256: s.sha256 } };
+      return { handleName: opts.osfFileId, size: s.size, digest: { md5: s.md5, sha256: s.sha256 }, contentType: "application/octet-stream" };
     });
 
     const result = await run(p, controller.signal);

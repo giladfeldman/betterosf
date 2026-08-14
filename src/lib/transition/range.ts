@@ -43,9 +43,6 @@ export function planRange(staged: number, expected: number): RangeDecision {
 
 export type RangeResponseCheck = { ok: true } | { ok: false; problem: string };
 
-/** Bodies that are never file content, whatever status accompanied them. */
-const SUSPECT_CONTENT_TYPES = [/^text\/html/i, /^application\/json/i];
-
 /**
  * Validate the response to a ranged request before writing a single byte.
  *
@@ -56,18 +53,22 @@ const SUSPECT_CONTENT_TYPES = [/^text\/html/i, /^application\/json/i];
 export function checkRangeResponse(args: {
   status: number;
   requestedFrom: number;
-  contentType: string | null;
   contentRange: string | null;
   expectedTotal: number;
 }): RangeResponseCheck {
-  const { status, requestedFrom, contentType, contentRange, expectedTotal } = args;
+  const { status, requestedFrom, contentRange, expectedTotal } = args;
 
-  if (contentType && SUSPECT_CONTENT_TYPES.some((re) => re.test(contentType))) {
-    return {
-      ok: false,
-      problem: `Server returned ${contentType}, which is an error page rather than file content.`,
-    };
-  }
+  // NOT checked here any more. A suspect content type used to abort the download before a
+  // byte was written, on the theory that an HTML body is an error page. Measured
+  // 2026-08-14: OSF serves small text-ish files (`.bib`, `.Rmd`, some `.docx`) as
+  // `text/html; charset=UTF-8` with their real, complete contents — so this rejected 12 of
+  // 79 files in a real export whose bytes were perfect.
+  //
+  // The judgement now happens in `verifyFile`, AFTER the bytes exist and can be hashed,
+  // where a checksum can corroborate or refute the header. That is strictly more
+  // information than this function has: here we would be guessing from a string, there we
+  // can compare against what OSF published. The caller reads the header off the response
+  // and hands it to `verifyFile` itself.
 
   if (requestedFrom === 0) {
     if (status !== 200 && status !== 206) {
