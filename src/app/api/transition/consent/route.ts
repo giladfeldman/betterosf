@@ -20,6 +20,13 @@ export async function GET(): Promise<Response> {
       signedIn: true,
       consented: await userHasToolkitConsent(user.osfUserId),
       termsVersion: TERMS_VERSION,
+      /**
+       * The caller's OWN OSF id. Not a disclosure — it is their identity, and they can
+       * read it from OSF directly — but it is what lets the browser key its cached
+       * project list per user. Without it, a shared machine would show one researcher
+       * another's private project titles after a sign-out and sign-in.
+       */
+      osfUserId: user.osfUserId,
     },
     { headers: noStore },
   );

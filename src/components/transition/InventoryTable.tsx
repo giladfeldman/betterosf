@@ -7,6 +7,13 @@ import { describeStorageUnknown, type StorageUsage } from "@/lib/transition/stor
 import { readApiError, networkError, type ApiError } from "@/lib/api-error";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { ProgressBar, Spinner } from "@/components/Progress";
+import {
+  readInventoryCache,
+  writeInventoryCache,
+  describeAge,
+  isStale,
+  type CachedEnrichment,
+} from "@/lib/transition/inventory-cache";
 
 type Project = {
   guid: string;
@@ -66,6 +73,10 @@ export function InventoryTable() {
   const [enrichFailures, setEnrichFailures] = useState(0);
   /** Runs already recorded for these projects, so the list says what is done. */
   const [doneByGuid, setDoneByGuid] = useState<Record<string, DoneRun>>({});
+  /** Whose list this is. Cached project titles are keyed by it — see inventory-cache.ts. */
+  const [osfUserId, setOsfUserId] = useState<string | null>(null);
+  /** When the shown list was fetched from OSF, or null when it is live from this visit. */
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
   /** Non-null when some pages loaded and a later one failed — a PARTIAL list. */
   const [partial, setPartial] = useState<ApiError | null>(null);
   const cancelled = useRef(false);
@@ -77,13 +88,50 @@ export function InventoryTable() {
     };
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts: { force?: boolean } = {}) => {
     setLoadError(null);
     setPartial(null);
+
+    // Who is this? Cheap — session and Neon only, no OSF call — and it is what makes the
+    // cache safe to read: a list cached for another account is never shown to this one.
+    let userId = osfUserId;
+    if (!userId) {
+      try {
+        const who = await fetch("/api/transition/consent", { cache: "no-store" });
+        if (who.ok) {
+          const body: { osfUserId?: string } = await who.json();
+          userId = body.osfUserId ?? null;
+          setOsfUserId(userId);
+        }
+      } catch {
+        /* no id means no cache — the load below still works, it is just not cached */
+      }
+    }
+
+    if (!opts.force && userId) {
+      const cached = readInventoryCache(userId);
+      if (cached) {
+        setProjects(cached.projects);
+        setExpectedTotal(cached.total);
+        setCachedAt(cached.fetchedAt);
+        setEnriched(
+          Object.fromEntries(
+            Object.entries(cached.enriched).map(([guid, e]) => [
+              guid,
+              { ...(e as unknown as Enrichment) },
+            ]),
+          ),
+        );
+        setLoadingMore(false);
+        return;
+      }
+    }
+
     setProjects(null);
     setEnriched({});
     setEnrichDone(0);
     setExpectedTotal(null);
+    setCachedAt(null);
     setLoadingMore(true);
 
     const collected: Project[] = [];
@@ -127,7 +175,36 @@ export function InventoryTable() {
         setProjects([...collected]);
 
         cursor = data.nextCursor;
-        if (!cursor) return;
+        if (!cursor) {
+          // Only a COMPLETE walk is cached. Storing a partial list and showing it later as
+          // the whole inventory would let someone decide what to migrate from a list
+          // quietly missing projects — the exact false green this toolkit exists to avoid.
+          const fetchedAt = new Date().toISOString();
+          if (userId) {
+            const stored = writeInventoryCache({
+              version: 1,
+              osfUserId: userId,
+              fetchedAt,
+              projects: collected.map((p) => ({
+                guid: p.guid,
+                title: p.title,
+                category: p.category,
+                public: p.public,
+                dateModified: p.dateModified,
+                osfUrl: p.osfUrl,
+                parentId: p.parentId,
+              })),
+              total: data.total,
+              enriched: {},
+              enrichedAt: null,
+            });
+            // Only claim it was saved if it was. A quota error or a private-browsing mode
+            // makes this false, and showing "saved in this browser" against nothing would
+            // leave the user wondering why every visit is slow.
+            setCachedAt(stored ? fetchedAt : null);
+          }
+          return;
+        }
 
         if (page === MAX_PAGES - 1) {
           setPartial({
@@ -145,11 +222,14 @@ export function InventoryTable() {
     } finally {
       setLoadingMore(false);
     }
-  }, []);
+  }, [osfUserId]);
 
   useEffect(() => {
     void load();
-  }, [load]);
+    // `load` depends on osfUserId, which it also sets — re-running on that change would
+    // refetch the moment the id lands. The initial call already handles both paths.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // What has already been done. Best-effort and non-blocking: the inventory is
   // useful without it, and a missing history must never be shown as "nothing done"
@@ -217,7 +297,24 @@ export function InventoryTable() {
       setEnrichDone(Math.min(i + BATCH, pending.length));
     }
     setEnriching(false);
-  }, [projects]);
+
+    // Persist what was checked, so the 45-batch pass is not repeated on every visit.
+    // Read-modify-write rather than assuming what is in there: the project list may have
+    // been refreshed since, and this must not resurrect an older one.
+    if (osfUserId) {
+      setEnriched((current) => {
+        const existing = readInventoryCache(osfUserId);
+        if (existing) {
+          writeInventoryCache({
+            ...existing,
+            enriched: current as unknown as Record<string, CachedEnrichment>,
+            enrichedAt: new Date().toISOString(),
+          });
+        }
+        return current;
+      });
+    }
+  }, [projects, osfUserId]);
 
   const rows = useMemo(() => {
     if (!projects) return [];
@@ -343,6 +440,15 @@ export function InventoryTable() {
         </p>
         <button
           type="button"
+          onClick={() => void load({ force: true })}
+          disabled={loadingMore || enriching}
+          className="inline-flex items-center gap-2 rounded border border-neutral-400 px-3 py-1 text-sm disabled:opacity-50 dark:border-neutral-600"
+          title="Fetch the list from OSF again"
+        >
+          ⟳ Refresh from OSF
+        </button>
+        <button
+          type="button"
           onClick={() => void enrichAll()}
           disabled={enriching || loadingMore}
           className="inline-flex items-center gap-2 rounded border border-neutral-400 px-3 py-1 text-sm disabled:opacity-50 dark:border-neutral-600"
@@ -368,6 +474,24 @@ export function InventoryTable() {
           </div>
         ) : null}
       </div>
+
+      {cachedAt ? (
+        <p
+          className={`mt-3 text-xs ${
+            isStale(cachedAt, new Date())
+              ? "rounded border border-amber-300 bg-amber-50 p-2 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+              : "text-neutral-600 dark:text-neutral-400"
+          }`}
+        >
+          Project list fetched from OSF <strong>{describeAge(cachedAt, new Date())}</strong> (
+          {cachedAt.slice(0, 16).replace("T", " ")} UTC) and saved in this browser, so it loads
+          instantly. Projects created or renamed on OSF since then will not appear until you
+          refresh.
+          {isStale(cachedAt, new Date())
+            ? " That is more than a week old — refresh before deciding anything from it."
+            : ""}
+        </p>
+      ) : null}
 
       {enriching ? (
         <div className="mt-4">

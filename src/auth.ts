@@ -90,6 +90,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   session: { strategy: "jwt", maxAge: 30 * 24 * 60 * 60 }, // 30 days sliding
+
   callbacks: {
     async jwt({ token, account, profile }) {
       // Initial sign in
@@ -139,5 +140,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   pages: {
     signIn: "/login",
+    // Auth.js's built-in error page renders "Server error — There is a problem with the
+    // server configuration. Check the server logs for more information." The person
+    // reading it cannot check the server logs, and "configuration" is the wrong cause for
+    // most of what lands there: it is the catch-all for ANY server-side failure during the
+    // callback, including OSF issuing a token and then refusing it. Ours says what is
+    // actually known and what to do about it.
+    error: "/auth/error",
   },
 });

@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.10.1 — 2026-08-14
+
+### Fixed
+- **Signing in with OSF failed after you approved it**, landing on a black
+  *"Server error — There is a problem with the server configuration. Check the server logs"*
+  box. Nothing was misconfigured: `error=Configuration` is Auth.js's catch-all for **any**
+  server-side failure during the callback. The Vercel log said only
+  `Error: OSF userinfo failed: 401` — the code exchange succeeded, then `api.osf.io`
+  rejected the token OSF had just issued, and the thrown error discarded everything that
+  would explain which of the several possible causes it was.
+  - The provider now **distinguishes the causes**: an exchange that returned no
+    `access_token` is reported as a BetterOSF bug rather than as an OSF 401 (previously it
+    sent `Bearer undefined` and blamed the user's OSF account), and a real refusal is logged
+    with the status, scope, token *length*, and OSF's response body. The token itself is
+    never logged.
+  - It **retries once on 401**, because OSF's API is eventually consistent and a token
+    `accounts.osf.io` minted a second ago can briefly not exist as far as `api.osf.io` is
+    concerned. When a retry rescues a sign-in it says so loudly in the log — "it works if
+    you try twice" is a finding, not a fix.
+  - **Ruled out by probe, so nobody re-derives it:** the OSF OAuth application and its
+    secret are still valid. `client_credentials` with the real secret answers
+    `400 invalid_request` (client authenticated, grant refused) while a deliberately wrong
+    secret answers `401` — the probe discriminates, so this is a measurement rather than an
+    assumption.
+- **A real sign-in error page** replaces Auth.js's. It says what is known, what to do next,
+  and states outright that the error code is a category rather than a diagnosis.
+
+### Added
+- **The project list is cached in your browser, with a Refresh button and the time it was
+  fetched.** Reading 443 projects costs five upstream pages and about half a minute, and
+  the answer barely changes day to day. The enrichment pass (DOIs, wikis, add-ons — 45
+  batches) is cached with it, so neither is repeated on every visit. Four rules the cache
+  keeps:
+  - **Keyed by OSF user.** It holds the titles of *private* projects; on a shared lab
+    machine an unkeyed cache would show one researcher another's work after a sign-out.
+  - **Only a complete load is ever stored.** A partial list presented later as the whole
+    inventory would mean deciding what to migrate from a list quietly missing projects.
+  - **Never silently refreshed**, and the age is always on screen — louder past a week.
+  - **Every failure survivable**: quota errors, private modes and anything a previous
+    version wrote all degrade to a cache miss, never a broken page.
+
 ## 1.10.0 — 2026-08-13
 
 **The inventory now leads somewhere.** Reported by the user, looking at 443 loaded
