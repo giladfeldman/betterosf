@@ -72,6 +72,13 @@ export type ExportProgress = {
 };
 
 export type ExportResult = {
+  /**
+   * Set when the run did not get through every file — because the user pressed Stop, or
+   * because something failed hard partway. The archive is still produced from what DID
+   * complete: losing an hour of verified downloads because file 48 of 79 dropped its
+   * connection is the worst possible response to a transient network error.
+   */
+  interrupted: { reason: string; stoppedByUser: boolean; atFile: string | null } | null;
   verdict: ReconciliationVerdict;
   verifications: FileVerification[];
   blob: Blob;
@@ -97,6 +104,54 @@ export type RunExportOptions = {
  * would leave a researcher with nothing and no list of what went wrong. The verdict at
  * the end is what refuses to call it a success.
  */
+const DOWNLOAD_ATTEMPTS = 3;
+const RETRY_BACKOFF_MS = 1500;
+
+/**
+ * Retry a download that failed for a transient reason.
+ *
+ * Deliberately narrow about what counts as transient: a checksum mismatch, a size
+ * mismatch, or a refusal from OSF are all reasons to STOP, because retrying cannot change
+ * them and doing so would just take three times as long to reach the same honest failure.
+ * Only a torn-down connection is retried.
+ */
+async function withRetry<T>(
+  run: () => Promise<T>,
+  opts: { signal?: AbortSignal; onDiscard: () => Promise<void> },
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt++) {
+    try {
+      return await run();
+    } catch (e) {
+      lastError = e;
+      // The user asked to stop. That is not a transient failure.
+      if (opts.signal?.aborted) throw e;
+      if (!isTransient(e) || attempt === DOWNLOAD_ATTEMPTS) throw e;
+      // Any partial stage is untrustworthy after a torn connection — start clean.
+      await opts.onDiscard();
+      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS * attempt));
+    }
+  }
+  throw lastError;
+}
+
+/** A dropped connection, and nothing else. */
+function isTransient(e: unknown): boolean {
+  if (isAbortError(e)) return true;
+  if (e instanceof TypeError) return true; // fetch's "network error"
+  const message = e instanceof Error ? e.message : "";
+  return /network|connection|failed to fetch|load failed/i.test(message);
+}
+
+/** Firefox reports a torn-down fetch as an AbortError; Chrome usually as a TypeError. */
+function isAbortError(e: unknown): boolean {
+  return (
+    (e instanceof DOMException && e.name === "AbortError") ||
+    (e instanceof Error && e.name === "AbortError")
+  );
+}
+
 export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
   const { plan, token, now } = opts;
   if (!opfsAvailable()) {
@@ -115,8 +170,19 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
   const bytesTotal = plan.files.reduce((n, f) => n + f.size, 0);
   let bytesDone = 0;
 
+  let interrupted: ExportResult["interrupted"] = null;
+
   for (const [index, file] of plan.files.entries()) {
-    opts.signal?.throwIfAborted();
+    // A user-requested stop is a decision, not a failure — but it still must not throw
+    // away what has already been verified. Break, then package what we have.
+    if (opts.signal?.aborted) {
+      interrupted = {
+        reason: "You stopped this export.",
+        stoppedByUser: true,
+        atFile: file.path,
+      };
+      break;
+    }
     opts.onProgress?.({
       phase: "staging",
       fileIndex: index,
@@ -128,23 +194,38 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
     });
 
     try {
-      const staged = await stageFile({
-        url: file.downloadUrl,
-        token,
-        osfFileId: file.osfFileId,
-        declaredSize: file.size,
-        signal: opts.signal,
-        onProgress: (p) =>
-          opts.onProgress?.({
-            phase: "staging",
-            fileIndex: index,
-            fileCount: plan.files.length,
-            currentPath: file.path,
-            bytesDone: bytesDone + p.bytesDone,
-            bytesTotal,
-            bytesPerSecond: p.bytesPerSecond,
+      /**
+       * Retry a dropped download before giving up on the file.
+       *
+       * A run over 79 files makes 79 long-lived connections to OSF, and one of them
+       * dropping is ordinary rather than exceptional — a real export died at 60% for
+       * exactly that reason (2026-08-14). A GET is idempotent and the bytes are checksummed
+       * afterwards regardless, so retrying is safe; the file simply restarts, because
+       * `?direct=` gives us no verifiable way to resume.
+       *
+       * A user-requested stop is never retried.
+       */
+      const staged = await withRetry(
+        () =>
+          stageFile({
+            url: file.downloadUrl,
+            token,
+            osfFileId: file.osfFileId,
+            declaredSize: file.size,
+            signal: opts.signal,
+            onProgress: (p) =>
+              opts.onProgress?.({
+                phase: "staging",
+                fileIndex: index,
+                fileCount: plan.files.length,
+                currentPath: file.path,
+                bytesDone: bytesDone + p.bytesDone,
+                bytesTotal,
+                bytesPerSecond: p.bytesPerSecond,
+              }),
           }),
-      });
+        { signal: opts.signal, onDiscard: () => discardStaged(file.osfFileId).catch(() => {}) },
+      );
 
       const verification = verifyFile({
         osfFileId: file.osfFileId,
@@ -187,13 +268,29 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
     } catch (e) {
       // Recorded, not thrown. The run continues so the researcher gets a complete list of
       // what failed instead of only the first thing.
+      const message = e instanceof Error ? e.message : "Unknown error";
       verifications.push({
         osfFileId: file.osfFileId,
         path: file.path,
         state: "failed",
         checks: [],
-        problems: [e instanceof Error ? e.message : "Unknown error"],
+        problems: [message],
       });
+
+      // An abort that we did NOT ask for means the browser or the network tore the
+      // connection down — retrying the rest is usually pointless and always slow, so stop
+      // and package what completed. The distinction matters to the researcher: "your
+      // connection dropped at file 48" is actionable, "79 files failed" is not.
+      if (isAbortError(e) && !opts.signal?.aborted) {
+        interrupted = {
+          reason:
+            "The connection to OSF was interrupted partway through. Everything downloaded before that point is in the archive below.",
+          stoppedByUser: false,
+          atFile: file.path,
+        };
+        await discardStaged(file.osfFileId).catch(() => {});
+        break;
+      }
     } finally {
       // Release staging immediately: peak disk stays at one file, not the project.
       await discardStaged(file.osfFileId).catch(() => {});
@@ -300,6 +397,7 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
   });
 
   return {
+    interrupted,
     verdict,
     verifications,
     blob,

@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.10.3 — 2026-08-14
+
+### Fixed
+- **An export that was cut short threw away everything it had already verified.** A 79-file
+  run reached ~60% and died with `AbortError: The operation was aborted` — an hour of
+  downloading and checksumming lost, with no list of which files had been fine. That
+  contradicted the module's own stated contract ("a file that fails is recorded and the run
+  CONTINUES"); a torn-down connection was the one path that ignored it. Now the run
+  packages what completed, reconciles it as **incomplete**, names the file it stopped at,
+  and distinguishes *you pressed Stop* from *the connection dropped*.
+- **A dropped download is retried** (3 attempts, backing off) before the file is given up
+  on. Seventy-nine long-lived connections to OSF means one of them dropping is ordinary,
+  not exceptional. Deliberately narrow: a checksum or size mismatch is **not** retried,
+  because retrying cannot change it and would only take three times as long to reach the
+  same honest failure.
+
+### Added
+- **You can choose where the archive is saved.** Where the browser supports it (Chrome,
+  Edge) the button opens a save dialog and streams the archive straight into the file you
+  pick. Firefox and Safari have no such API, so they get the ordinary download — and the UI
+  now says which of the two will happen *before* you press it, rather than leaving "it
+  downloaded, but where?" to be discovered afterwards.
+- **The progress text no longer misleads about where files go.** It said files were
+  "downloaded straight from OSF to your computer", which read as *files are appearing in my
+  Downloads folder*. They are held in the browser's private storage while the archive is
+  built — nothing reaches Downloads until you save at the end — and it now says exactly that.
+
 ## 1.10.2 — 2026-08-14
 
 ### Fixed

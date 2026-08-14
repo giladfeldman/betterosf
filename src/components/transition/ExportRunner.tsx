@@ -5,6 +5,7 @@ import { runExport, type ExportPlan, type ExportProgress, type ExportResult } fr
 import { opfsAvailable } from "@/lib/transition/stage-opfs";
 import { clausesByIds, TRANSITION_DIALOG_CLAUSE_IDS, TERMS_VERSION } from "@/lib/terms";
 import { downloadBlob } from "@/lib/backup/download";
+import { saveArchive, canChooseSaveLocation, type SaveOutcome } from "@/lib/transition/save-archive";
 import { keepScreenAwake } from "@/lib/transition/wake-lock";
 import { createBrowserLedger } from "@/lib/transition/ledger";
 import { ZenodoTransferPanel } from "./ZenodoTransferPanel";
@@ -36,6 +37,7 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [result, setResult] = useState<ExportResult | null>(null);
   const [destination, setDestination] = useState<Destination>("local");
+  const [saveState, setSaveState] = useState<SaveOutcome | null>(null);
   const abort = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
@@ -194,13 +196,34 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
           <Stat label="Missing">{v.counts.missing}</Stat>
         </dl>
 
+        {result.interrupted ? (
+          <div className="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            <p>
+              <strong>
+                {result.interrupted.stoppedByUser ? "You stopped this export." : "This export was cut short."}
+              </strong>{" "}
+              {result.interrupted.reason}
+            </p>
+            {result.interrupted.atFile ? (
+              <p className="mt-1">
+                It stopped at <code>{result.interrupted.atFile}</code>.
+              </p>
+            ) : null}
+            <p className="mt-1">
+              The archive below holds everything that was downloaded and verified before that
+              point, and its report says exactly which files are missing. Running the export again
+              starts over from the beginning.
+            </p>
+          </div>
+        ) : null}
+
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => downloadBlob(result.blob, `${result.filenameStem}.zip`)}
+            onClick={async () => setSaveState(await saveArchive(result.blob, `${result.filenameStem}.zip`))}
             className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-neutral-900"
           >
-            Download the archive
+            {canChooseSaveLocation() ? "Save the archive…" : "Download the archive"}
           </button>
           <button
             type="button"
@@ -216,9 +239,30 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
           </button>
         </div>
 
+        {saveState ? (
+          <p
+            className={`mt-3 text-sm ${
+              saveState.saved
+                ? "text-neutral-700 dark:text-neutral-300"
+                : "rounded border border-amber-300 bg-amber-50 p-2 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+            }`}
+          >
+            {saveState.saved && saveState.picked
+              ? `Saved as ${saveState.name} where you chose.`
+              : saveState.saved
+                ? `${saveState.name} was sent to your browser's downloads. BetterOSF cannot see where your browser puts them — check your Downloads folder or the browser's download list.`
+                : saveState.cancelled
+                  ? "Not saved — you closed the save dialog. The archive is still here; press the button again."
+                  : `Could not save the archive: ${saveState.error}`}
+          </p>
+        ) : null}
+
         <p className="mt-3 text-xs text-neutral-600 dark:text-neutral-400">
           The archive is a BagIt bag with an RO-Crate description, a SHA-256 manifest, the full
-          report, and a disclaimer. Nothing on OSF was changed or deleted.
+          report, and a disclaimer. Nothing on OSF was changed or deleted.{" "}
+          {canChooseSaveLocation()
+            ? "Your browser will ask where to put it."
+            : "Your browser will put it wherever it saves downloads — usually your Downloads folder, unless you have set it to ask each time."}
         </p>
 
         <details className="mt-4">
@@ -254,8 +298,10 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
           </p>
         ) : null}
         <p className="mt-3 text-xs text-neutral-600 dark:text-neutral-400">
-          Keep this tab open. Files are downloaded straight from OSF to your computer — they never
-          pass through BetterOSF&apos;s servers.
+          Keep this tab open. Files come straight from OSF to this browser and never pass through
+          BetterOSF&apos;s servers. They are held in the browser&apos;s private storage while the
+          archive is built — <strong>nothing appears in your Downloads folder until the end</strong>,
+          when you save the archive yourself.
         </p>
         <button
           type="button"
@@ -333,6 +379,10 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
           <span>
             <strong>Download it to this computer.</strong> A BagIt archive with a SHA-256 manifest,
             an RO-Crate description and the full verification report. Nothing leaves your machine.
+            Files are staged in the browser while it runs and you save the finished archive at the
+            end — {canChooseSaveLocation()
+              ? "your browser will ask you where to put it."
+              : "your browser will save it wherever it saves downloads."}
           </span>
         </label>
         <label className="mt-3 flex items-start gap-2 text-sm">
