@@ -26,6 +26,10 @@ export const ANON_ROUTES: AnonRoute[] = [
   { path: "/privacy", label: "privacy" },
   { path: "/login", label: "login" },
   { path: "/search?q=open+science", label: "search results" },
+  // Added with the page itself in v1.12.0. A public page with no post-deploy probe is a
+  // page nobody notices breaking — the same rule as "a page nothing links to is not
+  // shipped", one step later in its life.
+  { path: "/tools/zenodo-download", label: "Zenodo folder-tree downloader" },
   { path: `/${PUBLIC_GUID}`, label: "public project overview" },
   { path: `/${PUBLIC_GUID}/files`, label: "public project files (tree navigator)" },
 ];
