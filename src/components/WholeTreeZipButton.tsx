@@ -9,7 +9,8 @@ type State =
   | { phase: "idle" }
   | { phase: "working"; progress: ZipProgress | null }
   | { phase: "done"; outcome: SaveOutcome }
-  | { phase: "fellback"; reason: string };
+  | { phase: "fellback"; reason: string }
+  | { phase: "ratelimited"; message: string; action: string | null };
 
 /**
  * Download the whole project tree as one ZIP.
@@ -42,6 +43,21 @@ export function WholeTreeZipButton({ guid, isPublic }: { guid: string; isPublic:
     setState({ phase: "working", progress: null });
     try {
       const res = await fetch(`/api/zip/${guid}/manifest`, { cache: "no-store" });
+      if (res.status === 429) {
+        // Do NOT fall back to the server route here. A 429 means either OSF asked us to
+        // slow down or this IP has used its hourly budget — and the fallback is the
+        // expensive path that walks OSF even harder. Answering "slow down" with more load
+        // is how a transient limit becomes a sustained one.
+        const body = await res.json().catch(() => ({}));
+        setState({
+          phase: "ratelimited",
+          message:
+            body.error ??
+            "Too many requests. Wait about a minute and try again — nothing was changed.",
+          action: body.action ?? null,
+        });
+        return;
+      }
       if (!res.ok) throw new Error(`the project's structure could not be read (HTTP ${res.status})`);
       const manifest: ZipManifest = await res.json();
 
@@ -105,6 +121,24 @@ export function WholeTreeZipButton({ guid, isPublic }: { guid: string; isPublic:
           className="mt-2 w-full rounded border px-3 py-1 text-sm"
         >
           Stop
+        </button>
+      </div>
+    );
+  }
+
+  if (state.phase === "ratelimited") {
+    return (
+      <div>
+        <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950">
+          {state.message}
+          {state.action ? <span className="block mt-1 text-xs">{state.action}</span> : null}
+        </p>
+        <button
+          type="button"
+          onClick={() => setState({ phase: "idle" })}
+          className="mt-2 text-xs underline"
+        >
+          Try again
         </button>
       </div>
     );

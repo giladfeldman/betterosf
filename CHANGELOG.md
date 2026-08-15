@@ -17,6 +17,12 @@ OSF before any of it was written — the last five releases in this project were
   reported** — a new `stored_as` column in the crosswalk beside OSF's own `osf_path`, plus a
   report section listing each one. Files are renamed, never dropped.
   (Traversal was checked and is *not* reachable: OSF rejects `..` in file and folder names.)
+- **A rate limit from OSF was reported as a server error.** `/api/zip/[guid]/manifest`
+  collapsed every OSF failure into a 502, so a transient 429 read as "the upstream broke" —
+  and the browser-direct button's fallback then re-ran the *expensive* server route,
+  answering OSF's request to slow down with more load. It now uses the shared error mapper
+  (429 with `Retry-After`, 404 for a missing project, 500 only for our own bugs), and the
+  button shows the wait rather than falling back. Caught by a post-deploy behaviour probe.
 - **🚨 The browser-direct migration lost a rate limit.** `/api/zip/[guid]` caps anonymous
   callers at 5/IP/hour; its replacement `/api/zip/[guid]/manifest` shipped with none. It
   returns a few KB of JSON, but producing it walks up to 500 nodes — roughly 1000 OSF

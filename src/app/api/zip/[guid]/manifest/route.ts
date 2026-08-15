@@ -1,5 +1,5 @@
 import { isValidGuid } from "@/lib/osf/guid";
-import { OsfError } from "@/lib/osf/types";
+import { osfErrorResponse, appErrorResponse } from "@/lib/osf/error-response";
 import { collectNodeTree, type TreeNode } from "@/lib/osf/tree";
 import { getProviderRoots } from "@/lib/osf/files";
 import { mapWithConcurrency } from "@/lib/util/concurrency";
@@ -73,14 +73,24 @@ export async function GET(
   try {
     tree = await collectNodeTree(guid);
   } catch (e) {
-    if (e instanceof OsfError && e.code === "not_found") {
-      return Response.json({ error: "Project not found" }, { status: 404 });
-    }
+    // Use the SHARED mapper, not a hand-rolled branch. This route first shipped collapsing
+    // every OSF failure into one 502 "try again later" — which is precisely the defect
+    // `osfErrorResponse` was written to kill, and it matters here more than most: OSF's rate
+    // limit is a transient 429 with a Retry-After, and calling it 502 tells the client the
+    // server broke. The browser-direct button then falls back to the SERVER route, which is
+    // the expensive path — so mislabelling a rate limit makes the app answer OSF asking it
+    // to slow down by working OSF harder.
+    const mapped = osfErrorResponse(e, { endpoint: `/api/zip/${guid}/manifest` });
+    if (mapped) return mapped;
     console.error(`[zip/${guid}/manifest] failed to walk node tree:`, e);
-    return Response.json(
-      { error: "Could not read this project's structure from OSF. Please try again later." },
-      { status: 502 },
-    );
+    return appErrorResponse({
+      status: 500,
+      code: "manifest_failed",
+      error: "Could not read this project's structure.",
+      action: "Try again. If it keeps failing, the whole-project ZIP still works from the server.",
+      cause: e,
+      logType: "osf",
+    });
   }
 
   const rootTitle = safeFolderName(tree[0]?.title ?? guid);

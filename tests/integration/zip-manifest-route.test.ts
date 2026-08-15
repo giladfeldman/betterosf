@@ -91,6 +91,45 @@ describe("GET /api/zip/[guid]/manifest", () => {
     expect(body.nodes[0].providers).toEqual(["osfstorage"]);
   });
 
+  /**
+   * Observed in production immediately after v1.12.0 deployed: OSF was rate-limiting, and
+   * this route answered **502** for every request. 502 says "the upstream broke"; the truth
+   * was a transient 429 with a Retry-After, and the difference is not cosmetic — the
+   * browser-direct button falls back to the SERVER route on a generic failure, which is the
+   * expensive path that walks OSF harder. Mislabelling a rate limit made the app answer
+   * "slow down" with more load.
+   */
+  it("passes an OSF rate limit through as 429, not a blanket 502", async () => {
+    const { OsfError } = await import("@/lib/osf/types");
+    vi.mocked(collectNodeTree).mockRejectedValue(
+      new OsfError(429, "rate_limited", "OSF rate limit exceeded"),
+    );
+    const res = await call();
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("60");
+    const body = await res.json();
+    expect(body.code).toBe("osf_rate_limited");
+    // Actionable, and true: retrying later works, which "the server broke" never implies.
+    expect(body.action).toMatch(/wait/i);
+  });
+
+  it("passes a missing project through as 404", async () => {
+    const { OsfError } = await import("@/lib/osf/types");
+    vi.mocked(collectNodeTree).mockRejectedValue(new OsfError(404, "not_found", "nope"));
+    const res = await call();
+    expect(res.status).toBe(404);
+  });
+
+  it("still reports a genuine bug as ours, not as OSF's", async () => {
+    vi.mocked(collectNodeTree).mockRejectedValue(new TypeError("x is not a function"));
+    const res = await call();
+    // 500, not 502: a programming error must not be disguised as an upstream outage, or an
+    // OSF status page becomes the first place someone looks for our bug.
+    expect(res.status).toBe(500);
+    expect((await res.json()).code).toBe("manifest_failed");
+  });
+
   it("reports a node whose providers could not be listed, rather than dropping it", async () => {
     vi.mocked(getProviderRoots).mockImplementation(async (guid: string) => {
       if (guid === "kid01") throw new Error("OSF said 403");
