@@ -121,6 +121,19 @@ describe("GET /api/zip/[guid]/manifest", () => {
     expect(res.status).toBe(404);
   });
 
+  it("reports an OSF timeout as 504, not as our own 500", async () => {
+    // Observed in production: the OSF client's per-attempt AbortSignal fires and rethrows a
+    // raw AbortError, which is not an OsfError — so it fell through to the generic branch
+    // and blamed BetterOSF for an upstream that was merely slow.
+    const abort = new Error("This operation was aborted");
+    abort.name = "AbortError";
+    vi.mocked(collectNodeTree).mockRejectedValue(abort);
+    const res = await call();
+
+    expect(res.status).toBe(504);
+    expect((await res.json()).code).toBe("osf_timeout");
+  });
+
   it("still reports a genuine bug as ours, not as OSF's", async () => {
     vi.mocked(collectNodeTree).mockRejectedValue(new TypeError("x is not a function"));
     const res = await call();

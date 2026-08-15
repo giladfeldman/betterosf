@@ -82,6 +82,25 @@ export async function GET(
     // to slow down by working OSF harder.
     const mapped = osfErrorResponse(e, { endpoint: `/api/zip/${guid}/manifest` });
     if (mapped) return mapped;
+
+    // A timeout talking to OSF is not an `OsfError` — the client's per-attempt AbortSignal
+    // fires and the raw `AbortError` is rethrown after its retries. Observed in production
+    // while OSF was slow: it landed in the branch below and was reported as **500**, which
+    // says "BetterOSF has a bug" about an upstream that was merely busy. 504 is the honest
+    // status, and unlike a 429 the client SHOULD fall back to the server route here — a
+    // timeout is not OSF asking us to slow down.
+    if (e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError")) {
+      console.warn(`[zip/${guid}/manifest] OSF timed out while walking the node tree`);
+      return appErrorResponse({
+        status: 504,
+        code: "osf_timeout",
+        error: "OSF took too long to describe this project.",
+        action: "Try again in a moment. Large projects with many components are the usual cause.",
+        cause: e,
+        logType: "osf",
+      });
+    }
+
     console.error(`[zip/${guid}/manifest] failed to walk node tree:`, e);
     return appErrorResponse({
       status: 500,
