@@ -22,7 +22,15 @@ export type PlanResponse = {
   addonProviders: string[] | null;
   files: {
     osfFileId: string;
+    /** The name used in the archive and as the Zenodo key — safe on every filesystem. */
     path: string;
+    /**
+     * OSF's own name, present ONLY when it had to be rewritten to be writable.
+     *
+     * OSF accepts names a filesystem cannot take — `a\b.txt`, `CON` and `we<ird>.txt` were
+     * all stored verbatim when measured. Absent means the name was used unchanged.
+     */
+    osfPath?: string;
     size: number;
     downloadUrl: string;
     md5: string | null;

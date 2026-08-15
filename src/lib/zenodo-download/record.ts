@@ -14,6 +14,8 @@
  * `Access-Control-Allow-Origin: *`. No token, no account, no server.
  */
 
+import { safeEntryPath, pathWasRewritten } from "@/lib/paths/entry-path";
+
 export type ZenodoHost = { api: string; site: string; label: string };
 
 export const ZENODO_HOSTS: ZenodoHost[] = [
@@ -146,68 +148,18 @@ export function parseMd5(value: unknown): string | null {
 /**
  * A Zenodo file key turned into a ZIP entry path that cannot escape the archive.
  *
- * **The key is untrusted.** This tool reads any public record, and a record's keys are
- * whatever its depositor uploaded. Measured against sandbox.zenodo.org on 2026-08-14, by
- * publishing a record for each case:
- *
- *   - **`..\` traversal and `C:\` drive paths PUBLISH FINE.** `..\windows-escape.txt` and
- *     `C:\Windows\evil.dll` uploaded, committed and published, and are listed verbatim on
- *     the public record. On Windows a backslash in a ZIP entry name is treated as a
- *     separator by many unzippers, so that is a live Zip Slip — the reader picks the
- *     unzipper, not us.
- *   - **`../` traversal cannot reach a published record.** Zenodo accepts the *declare*
- *     (201) and lists the key on the draft, but the content `PUT` 404s — the URL normalises
- *     — so the file never completes, and a draft with pending files will not publish. Worth
- *     knowing for a different reason: such an entry also cannot be DELETED (404 again), so
- *     declaring one bricks the draft permanently.
- *   - **`CON`, `dir/NUL.txt`, `a<b>c"d|e?f*g.txt` and `trailing. ` all publish fine** and
- *     are each unusable or silently renamed on Windows.
- *
- * The rule is *neutralise, never drop*. Removing the file would lose data the record really
- * contains; keeping the segment would let it escape. So traversal and root segments are
- * removed and everything else is preserved, which keeps the folder structure this whole
- * page exists to rebuild.
- *
- * Windows takes the rest: `\` is a separator there and an ordinary character on POSIX, so a
- * key containing one means two different things and neither may escape; `<>:"|?*` are
- * illegal; a trailing dot or space is silently dropped by the filesystem, which would
- * rename the file; and the reserved device names cannot exist as files at all.
+ * Delegates to `safeEntryPath`, which is the ONE definition shared with the outbound export
+ * and transfer paths — see its doc comment for what Zenodo and OSF each actually permit, all
+ * measured. A second copy here is exactly the duplication invariant (class 10) that this
+ * project keeps paying for.
  */
 export function zipEntryPath(key: string): string {
-  const segments = key
-    .split(/[/\\]/)
-    .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0 && segment !== "." && segment !== "..")
-    // A drive-relative prefix ("C:") is only a traversal risk on Windows, and only as the
-    // first segment — but sanitising every segment the same way costs nothing.
-    .map(safeZipSegment)
-    .filter((segment) => segment.length > 0);
-
-  return segments.length > 0 ? segments.join("/") : "unnamed-file";
-}
-
-const ILLEGAL = new Set(["<", ">", ":", '"', "|", "?", "*"]);
-
-/** Windows-reserved device names, which cannot be files whatever the extension. */
-const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
-
-function safeZipSegment(segment: string): string {
-  const cleaned = [...segment]
-    // Windows-illegal characters and control characters become a dash. Spaces and hyphens
-    // are deliberately NOT in this set: "PCIRR Stage 1" is a real folder name, and mangling
-    // it would defeat the point of rebuilding the structure faithfully.
-    .map((ch) => (ILLEGAL.has(ch) || ch.codePointAt(0)! < 32 ? "-" : ch))
-    .join("")
-    // A trailing dot or space is silently discarded by the Windows filesystem, which
-    // renames the file without telling anyone.
-    .replace(/[. ]+$/, "");
-  if (cleaned.length === 0) return "";
-  return RESERVED.test(cleaned) ? `_${cleaned}` : cleaned;
+  return safeEntryPath(key);
 }
 
 /** Did sanitising change the key? Shown to the user, so a rename is never silent. */
 export function wasRewritten(key: string): boolean {
-  return zipEntryPath(key) !== key;
+  return pathWasRewritten(key);
 }
 
 export type TreeFolder = {

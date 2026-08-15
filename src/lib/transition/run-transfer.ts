@@ -737,6 +737,7 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
       state: isCollided(v.path) ? "overwritten" : v.state,
       destinationKey: v.state === "failed" || isCollided(v.path) ? null : v.path,
       sourceGuid: byId.get(v.osfFileId)?.sourceGuid ?? null,
+      osfPath: byId.get(v.osfFileId)?.osfPath ?? null,
     })),
     coveredNodes: plan.coveredNodes,
     createdAt,
@@ -1125,6 +1126,7 @@ async function runArchiveDeposit(ctx: ArchiveRunContext): Promise<TransferResult
       // is retrievable on its own, which is the thing this trade gives up.
       destinationKey: v.state === "failed" ? null : `${ARCHIVE_KEY}!/data/${v.path}`,
       sourceGuid: byId.get(v.osfFileId)?.sourceGuid ?? null,
+      osfPath: byId.get(v.osfFileId)?.osfPath ?? null,
     })),
     coveredNodes: plan.coveredNodes,
     createdAt,

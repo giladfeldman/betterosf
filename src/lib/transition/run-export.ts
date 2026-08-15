@@ -37,6 +37,12 @@ export type PlannedExportFile = {
    * `components/<guid>-<title>/osfstorage/sub/a.csv` for a file on a component.
    */
   path: string;
+  /**
+   * OSF's own name, present ONLY when sanitising had to change it.
+   *
+   * Reported in the crosswalk so a rename is never silent — see `safeEntryPath`.
+   */
+  osfPath?: string;
   size: number;
   downloadUrl: string;
   md5: string | null;
@@ -479,6 +485,7 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
       sha256: bagFiles.find((b) => b.path === v.path)?.sha256 ?? null,
       state: v.state,
       sourceGuid: plan.files.find((f) => f.osfFileId === v.osfFileId)?.sourceGuid ?? null,
+      osfPath: plan.files.find((f) => f.osfFileId === v.osfFileId)?.osfPath ?? null,
     })),
     coveredNodes: plan.coveredNodes,
     createdAt,

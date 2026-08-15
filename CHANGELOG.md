@@ -8,6 +8,15 @@ OSF before any of it was written — the last five releases in this project were
 "assumed instead of measured", and it stopped being a coincidence.
 
 ### Fixed
+- **🚨 An export could contain file names the researcher's computer cannot write.** OSF
+  accepts names a filesystem does not — measured on a throwaway project, `a\b.txt`, `CON`,
+  `we<ird>.txt` and `trailing. ` are all stored verbatim and listed back. Left alone,
+  `a\b.txt` silently becomes a folder on Windows extraction and `CON` cannot be created at
+  all, so a report could say `verified` for a file that is not on disk. Names are now made
+  safe on the way out as well as the way in, from one shared module, and **every rename is
+  reported** — a new `stored_as` column in the crosswalk beside OSF's own `osf_path`, plus a
+  report section listing each one. Files are renamed, never dropped.
+  (Traversal was checked and is *not* reachable: OSF rejects `..` in file and folder names.)
 - **🚨 The browser-direct migration lost a rate limit.** `/api/zip/[guid]` caps anonymous
   callers at 5/IP/hour; its replacement `/api/zip/[guid]/manifest` shipped with none. It
   returns a few KB of JSON, but producing it walks up to 500 nodes — roughly 1000 OSF

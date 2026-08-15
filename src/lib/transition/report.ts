@@ -41,6 +41,14 @@ export type ReportInput = {
      * root's guid would send them to a URL that never held it.
      */
     sourceGuid?: string | null;
+    /**
+     * OSF's own name, when it had to be rewritten to be writable.
+     *
+     * OSF accepts names a filesystem cannot take (`a\b.txt` becomes a folder on Windows;
+     * `CON` cannot be created at all). Renaming keeps the file; hiding the rename would
+     * make `osf_path` a false statement about where the file came from.
+     */
+    osfPath?: string | null;
   }[];
   /** Every node this export covered, root first. Rendered so the scope is on the record. */
   coveredNodes?: { guid: string; title: string; kind: string; fileCount: number }[];
@@ -72,6 +80,8 @@ export function renderCrosswalkCsv(input: ReportInput): string {
     "osf_node_guid",
     "osf_node_url",
     "osf_path",
+    // Only ever differs from osf_path when OSF's own name was unwritable.
+    "stored_as",
     "size_bytes",
     "sha256",
     "verification",
@@ -90,6 +100,8 @@ export function renderCrosswalkCsv(input: ReportInput): string {
       f.sourceGuid && f.sourceGuid !== input.projectGuid
         ? `https://osf.io/${f.sourceGuid}/`
         : input.osfUrl,
+      // osf_path is OSF's name; stored_as is what the archive/deposit actually holds.
+      f.osfPath ?? f.path,
       f.path,
       f.size,
       f.sha256 ?? "",
@@ -157,6 +169,26 @@ export function renderReportMarkdown(input: ReportInput): string {
       ),
       "",
       "Anything not listed here was **not** copied, whatever its relationship to this project.",
+      "",
+    );
+  }
+
+  const renamed = input.files.filter((f) => f.osfPath && f.osfPath !== f.path);
+  if (renamed.length > 0) {
+    // Named individually, not counted. OSF accepts names a filesystem cannot write — a
+    // backslash becomes a folder on Windows, `CON` cannot be created at all — so these files
+    // ARE in the archive, under a different name. A reader looking for the OSF name would
+    // otherwise conclude the file was missing.
+    lines.push(
+      "## Files stored under a different name",
+      "",
+      "OSF allows names that a filesystem does not. These files are all present; only the",
+      "name changed, and the original is recorded here and in the `osf_path` column of the",
+      "crosswalk CSV.",
+      "",
+      "| OSF name | stored as |",
+      "|---|---|",
+      ...renamed.map((f) => `| \`${f.osfPath}\` | \`${f.path}\` |`),
       "",
     );
   }

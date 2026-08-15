@@ -10,6 +10,7 @@ import { getNodeRegistrations } from "@/lib/osf/registrations";
 import { mapWithConcurrency } from "@/lib/util/concurrency";
 import { waterbutlerDownloadUrl } from "@/lib/osf/waterbutler-url";
 import { relatedNodePrefix, type RelatedKind } from "@/lib/transition/related-nodes";
+import { safeNameSegment } from "@/lib/paths/entry-path";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -101,6 +102,8 @@ export async function GET(
       sourceGuid: string,
       prefix: string,
       depth: number,
+      /** The same prefix built from OSF's untouched names, for reporting a rename. */
+      rawPrefix: string = prefix,
     ): Promise<void> {
       if (truncated) return;
       if (depth > MAX_DEPTH) {
@@ -108,12 +111,19 @@ export async function GET(
         return;
       }
       const entries: FileEntry[] = await getFolderContents(listingUrl, sourceGuid, { fresh: false });
-      const folders: { listingUrl: string; prefix: string }[] = [];
+      const folders: { listingUrl: string; prefix: string; rawPrefix: string }[] = [];
 
       for (const entry of entries) {
         if (truncated) return;
         if (entry.kind === "folder") {
-          folders.push({ listingUrl: entry.listingUrl, prefix: `${prefix}${entry.name}/` });
+          // A folder name becomes a path segment. OSF rejects the hostile folder names
+          // outright (measured), but sanitising here costs nothing and means the prefix
+          // is safe by construction rather than by OSF's good manners.
+          folders.push({
+            listingUrl: entry.listingUrl,
+            prefix: `${prefix}${safeNameSegment(entry.name)}/`,
+            rawPrefix: `${rawPrefix}${entry.name}/`,
+          });
           continue;
         }
         // The BROWSER fetches these, so the URL has to be one a browser can fetch.
@@ -138,9 +148,23 @@ export async function GET(
           downloadUrl = "";
         }
 
+        // OSF accepts file names a filesystem cannot write. Measured 2026-08-14 on a
+        // throwaway project: `a\b.txt`, `CON` and `we<ird>.txt` are all stored verbatim
+        // (traversal is not — OSF rejects `..` in file AND folder names with 400). Left
+        // alone, `a\b.txt` silently becomes a folder on Windows extraction and `CON` cannot
+        // be written at all, so the report would say `verified` for a file the researcher
+        // does not actually have.
+        //
+        // `path` is therefore the name the archive and the Zenodo key use, and `osfPath`
+        // keeps OSF's own name whenever they differ, so the rename is reported rather than
+        // silent. See `safeEntryPath` for the full measurement.
+        const rawPath = `${rawPrefix}${entry.name}`;
+        const safePath = `${prefix}${safeNameSegment(entry.name)}`;
+
         files.push({
           osfFileId: entry.id,
-          path: `${prefix}${entry.name}`,
+          path: safePath,
+          ...(safePath === rawPath ? {} : { osfPath: rawPath }),
           size: entry.size ?? 0,
           downloadUrl,
           md5: entry.md5,
@@ -154,7 +178,7 @@ export async function GET(
       }
 
       await mapWithConcurrency(folders, WALK_CONCURRENCY, (f) =>
-        walk(f.listingUrl, sourceGuid, f.prefix, depth + 1),
+        walk(f.listingUrl, sourceGuid, f.prefix, depth + 1, f.rawPrefix),
       );
     }
 
@@ -296,7 +320,10 @@ async function collectComponents(
 
 type PlanFile = {
   osfFileId: string;
+  /** The name used in the archive and as the Zenodo key — safe on every filesystem. */
   path: string;
+  /** OSF's own name, present ONLY when sanitising had to change it. Never silent. */
+  osfPath?: string;
   size: number;
   downloadUrl: string;
   md5: string | null;
