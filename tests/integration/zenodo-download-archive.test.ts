@@ -12,6 +12,23 @@
  * in the folder names. That is not automatable across platforms here, so what this test
  * pins is the property that decides it: the entry names stored in the archive keep their
  * forward slashes and carry no traversal.
+ *
+ * ## Live fixtures for testing the page by hand
+ *
+ * Two published SANDBOX records exist for this, so nobody has to build them again:
+ *
+ *   - `https://sandbox.zenodo.org/records/587114` — a realistic BetterOSF-shaped deposit:
+ *     four levels deep, spaces in folder names, a `components/` prefix, a file at the root,
+ *     and **two different `raw.csv` files in different folders** (a flat unzip collides
+ *     them). Verified end to end: 6/6 md5 matched and Expand-Archive produced the tree.
+ *   - `https://sandbox.zenodo.org/records/587118` — every key on it is one Zenodo publishes
+ *     happily and Windows cannot take (`..\windows-escape.txt`, `C:\Windows\evil.dll`,
+ *     `CON`, `dir/NUL.txt`, `a<b>c"d|e?f*g.txt`, `trailing. `). Use it to watch the rename
+ *     reporting work.
+ *
+ * On production, any GitHub-archived release has a slashed key (`owner/repo-vX.Y.Z.zip`) —
+ * e.g. records 21934832, 21936356, 21934451 — but all are depth 1, which is why the sandbox
+ * fixtures exist. A scan of 176 public records found no deep-tree example at all.
  */
 import { describe, it, expect } from "vitest";
 import { downloadZip } from "client-zip";
