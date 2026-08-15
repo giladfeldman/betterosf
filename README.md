@@ -47,7 +47,8 @@ Production deploys automatically on every push to `main` via the Vercel GitHub i
 
 ## v0.2.0 (Plan 2: Whole-tree ZIP + Deep Search) — what's new
 
-- One-click download of the whole project tree (root + every component + every linked project, across every storage provider) as a streamed ZIP via `/api/zip/<guid>`. Per-provider archives are nested as `<provider>.zip` inside the outer ZIP — unzip twice if needed.
+- One-click download of the whole project tree (root + every component + every linked project, across every storage provider) as one ZIP. Per-provider archives are nested as `<provider>.zip` inside the outer ZIP — unzip twice if needed. For a public project the archive is assembled **in your browser**, so the files go straight from OSF to your computer and never through BetterOSF's servers; private projects and any failure fall back to the server route (`/api/zip/<guid>`).
+- A standalone [Zenodo folder-tree downloader](https://betterosf.vercel.app/tools/zenodo-download) at `/tools/zenodo-download`. Zenodo has no folders and renders file keys as long flat names; paste any public record and this rebuilds the tree the keys describe, checks every file against the checksum Zenodo publishes, and hands you one ZIP. No account needed, and it works for any deposit whose names contain paths — not only ones made with BetterOSF.
 - Failures during the tree walk are logged into `_BETTEROSF_ERRORS.txt` at the ZIP root instead of aborting the download.
 - Within-project search now has an "include collapsed folders" toggle that lazy-expands every folder client-side so the filter sees the whole tree.
 

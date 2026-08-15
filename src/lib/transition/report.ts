@@ -26,7 +26,24 @@ export type ReportInput = {
   destination: { name: string; recordUrl: string | null; doi: string | null } | null;
   verdict: ReconciliationVerdict;
   fidelity: FidelityRow[];
-  files: { path: string; size: number; sha256: string | null; state: string; destinationKey?: string | null }[];
+  files: {
+    path: string;
+    size: number;
+    sha256: string | null;
+    state: string;
+    destinationKey?: string | null;
+    /**
+     * The OSF node this file actually lives on.
+     *
+     * Since an export can cover components and registrations as well as the root, the
+     * project guid alone no longer identifies where a file came from — and this CSV is
+     * what a researcher uses to repair links in papers. A component file stamped with the
+     * root's guid would send them to a URL that never held it.
+     */
+    sourceGuid?: string | null;
+  }[];
+  /** Every node this export covered, root first. Rendered so the scope is on the record. */
+  coveredNodes?: { guid: string; title: string; kind: string; fileCount: number }[];
   createdAt: string;
   appVersion: string;
 };
@@ -49,6 +66,11 @@ export function renderCrosswalkCsv(input: ReportInput): string {
     "osf_project_guid",
     "osf_project_url",
     "osf_doi",
+    // The node the FILE is on, which is the root for most rows and a component or
+    // registration for the rest. Distinct from osf_project_guid, which names the export's
+    // subject.
+    "osf_node_guid",
+    "osf_node_url",
     "osf_path",
     "size_bytes",
     "sha256",
@@ -64,6 +86,10 @@ export function renderCrosswalkCsv(input: ReportInput): string {
       input.projectGuid,
       input.osfUrl,
       input.osfDoi ?? "",
+      f.sourceGuid ?? input.projectGuid,
+      f.sourceGuid && f.sourceGuid !== input.projectGuid
+        ? `https://osf.io/${f.sourceGuid}/`
+        : input.osfUrl,
       f.path,
       f.size,
       f.sha256 ?? "",
@@ -115,6 +141,25 @@ export function renderReportMarkdown(input: ReportInput): string {
     `| Unexpected extra | ${v.counts.extra} |`,
     "",
   ];
+
+  if (input.coveredNodes && input.coveredNodes.length > 0) {
+    // Named explicitly, because "a copy of this project" is ambiguous the moment a project
+    // has components. A reader has to be able to tell what was in scope WITHOUT inferring
+    // it from folder names, and to see that a component with zero files really had none
+    // rather than having been skipped.
+    lines.push(
+      "## What this export covers",
+      "",
+      "| OSF node | | Files |",
+      "|---|---|---|",
+      ...input.coveredNodes.map(
+        (n) => `| [${n.guid}](https://osf.io/${n.guid}/) | ${n.title} (${n.kind}) | ${n.fileCount} |`,
+      ),
+      "",
+      "Anything not listed here was **not** copied, whatever its relationship to this project.",
+      "",
+    );
+  }
 
   if (v.blockers.length > 0) {
     // First, and before the per-file detail: a check that did not run is not a check that

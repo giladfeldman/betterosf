@@ -21,6 +21,13 @@
 
 import type { ContributorView } from "@/lib/osf/contributors";
 
+/**
+ * DataCite's `publisher` for a Zenodo deposit.
+ *
+ * Not derived from OSF, which has no such field. See `ZenodoMetadata.publisher`.
+ */
+export const ZENODO_PUBLISHER = "Zenodo";
+
 /** How faithfully one field survived the crossing. */
 export type FidelityStatus = "exact" | "approximated" | "dropped" | "user_supplied";
 
@@ -50,6 +57,14 @@ export type ZenodoRelatedIdentifier = {
 export type ZenodoMetadata = {
   title: string;
   description?: string;
+  /**
+   * REQUIRED to publish. Zenodo refuses to mint a DOI without it —
+   * `{"field":"metadata.publisher","messages":["Missing publisher field required for DOI
+   * registration."]}`, measured against sandbox.zenodo.org on 2026-08-14 with the exact
+   * metadata this crosswalk emits. Creating and filling a draft works fine without it, so
+   * the omission was invisible until the publish leg was probed end to end.
+   */
+  publisher: string;
   publication_date: string;
   resource_type: { id: string };
   creators: ZenodoCreator[];
@@ -314,6 +329,16 @@ export function crosswalk(input: CrosswalkInput): CrosswalkResult {
   });
 
   fidelity.push({
+    field: "publisher",
+    source: "(set by BetterOSF)",
+    status: "user_supplied",
+    note:
+      `OSF has no publisher field, and Zenodo will not mint a DOI without one, so the deposit ` +
+      `records "${ZENODO_PUBLISHER}" — the same value Zenodo's own upload form pre-fills. ` +
+      `Change it on the draft if a different publisher is correct for this work.`,
+  });
+
+  fidelity.push({
     field: "resource_type",
     source: "(you chose it)",
     status: "user_supplied",
@@ -395,6 +420,11 @@ export function crosswalk(input: CrosswalkInput): CrosswalkResult {
 
   const metadata: ZenodoMetadata = {
     title: input.title,
+    // "Zenodo" rather than "OSF" or the institution: DataCite's publisher is the entity
+    // making the resource available, which for this deposit is Zenodo. It is also what
+    // Zenodo's own upload form pre-fills, so a researcher who later edits the draft by
+    // hand sees the value they would have got anyway.
+    publisher: ZENODO_PUBLISHER,
     publication_date: (input.dateCreated || "").slice(0, 10),
     resource_type: { id: input.resourceTypeId },
     creators: creators.creators,

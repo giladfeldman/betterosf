@@ -22,7 +22,7 @@
  */
 
 import { downloadZip } from "client-zip";
-import { stageFile, stagedBlob, discardStaged, requestPersistence, opfsAvailable } from "./stage-opfs";
+import { stageFile, stagedBlob, discardStaged, clearStaging, requestPersistence, opfsAvailable } from "./stage-opfs";
 import { verifyFile, reconcile, type FileVerification, type ReconciliationVerdict } from "./verify";
 import { hashBytes } from "./hash";
 import { renderReportMarkdown, renderCrosswalkCsv, reportFilename, type ReportInput } from "./report";
@@ -31,14 +31,17 @@ import { renderDisclaimer } from "./package-bagit";
 import { describeError, type ExportPlan, type RunLogEntry } from "./run-export";
 import type { FidelityRow, ZenodoMetadata } from "./crosswalk";
 import {
+  appendRelatedIdentifiers,
   createDraft,
+  createNewVersion,
   declareFiles,
   deleteDraftFile,
   commitFile,
   listDraftFileEntries,
+  occupancyExcluding,
   planShards,
+  requestCommunityReview,
   shardRelatedIdentifiers,
-  updateDraftMetadata,
   uploadPart,
   uploadSingle,
   partsExpired,
@@ -60,6 +63,28 @@ import { zenodoDraftUrl, zenodoRecordUrl } from "./zenodo-env";
 export const FILES_PER_RECORD = ZENODO_MAX_FILES_PER_RECORD - 1;
 
 export const SUPPLEMENT_KEY = "betterosf-supplement.zip";
+
+/**
+ * Where the deposit lands.
+ *
+ * Zenodo has no projects or folders, so there is nothing to browse — but there are three
+ * genuinely different things a researcher can mean, and they are not interchangeable:
+ *
+ *   - `new` — a fresh record. The default, and the only one that existed before v1.12.
+ *   - `existing-draft` — an unpublished draft the user already has. BetterOSF adds files to
+ *     it and **does not author its metadata**: whatever they curated there stays.
+ *   - `new-version` — a new version of a record they already published. A Zenodo version
+ *     means *a revision of the same work*, so this is correct for "I deposited this last
+ *     year and the data has changed" and wrong for "this is a different project" or "this
+ *     is part 2" (that is what `IsPartOf` sharding is for). The UI only offers it when the
+ *     user names a prior record as the same work.
+ */
+export type TransferDestination =
+  | { kind: "new" }
+  | { kind: "existing-draft"; recordId: string }
+  | { kind: "new-version"; sourceRecordId: string };
+
+export const DEFAULT_DESTINATION: TransferDestination = { kind: "new" };
 
 export type TransferProgress = {
   phase: "preparing" | "transferring" | "finishing" | "done";
@@ -147,6 +172,38 @@ export type RunTransferOptions = {
    * litter they have to identify and delete themselves.
    */
   resumeRecordIds?: (string | null)[] | null;
+  /** Where the deposit lands. Defaults to a fresh record. */
+  destination?: TransferDestination;
+  /**
+   * A Zenodo community to ask to take the deposit, or null for none.
+   *
+   * Attaching one creates a `community-submission` REVIEW REQUEST. It is never submitted
+   * by the transfer and it never affects the verdict: the community's answer is a later
+   * human decision, and a curator declining a submission must not read as a failed copy.
+   * The measured consequence the UI has to carry is that an open review request BLOCKS
+   * direct publishing until it is cancelled.
+   */
+  communityId?: string | null;
+  /**
+   * Deposit ONE archive instead of one Zenodo file per OSF file.
+   *
+   * **Never the default, and only worth offering when the deposit would otherwise shard.**
+   * Zenodo's caps are 100 files and 50 GB per record, so a 400-file project becomes five
+   * linked records and — if published — five DOIs for one dataset, which is its own kind of
+   * citation damage. "One archive, one DOI" is a real answer to that, with a real cost.
+   *
+   * The cost: the toolkit's central claim is three independent checksum comparisons per
+   * file, the third being *the destination stored what we sent*. An archive replaces N of
+   * those with one, about a container OSF never held. Every file is still downloaded,
+   * hashed and compared against OSF's checksums BEFORE it goes in, and every per-file
+   * digest is written into the archive's manifest and the crosswalk CSV — but the
+   * destination-side comparison stops being about the researcher's files. `reconcile()`
+   * says so in words, and the report says so again.
+   *
+   * Also lost: Zenodo serves single files from a record, previews them, and indexes their
+   * names. Inside an archive, none of that.
+   */
+  packageAsArchive?: boolean;
   /**
    * Per-record caps. Defaults to Zenodo's real ones.
    *
@@ -175,6 +232,17 @@ export type TransferResult = {
   filenameStem: string;
   /** Whether the report/crosswalk bundle reached every record, and what went wrong if not. */
   supplement: { deposited: number; expected: number; problems: string[] };
+  /**
+   * What was asked of a community, and what it means.
+   *
+   * `requested` is deliberately not called "submitted": the request exists on the draft and
+   * a human still has to send it. `blocksDirectPublish` carries the measured consequence
+   * the publish UI has to respect — Zenodo refuses `POST /draft/actions/publish` while a
+   * review request is open.
+   */
+  community: { requested: boolean; blocksDirectPublish: boolean; problems: string[] };
+  /** Which of the three destinations this run used, for the UI's wording afterwards. */
+  destinationKind: TransferDestination["kind"];
 };
 
 /** Checkpoint cadence: coarse on purpose, to stay inside the "no meaningful usage" rule. */
@@ -214,6 +282,14 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
     message: `Starting: ${plan.files.length} files to Zenodo (${zenodo.env}), project ${plan.guid}`,
   });
 
+  // A container deposit is a different shape end to end — one destination key, one
+  // checksum, no sharding — so it is a separate path rather than a flag threaded through
+  // the per-file loop. The per-file path is the one that has been proven against
+  // production Zenodo; it stays exactly as it was.
+  if (opts.packageAsArchive) {
+    return await runArchiveDeposit({ opts, createdAt, note, step });
+  }
+
   const verifications: FileVerification[] = [];
   /**
    * Every per-file snapshot this run produced, kept for the whole run. The checkpoint
@@ -226,11 +302,90 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
   const bytesTotal = plan.files.reduce((n, f) => n + (Number.isFinite(f.size) ? f.size : 0), 0);
   let bytesDone = 0;
 
+  // ------------------------------------------------- resolve the anchor record, if any
+  //
+  // Done BEFORE planning, because an existing draft may already hold files and the plan
+  // has to be made against the room that is actually left. A resumed run's own first
+  // record is the anchor too — its occupancy is measured the same way, and the files this
+  // job already put there are excluded so they are not counted against the cap twice.
+  const destination = opts.destination ?? DEFAULT_DESTINATION;
+  const resumed = opts.resumeRecordIds ?? null;
+  const ourKeys = new Set([...plan.files.map((f) => f.path), SUPPLEMENT_KEY]);
+  const destinationNotes: FidelityRow[] = [];
+
+  let anchorRecordId: string | null = resumed?.[0] ?? null;
+  if (!anchorRecordId) {
+    if (destination.kind === "existing-draft") {
+      anchorRecordId = destination.recordId;
+    } else if (destination.kind === "new-version") {
+      const draft = await step(
+        "zenodo",
+        `createNewVersion of record ${destination.sourceRecordId}`,
+        () => createNewVersion(zenodo, destination.sourceRecordId),
+      );
+      anchorRecordId = draft.id;
+    }
+  }
+
+  let occupied = { files: 0, bytes: 0, unsizedFiles: 0 };
+  if (anchorRecordId) {
+    // Measured, never assumed, and never taken from the search listing — that reported
+    // `files.count: 0` for a draft with a committed file (2026-08-14). A failure to read
+    // it is fatal HERE rather than at file 101: planning a deposit against an unknown
+    // amount of remaining room is guessing with somebody's afternoon.
+    const entries = await step("zenodo", `listDraftFiles (anchor record ${anchorRecordId})`, () =>
+      listDraftFileEntries(zenodo, anchorRecordId!),
+    );
+    occupied = occupancyExcluding(entries, ourKeys);
+    if (occupied.files > 0) {
+      destinationNotes.push({
+        field: "destination",
+        source: "existing Zenodo record",
+        status: "approximated",
+        note:
+          `This deposit was added to record ${anchorRecordId}, which already held ${occupied.files} ` +
+          `file(s) BetterOSF did not put there. Those files are not part of this run and are not ` +
+          `verified by this report; they still count against Zenodo's per-record limits.` +
+          (occupied.unsizedFiles > 0
+            ? ` Zenodo reported no size for ${occupied.unsizedFiles} of them, so the byte figure used ` +
+              `for planning is a lower bound.`
+            : ""),
+      });
+    }
+    if (destination.kind !== "new") {
+      destinationNotes.push({
+        field: "metadata",
+        source: destination.kind === "new-version" ? "previous version" : "the draft you chose",
+        status: "dropped",
+        note:
+          destination.kind === "new-version"
+            ? "This is a new version of an existing record, so it inherited that record's metadata. " +
+              "BetterOSF did not overwrite it with a fresh crosswalk of the OSF project — any edits " +
+              "made to the earlier version are still there. Check the draft before publishing."
+            : "The files were added to a draft you already had, so BetterOSF left its metadata alone " +
+              "rather than replacing it with a crosswalk of the OSF project. Nothing in the fidelity " +
+              "table above was applied to this record.",
+      });
+    }
+  }
+
   // ---------------------------------------------------------------- plan the records
   const planned = planShards(
     plan.files,
     opts.shardLimits ?? { maxFiles: FILES_PER_RECORD, maxBytes: ZENODO_MAX_BYTES_PER_RECORD },
+    occupied,
   );
+
+  if (anchorRecordId && planned.shards.length > 0 && planned.shards[0]!.length === 0) {
+    // An empty leading shard means the anchor could not take even one file. Refuse before
+    // uploading anything: the alternative is silently depositing into fresh records the
+    // researcher did not ask for, next to a draft they chose and which stays empty.
+    throw new Error(
+      `The Zenodo draft you chose (record ${anchorRecordId}) has no room left — it already holds ` +
+        `${occupied.files} file(s), and Zenodo allows ${FILES_PER_RECORD + 1} per record. ` +
+        `Choose a different draft, or deposit into a new record. Nothing was uploaded.`,
+    );
+  }
 
   // A file that fits in no record is recorded as failed, never dropped. reconcile() then
   // refuses to call the run complete, which is the correct outcome: part of the project
@@ -262,11 +417,10 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
 
   // ---------------------------------------------------------------- drafts (or resume)
   const records: { recordId: string; paths: string[] }[] = [];
-  const resumed = opts.resumeRecordIds ?? null;
 
   for (const [index, files] of shardPaths.entries()) {
     opts.signal?.throwIfAborted();
-    const priorId = resumed?.[index];
+    const priorId = resumed?.[index] ?? (index === 0 ? anchorRecordId : null);
     if (priorId) {
       records.push({ recordId: priorId, paths: files.map((f) => f.path) });
       continue;
@@ -298,23 +452,52 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
   await saveJob("running");
 
   // Sibling links, once every record id is known. Only meaningful for a split deposit.
+  //
+  // APPENDED, never written over the top. A record in this set may be a draft the user
+  // already had, or a new version that inherited a published record's metadata — replacing
+  // that with `shardMetadata(...)` would silently undo whatever they curated. The title and
+  // the crosswalk's own related identifiers are already set at creation for records we
+  // create, so an append is all this step ever needed to add.
   if (shardCount > 1) {
     const urls = records.map((r) => zenodoRecordUrl(zenodo.env, r.recordId));
     for (const [index, record] of records.entries()) {
       try {
-        await updateDraftMetadata(zenodo, record.recordId, {
-          ...shardMetadata(opts.metadata, index, shardCount),
-          related_identifiers: [
-            ...(opts.metadata.related_identifiers ?? []),
-            ...shardRelatedIdentifiers(urls, index),
-          ],
-        });
+        const problem = await appendRelatedIdentifiers(
+          zenodo,
+          record.recordId,
+          shardRelatedIdentifiers(urls, index),
+        );
+        if (problem) linkProblems.push(problem);
       } catch (e) {
         // The links are metadata, not data. Losing them must not stop the bytes moving —
         // but the researcher has to be told, because unlinked shards look like unrelated
         // deposits.
         linkProblems.push(
           `Could not link record ${record.recordId} to its siblings: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------- community, if asked
+  //
+  // A REQUEST, not a submission and not a publication. Measured 2026-08-14: the request is
+  // created by `PUT /draft/review` and stays there until a human submits it and a curator
+  // answers; `POST /draft/actions/submit-review` returns 202 with the record still
+  // unpublished. Failures here are reported and never touch the verdict — a community
+  // declining a deposit says nothing about whether the files copied correctly.
+  const communityProblems: string[] = [];
+  if (opts.communityId) {
+    for (const record of records) {
+      try {
+        await step("zenodo", `requestCommunityReview (record ${record.recordId})`, () =>
+          requestCommunityReview(zenodo, record.recordId, opts.communityId!),
+        );
+      } catch (e) {
+        communityProblems.push(
+          `Could not ask the community to take record ${record.recordId}: ` +
+            `${e instanceof Error ? e.message : String(e)}. The files are unaffected — you can add the ` +
+            `community yourself on the draft.`,
         );
       }
     }
@@ -507,6 +690,23 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
     verdict,
     fidelity: [
       ...opts.fidelity,
+      ...destinationNotes,
+      ...(opts.communityId
+        ? [
+            {
+              field: "communities",
+              source: "(you chose it)",
+              status: "user_supplied" as const,
+              note:
+                `A submission request to the community was added to ${records.length} record(s). ` +
+                `It is a REQUEST: a curator still has to accept it, and they may decline — that has ` +
+                `no bearing on whether these files copied correctly. Note that Zenodo will not let you ` +
+                `publish a draft while a review request is open; cancel it on the draft if you want to ` +
+                `publish outside the community.` +
+                (communityProblems.length > 0 ? ` ${communityProblems.join(" ")}` : ""),
+            },
+          ]
+        : []),
       ...(shardCount > 1
         ? [
             {
@@ -536,7 +736,9 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
       // reading "verified" would tell a researcher a file is safe when its bytes are gone.
       state: isCollided(v.path) ? "overwritten" : v.state,
       destinationKey: v.state === "failed" || isCollided(v.path) ? null : v.path,
+      sourceGuid: byId.get(v.osfFileId)?.sourceGuid ?? null,
     })),
+    coveredNodes: plan.coveredNodes,
     createdAt,
     appVersion: opts.appVersion,
   };
@@ -593,7 +795,462 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
     crosswalkCsv,
     filenameStem: reportFilename(plan.guid, plan.projectTitle, createdAt),
     supplement,
+    community: {
+      requested: Boolean(opts.communityId) && communityProblems.length < records.length,
+      // True whenever a request was asked for at all: even a partially-failed attach leaves
+      // some records unpublishable, and telling the user "publish is blocked" when it might
+      // not be costs them a confusing error instead of a wrong action.
+      blocksDirectPublish: Boolean(opts.communityId) && communityProblems.length < records.length,
+      problems: communityProblems,
+    },
+    destinationKind: destination.kind,
   };
+}
+
+/** The one file a container deposit puts on the record, beside the report bundle. */
+export const ARCHIVE_KEY = "betterosf-archive.zip";
+
+type ArchiveRunContext = {
+  opts: RunTransferOptions;
+  createdAt: string;
+  note: (entry: Omit<RunLogEntry, "at">) => void;
+  step: <T>(phase: string, message: string, fn: () => Promise<T>) => Promise<T>;
+};
+
+/**
+ * Deposit the whole project as ONE archive.
+ *
+ * Offered only as an answer to sharding: past Zenodo's 100-file cap a deposit becomes
+ * several linked records, and publishing those mints several DOIs for one dataset. This
+ * trades the per-file destination checksum for one DOI and one record.
+ *
+ * What is kept, and it is most of it: every file is downloaded, hashed, and compared
+ * against OSF's own md5 and sha256 BEFORE it enters the archive. A file that fails that
+ * comparison is left OUT and recorded as failed — pushing bytes we already know do not
+ * match OSF into a permanent citable archive is the worst outcome available. Every digest
+ * is written into the archive's own manifest and into the crosswalk CSV.
+ *
+ * What is lost, and the report says so: Zenodo reports one checksum, for the container. It
+ * proves the archive arrived intact; it says nothing about any file inside it that was not
+ * already established locally. Zenodo also cannot serve, preview or index a single file
+ * from inside an archive.
+ */
+async function runArchiveDeposit(ctx: ArchiveRunContext): Promise<TransferResult> {
+  const { opts, createdAt, note, step } = ctx;
+  const { plan, zenodo } = opts;
+  const destination = opts.destination ?? DEFAULT_DESTINATION;
+
+  if (destination.kind !== "new") {
+    // Not a technical limit — a refusal to guess. Dropping one opaque archive into a draft
+    // someone else curated, or into a new version of a record whose previous version was
+    // per-file, changes what that deposit IS without them having said so.
+    throw new Error(
+      "A single-archive deposit is only offered for a new record. Choose 'a new record' as the destination, or transfer the files individually.",
+    );
+  }
+
+  const bytesTotal = plan.files.reduce((n, f) => n + (Number.isFinite(f.size) ? f.size : 0), 0);
+  if (bytesTotal > ZENODO_MAX_BYTES_PER_RECORD) {
+    throw new Error(
+      `This project is ${(bytesTotal / 1024 ** 3).toFixed(1)} GB, over Zenodo's ` +
+        `${Math.round(ZENODO_MAX_BYTES_PER_RECORD / 1024 ** 3)} GB per-record limit. An archive cannot be ` +
+        `split across records, so this project has to be transferred file by file (which does split).`,
+    );
+  }
+
+  const verifications: FileVerification[] = [];
+  const snapshots: TransferItemSnapshot[] = [];
+  const archiveEntries: { name: string; input: Blob | string }[] = [];
+  const manifestRows: { path: string; size: number; md5: string | null; sha256: string | null; state: string }[] = [];
+  let bytesDone = 0;
+
+  const draft = await step("zenodo", "createDraft (single-archive deposit)", () =>
+    createDraft(zenodo, archiveMetadata(opts.metadata, plan.files.length)),
+  );
+  const records = [{ recordId: draft.id, paths: [ARCHIVE_KEY] }];
+
+  if (opts.ledger) {
+    await opts.ledger
+      .saveJob({
+        jobId: opts.jobId,
+        guid: plan.guid,
+        destination: "zenodo",
+        env: zenodo.env,
+        status: "running",
+        records: [{ recordId: draft.id, fileCount: 1 }],
+        fileCount: plan.files.length,
+        bytesTotal,
+        updatedAt: opts.now().toISOString(),
+      })
+      .catch(() => {});
+  }
+
+  // ------------------------------------------------------------------ stage and verify
+  for (const [index, file] of plan.files.entries()) {
+    opts.signal?.throwIfAborted();
+    opts.onProgress?.({
+      phase: "transferring",
+      fileIndex: index,
+      fileCount: plan.files.length,
+      currentPath: file.path,
+      bytesDone,
+      bytesTotal,
+      bytesPerSecond: null,
+      shardIndex: 1,
+      shardCount: 1,
+    });
+
+    const fail = (problem: string) => {
+      verifications.push({
+        osfFileId: file.osfFileId,
+        path: file.path,
+        state: "failed",
+        checks: [],
+        problems: [problem],
+      });
+      snapshots.push({
+        osfFileId: file.osfFileId,
+        path: file.path,
+        size: file.size,
+        state: "failed",
+        localSha256: null,
+        localMd5: null,
+        remoteMd5: null,
+        shardIndex: 0,
+        problems: [problem],
+      });
+      manifestRows.push({ path: file.path, size: file.size, md5: null, sha256: null, state: "failed" });
+    };
+
+    try {
+      const staged = await stageFile({
+        url: file.downloadUrl,
+        token: opts.osfToken,
+        osfFileId: file.osfFileId,
+        declaredSize: file.size,
+        signal: opts.signal,
+        onProgress: (p) =>
+          opts.onProgress?.({
+            phase: "transferring",
+            fileIndex: index,
+            fileCount: plan.files.length,
+            currentPath: file.path,
+            bytesDone: bytesDone + p.bytesDone,
+            bytesTotal,
+            bytesPerSecond: p.bytesPerSecond,
+            shardIndex: 1,
+            shardCount: 1,
+          }),
+      });
+
+      // `destinationExpected: false` — correctly. There is no per-file destination
+      // checksum on this path, and demanding one would fail every file. The archive's own
+      // comparison is made once, below, and `reconcile` treats a failure there as a
+      // blocker for the whole run.
+      const verification = verifyFile({
+        osfFileId: file.osfFileId,
+        path: file.path,
+        declaredSize: file.size,
+        declared: { md5: file.md5, sha256: file.sha256 },
+        written: [{ start: 0, end: staged.size }],
+        local: staged.digest,
+        contentType: staged.contentType,
+        destinationExpected: false,
+      });
+      verifications.push(verification);
+      note({
+        phase: "archive",
+        path: file.path,
+        index: index + 1,
+        message: verification.state,
+        error: verification.problems[0],
+      });
+
+      if (verification.state === "failed") {
+        snapshots.push({
+          osfFileId: file.osfFileId,
+          path: file.path,
+          size: file.size,
+          state: "failed",
+          localSha256: staged.digest.sha256,
+          localMd5: staged.digest.md5,
+          remoteMd5: null,
+          shardIndex: 0,
+          problems: [
+            ...verification.problems,
+            "Left out of the archive: what was downloaded does not match what OSF says it holds.",
+          ],
+        });
+        manifestRows.push({
+          path: file.path,
+          size: file.size,
+          md5: staged.digest.md5,
+          sha256: staged.digest.sha256,
+          state: "failed",
+        });
+        await discardStaged(file.osfFileId).catch(() => {});
+      } else {
+        // ⚠️ NOT discarded here. `archiveEntries` holds a Blob backed by the staged file
+        // and client-zip reads them at the END — discarding now leaves every Blob
+        // dangling, which is exactly the bug that broke v1.10.3's export. Peak browser
+        // storage for a container deposit is therefore the whole project, and the
+        // preflight says so.
+        archiveEntries.push({ name: `data/${file.path}`, input: await stagedBlob(file.osfFileId) });
+        snapshots.push({
+          osfFileId: file.osfFileId,
+          path: file.path,
+          size: file.size,
+          state: verification.state,
+          localSha256: staged.digest.sha256,
+          localMd5: staged.digest.md5,
+          remoteMd5: null,
+          shardIndex: 0,
+          problems: verification.problems,
+        });
+        manifestRows.push({
+          path: file.path,
+          size: file.size,
+          md5: staged.digest.md5,
+          sha256: staged.digest.sha256,
+          state: verification.state,
+        });
+      }
+      bytesDone += Number.isFinite(file.size) ? file.size : 0;
+    } catch (e) {
+      if (isAbort(e)) throw e;
+      await discardStaged(file.osfFileId).catch(() => {});
+      fail(e instanceof Error ? e.message : "Could not download this file from OSF.");
+    }
+  }
+
+  if (opts.ledger) await opts.ledger.saveItems(opts.jobId, snapshots).catch(() => {});
+
+  // ------------------------------------------------------------------- build and upload
+  opts.onProgress?.({
+    phase: "finishing",
+    fileIndex: plan.files.length,
+    fileCount: plan.files.length,
+    currentPath: "",
+    bytesDone,
+    bytesTotal,
+    bytesPerSecond: null,
+    shardIndex: 1,
+    shardCount: 1,
+  });
+
+  archiveEntries.push({ name: "MANIFEST.tsv", input: renderArchiveManifest(plan, manifestRows, createdAt) });
+  for (const extra of plan.extras) archiveEntries.push({ name: `data/${extra.path}`, input: extra.text });
+
+  const blob = await step("archive", `Building the archive from ${archiveEntries.length} entries`, () =>
+    downloadZip(archiveEntries).blob(),
+  );
+  const digest = await hashBytes(new Uint8Array(await blob.arrayBuffer()));
+  await clearStaging().catch(() => {});
+
+  let container: { key: string; verified: boolean; detail: string };
+  try {
+    await deleteDraftFile(zenodo, draft.id, ARCHIVE_KEY).catch(() => {});
+    const declared = await declareFiles(zenodo, draft.id, [{ key: ARCHIVE_KEY, size: blob.size }]);
+    const found = declared.find((d) => d.key === ARCHIVE_KEY);
+    if (!found) throw new Error("Zenodo did not return an entry for the archive.");
+    await step("zenodo", `Uploading the archive (${blob.size} bytes)`, () =>
+      uploadBytes({ auth: zenodo, recordId: draft.id, declared: found, blob, opts, onBytes: () => {} }),
+    );
+    const commit = await commitFile(zenodo, draft.id, ARCHIVE_KEY);
+    container =
+      commit.md5 === null
+        ? {
+            key: ARCHIVE_KEY,
+            verified: false,
+            detail: "Zenodo reported no checksum for it, so there is no evidence it stored what was sent.",
+          }
+        : commit.md5 === digest.md5
+          ? { key: ARCHIVE_KEY, verified: true, detail: `Zenodo's md5 matches (${digest.md5}).` }
+          : {
+              key: ARCHIVE_KEY,
+              verified: false,
+              detail: `Zenodo reported md5 ${commit.md5}, but what was sent hashes to ${digest.md5}.`,
+            };
+  } catch (e) {
+    container = {
+      key: ARCHIVE_KEY,
+      verified: false,
+      detail: e instanceof Error ? e.message : String(e),
+    };
+  }
+  note({ phase: "zenodo", message: `Archive ${container.verified ? "verified" : "NOT verified"}: ${container.detail}` });
+
+  // ------------------------------------------------------------------- reconciliation
+  const verdict = reconcile({
+    expected: plan.files.map((f) => ({ osfFileId: f.osfFileId, path: f.path, size: f.size })),
+    results: verifications,
+    container,
+  });
+
+  const byId = new Map(plan.files.map((f) => [f.osfFileId, f] as const));
+  const digestByPath = new Map(manifestRows.map((r) => [r.path, r] as const));
+
+  const reportInput: ReportInput = {
+    projectTitle: plan.projectTitle,
+    projectGuid: plan.guid,
+    osfUrl: plan.osfUrl,
+    osfDoi: plan.doi,
+    destination: {
+      name: `Zenodo (${zenodo.env}) — single archive`,
+      recordUrl: zenodoDraftUrl(zenodo.env, draft.id),
+      doi: null,
+    },
+    verdict,
+    fidelity: [
+      ...opts.fidelity,
+      {
+        field: "files",
+        source: "(you chose it)",
+        status: "approximated",
+        note:
+          `This deposit is ONE archive (${ARCHIVE_KEY}) rather than ${plan.files.length} separate Zenodo ` +
+          `files, so it is one record and one DOI instead of ` +
+          `${Math.ceil(plan.files.length / FILES_PER_RECORD)}. Every file was checked against OSF's ` +
+          `checksums before it went in, and every digest is in MANIFEST.tsv inside the archive and in ` +
+          `the crosswalk CSV — but Zenodo holds one checksum, for the archive. It cannot serve, preview ` +
+          `or index a file from inside it either.`,
+      },
+    ],
+    files: verifications.map((v) => ({
+      path: v.path,
+      size: byId.get(v.osfFileId)?.size ?? 0,
+      sha256: digestByPath.get(v.path)?.sha256 ?? null,
+      state: v.state,
+      // Inside the container, under data/. Naming the archive alone would suggest the file
+      // is retrievable on its own, which is the thing this trade gives up.
+      destinationKey: v.state === "failed" ? null : `${ARCHIVE_KEY}!/data/${v.path}`,
+      sourceGuid: byId.get(v.osfFileId)?.sourceGuid ?? null,
+    })),
+    coveredNodes: plan.coveredNodes,
+    createdAt,
+    appVersion: opts.appVersion,
+  };
+
+  const reportMarkdown = renderReportMarkdown(reportInput);
+  const crosswalkCsv = renderCrosswalkCsv(reportInput);
+
+  const supplement = await depositSupplement({
+    opts,
+    records,
+    reportMarkdown,
+    crosswalkCsv,
+    crateFiles: verifications
+      .filter((v) => v.state !== "failed")
+      .map<CrateFile>((v) => ({
+        path: `${ARCHIVE_KEY}!/data/${v.path}`,
+        size: byId.get(v.osfFileId)?.size ?? 0,
+        sha256: digestByPath.get(v.path)?.sha256 ?? null,
+        verification: v.state,
+      })),
+    createdAt,
+    incompleteReason: verdict.status === "complete" ? null : verdict.summary,
+  });
+
+  const communityProblems: string[] = [];
+  if (opts.communityId) {
+    try {
+      await requestCommunityReview(zenodo, draft.id, opts.communityId);
+    } catch (e) {
+      communityProblems.push(
+        `Could not ask the community to take record ${draft.id}: ${e instanceof Error ? e.message : String(e)}. ` +
+          `The files are unaffected — you can add the community yourself on the draft.`,
+      );
+    }
+  }
+
+  if (opts.ledger) {
+    await opts.ledger
+      .saveJob({
+        jobId: opts.jobId,
+        guid: plan.guid,
+        destination: "zenodo",
+        env: zenodo.env,
+        status: verdict.status === "complete" ? "complete" : "incomplete",
+        records: [{ recordId: draft.id, fileCount: 1 }],
+        fileCount: plan.files.length,
+        bytesTotal,
+        updatedAt: opts.now().toISOString(),
+      })
+      .catch(() => {});
+  }
+
+  opts.onProgress?.({
+    phase: "done",
+    fileIndex: plan.files.length,
+    fileCount: plan.files.length,
+    currentPath: "",
+    bytesDone,
+    bytesTotal,
+    bytesPerSecond: null,
+    shardIndex: 1,
+    shardCount: 1,
+  });
+
+  return {
+    verdict,
+    verifications,
+    records: [
+      {
+        recordId: draft.id,
+        draftUrl: zenodoDraftUrl(zenodo.env, draft.id),
+        futureRecordUrl: zenodoRecordUrl(zenodo.env, draft.id),
+        fileCount: 1,
+      },
+    ],
+    reportMarkdown,
+    crosswalkCsv,
+    filenameStem: reportFilename(plan.guid, plan.projectTitle, createdAt),
+    supplement,
+    community: {
+      requested: Boolean(opts.communityId) && communityProblems.length === 0,
+      blocksDirectPublish: Boolean(opts.communityId) && communityProblems.length === 0,
+      problems: communityProblems,
+    },
+    destinationKind: "new",
+  };
+}
+
+/**
+ * The record description for a container deposit.
+ *
+ * Appended rather than replacing: the description is the public, indexed, human-readable
+ * part of the record, and someone finding it needs to know they are looking at an archive
+ * before they download 40 GB expecting to browse it.
+ */
+export function archiveMetadata(base: ZenodoMetadata, fileCount: number): ZenodoMetadata {
+  const noteText =
+    `<p><strong>This deposit is a single archive.</strong> ${ARCHIVE_KEY} contains ${fileCount} file(s) ` +
+    `under <code>data/</code>, laid out exactly as they were on OSF. Each one was downloaded and checked ` +
+    `against OSF's own checksums before it was packaged; <code>MANIFEST.tsv</code> inside the archive ` +
+    `lists every file with its size, MD5 and SHA-256, and the same table is in the crosswalk CSV in the ` +
+    `report bundle. Zenodo's checksum for this record covers the archive, not the individual files.</p>`;
+  return {
+    ...base,
+    description: base.description ? `${base.description}\n${noteText}` : noteText,
+  };
+}
+
+/** The per-file digest table that travels INSIDE the archive. */
+export function renderArchiveManifest(
+  plan: ExportPlan,
+  rows: { path: string; size: number; md5: string | null; sha256: string | null; state: string }[],
+  createdAt: string,
+): string {
+  return [
+    `# BetterOSF archive manifest`,
+    `# Project: ${plan.projectTitle} (${plan.guid}) — ${plan.osfUrl}`,
+    `# Created: ${createdAt}`,
+    `# Every digest below was computed from the bytes downloaded from OSF and compared against`,
+    `# OSF's own checksums BEFORE this archive was built. "failed" rows are NOT in the archive.`,
+    `path\tsize\tmd5\tsha256\tverification`,
+    ...rows.map((r) => `data/${r.path}\t${r.size}\t${r.md5 ?? ""}\t${r.sha256 ?? ""}\t${r.state}`),
+    "",
+  ].join("\n");
 }
 
 /**

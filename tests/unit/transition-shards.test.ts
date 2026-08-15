@@ -106,6 +106,7 @@ describe("shardRelatedIdentifiers", () => {
 describe("shardMetadata", () => {
   const base = {
     title: "My project",
+    publisher: "Zenodo",
     publication_date: "2026-01-01",
     resource_type: { id: "dataset" },
     creators: [],

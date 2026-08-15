@@ -21,8 +21,10 @@ import { readApiError, networkError, type ApiError } from "@/lib/api-error";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { Working } from "@/components/Progress";
 import { fetchExtras } from "./plan-extras";
+import { coveredNodesFrom } from "./covered-nodes";
 import { Stat } from "./Stat";
 import { RunLog } from "./RunLog";
+import { RelatedNodesPicker, defaultSelection } from "./RelatedNodesPicker";
 import type { PlanResponse } from "./plan-types";
 
 type Phase = "loading" | "preflight" | "running" | "done" | "error";
@@ -40,6 +42,14 @@ type Destination = "local" | "zenodo";
 export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: string }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [plan, setPlan] = useState<PlanResponse | null>(null);
+  /**
+   * Which components / registrations / linked projects travel with the export.
+   *
+   * `null` until the first plan arrives, so the server's defaults can be adopted exactly
+   * once. An empty Set afterwards is a real choice — "the root project only" — and must not
+   * be confused with "not decided yet".
+   */
+  const [selected, setSelected] = useState<Set<string> | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
@@ -67,26 +77,45 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
   const [logView, setLogView] = useState<RunLogEntry[]>([]);
   const abort = useRef<AbortController | null>(null);
 
-  const load = useCallback(async () => {
-    setPhase("loading");
-    setError(null);
-    try {
-      const res = await fetch(`/api/transition/plan/${guid}`, { cache: "no-store" });
-      if (!res.ok) {
-        setError(await readApiError(res, `/api/transition/plan/${guid}`));
+  /**
+   * Load the plan.
+   *
+   * `include` is omitted on the first load, which is how the route says "every component" —
+   * the default this feature exists for. Once the user changes the selection it is always
+   * sent explicitly, including as an EMPTY list, because "root only" and "first load" have
+   * to be distinguishable.
+   */
+  const load = useCallback(
+    async (include: string[] | null) => {
+      setPhase("loading");
+      setError(null);
+      const url =
+        include === null
+          ? `/api/transition/plan/${guid}`
+          : `/api/transition/plan/${guid}?include=${include.join(",")}`;
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) {
+          setError(await readApiError(res, `/api/transition/plan/${guid}`));
+          setPhase("error");
+          return;
+        }
+        const body: PlanResponse = await res.json();
+        setPlan(body);
+        // Only the FIRST load adopts the server's defaults. Re-planning after a tick must
+        // not overwrite what the user just chose.
+        setSelected((prev) => prev ?? defaultSelection(body));
+        setPhase("preflight");
+      } catch (e) {
+        setError(networkError(`/api/transition/plan/${guid}`, e));
         setPhase("error");
-        return;
       }
-      setPlan(await res.json());
-      setPhase("preflight");
-    } catch (e) {
-      setError(networkError(`/api/transition/plan/${guid}`, e));
-      setPhase("error");
-    }
-  }, [guid]);
+    },
+    [guid],
+  );
 
   useEffect(() => {
-    void load();
+    void load(null);
   }, [load]);
 
   // A run can take hours. Warn before a reload throws away staged work.
@@ -124,8 +153,9 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
         projectTitle: plan.title,
         osfUrl: plan.osfUrl,
         doi: plan.doi,
-        files: plan.files.map((f) => ({ ...f, provider: f.path.split("/")[0] ?? "osfstorage" })),
+        files: plan.files,
         extras: await fetchExtras(plan),
+        coveredNodes: coveredNodesFrom(plan),
         contributors: plan.contributors ?? [],
         crateInput: {
           description: plan.description,
@@ -222,7 +252,7 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
         <ErrorNotice
           error={error}
           title={isExportFailure ? "The export did not finish" : "Could not read this project"}
-          onRetry={() => (isExportFailure ? setPhase("preflight") : void load())}
+          onRetry={() => (isExportFailure ? setPhase("preflight") : void load(selected ? [...selected] : null))}
           retryLabel={isExportFailure ? "Back to the preflight" : "Try again"}
         />
         <RunLog entries={logView} />
@@ -422,9 +452,22 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
       <dl className="mt-4 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
         <Stat label="Files">{plan.files.length}</Stat>
         <Stat label="Total size">{formatBytes(totalBytes)}</Stat>
+        <Stat label="Nodes">{1 + plan.included.filter((i) => !i.error).length}</Stat>
         <Stat label="Wiki pages">{plan.wikis?.length ?? "unknown"}</Stat>
-        <Stat label="Contributors">{plan.contributors?.length ?? "unknown"}</Stat>
       </dl>
+
+      <RelatedNodesPicker
+        plan={plan}
+        selected={selected ?? new Set()}
+        disabled={false}
+        onChange={(next) => {
+          setSelected(next);
+          // Re-plan immediately. The file list, the byte total and the shard count all
+          // change with the selection, and a preflight that described a different run
+          // from the one about to start is worse than no preflight.
+          void load([...next]);
+        }}
+      />
 
       {plan.truncated ? (
         <p className="mt-4 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">

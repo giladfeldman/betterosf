@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { TransitionGate } from "@/components/transition/TransitionGate";
 import { TransitionDeadlines } from "@/components/transition/TransitionDeadlines";
 import { InventoryTable } from "@/components/transition/InventoryTable";
@@ -29,6 +30,28 @@ export default function TransitionPage() {
           </section>
         </TransitionGate>
       </div>
+
+      {/*
+        Outside the gate on purpose: it needs no OSF account, no consent and no sign-in, and
+        it is most useful to someone who deposited months ago and has come back to get their
+        data out again.
+      */}
+      <section className="mt-10 border-t border-neutral-200 pt-6 dark:border-neutral-800">
+        <h2 className="text-base font-semibold">Already moved something to Zenodo?</h2>
+        <p className="mt-2 max-w-3xl text-sm text-neutral-600 dark:text-neutral-400">
+          Zenodo has no folders, so a deposit&apos;s file list reads as long flat names like{" "}
+          <code className="rounded bg-neutral-100 px-1 text-xs dark:bg-neutral-900">
+            osfstorage/analysis/raw.csv
+          </code>
+          . The{" "}
+          <Link href="/tools/zenodo-download" className="underline">
+            folder-tree downloader
+          </Link>{" "}
+          rebuilds the structure from any public record, checks every file against the checksum
+          Zenodo publishes, and gives you one ZIP. No account needed, and it works for deposits made
+          without BetterOSF.
+        </p>
+      </section>
     </main>
   );
 }

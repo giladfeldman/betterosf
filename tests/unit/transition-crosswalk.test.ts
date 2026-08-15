@@ -299,3 +299,28 @@ describe("codex-consult 2026-08-13 — reproduced metadata defects", () => {
     expect(blockingGaps(crosswalk(input({ dateCreated: "2024-02-29T00:00:00" })))).toEqual([]);
   });
 });
+
+describe("publisher — the field that made every publish fail", () => {
+  /**
+   * Measured against sandbox.zenodo.org on 2026-08-14, with the exact metadata shape this
+   * crosswalk emitted at the time:
+   *
+   *   POST /api/records/{id}/draft/actions/publish
+   *   → 400 {"field":"metadata.publisher",
+   *          "messages":["Missing publisher field required for DOI registration."]}
+   *
+   * The identical draft with `publisher: "Zenodo"` added published with 202. Nothing
+   * caught this because the only real user run stopped at the draft — the publish leg had
+   * never been exercised end to end against a live Zenodo.
+   */
+  it("sets a publisher, because Zenodo refuses to mint a DOI without one", () => {
+    expect(crosswalk(input()).metadata.publisher).toBe("Zenodo");
+  });
+
+  it("records the publisher in the fidelity table rather than slipping it in silently", () => {
+    const row = crosswalk(input()).fidelity.find((r) => r.field === "publisher");
+    expect(row).toBeDefined();
+    expect(row!.status).toBe("user_supplied");
+    expect(row!.note).toMatch(/DOI/i);
+  });
+});

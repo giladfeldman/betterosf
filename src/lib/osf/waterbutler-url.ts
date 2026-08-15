@@ -331,6 +331,70 @@ export function validateUploadTarget(target: UploadTarget): UploadTarget {
  * the server does not say so. `checkRangeResponse` therefore cannot confirm a resume and
  * restarts the file instead, which is the safe reading of an unverifiable claim.
  */
+/**
+ * The `Authorization` header value a BROWSER must send to Waterbutler, even for a public
+ * file it needs no credential for.
+ *
+ * Measured 2026-08-14, and this is the whole finding:
+ *
+ *   - Waterbutler emits `Access-Control-Allow-Origin` **only when the request carries an
+ *     `Authorization` header**. Anonymously it answers `200` with the real bytes and NO
+ *     ACAO, so a browser discards the response and reports an opaque CORS failure. No
+ *     other allowed header flips it — not `X-Requested-With`, not `Cache-Control`, not
+ *     `Range`, not `X-CSRFToken`. Only `Authorization`, and any value does it:
+ *     `Bearer x`, `Basic x`, even a bare `x`.
+ *   - The value is **not** used for authorization. On a PRIVATE file the same placeholder
+ *     still returns **403**, and the real token returns 200. So this flips the CORS branch
+ *     and nothing else — it is not a bypass, and it cannot become one.
+ *   - The bytes fetched with the placeholder are md5-identical to the bytes fetched with a
+ *     real token, on a public file and on a public registration's file.
+ *
+ * The placeholder is spelled out rather than random so that anyone reading an OSF access
+ * log, or this code, can see exactly what it is: a marker, not a credential.
+ *
+ * Undocumented behaviour, so every caller must degrade rather than depend: the
+ * browser-direct download paths fall back to the server route when a direct fetch fails.
+ */
+export const PUBLIC_FETCH_PLACEHOLDER_TOKEN = "betterosf-public-file-no-credential";
+
+export function osfBrowserAuthHeader(token: string | null | undefined): string {
+  const trimmed = (token ?? "").trim();
+  return `Bearer ${trimmed.length > 0 ? trimmed : PUBLIC_FETCH_PLACEHOLDER_TOKEN}`;
+}
+
+/**
+ * Waterbutler's own archive of a provider root or a folder, browser-fetchable.
+ *
+ * `?zip=` streams a ZIP of everything beneath the path. It answers the CORS preflight and
+ * sends ACAO on the real response under the same `Authorization` rule above (measured on a
+ * provider root and on a nested folder, 2026-08-14 — the latter returned a real `PK`
+ * archive).
+ *
+ * This is what makes a browser-direct whole-tree download cheap: one request per
+ * (node, provider) instead of enumerating every file, and byte-for-byte the same nesting
+ * the server route produces.
+ */
+export function waterbutlerZipUrl(input: {
+  guid: string;
+  provider: string;
+  /** Folder path within the provider, or "/" for the whole provider. */
+  path?: string;
+}): string {
+  if (!isValidGuid(input.guid)) {
+    throw new OsfWriteError(400, "invalid", `Not a valid OSF guid: ${input.guid}`);
+  }
+  const provider = input.provider.trim();
+  if (!provider || provider.includes("/")) {
+    throw new OsfWriteError(400, "invalid", `Not a valid storage provider: ${input.provider}`);
+  }
+  const encoded = (input.path ?? "/")
+    .split("/")
+    .filter((seg) => seg.length > 0)
+    .map((seg) => encodeURIComponent(safeDecode(seg)))
+    .join("/");
+  return `${WATERBUTLER_BASE}/${input.guid}/providers/${provider}/${encoded ? `${encoded}/` : ""}?zip=`;
+}
+
 export function waterbutlerDownloadUrl(input: {
   guid: string;
   provider: string;

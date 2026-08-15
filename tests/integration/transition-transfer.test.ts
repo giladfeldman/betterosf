@@ -39,14 +39,44 @@ vi.mock("@/lib/transition/stage-opfs", () => ({
 // `Response`, whose `.blob()` returns a **jsdom** Blob that undici's fetch will not send.
 // The real zipping still runs — only the Blob is re-wrapped in the realm `fetch` accepts,
 // so the bytes the fake Zenodo hashes are the bytes client-zip actually produced.
+/**
+ * Every entry name handed to client-zip this run.
+ *
+ * Asserting on the VERDICT alone is not enough for the archive path: a file left in the
+ * archive despite failing its OSF checksum still reads as "failed" in the verdict, so the
+ * test passed against the defect. This is what actually pins the bytes.
+ */
+const zippedEntryNames: string[] = [];
+
 vi.mock("client-zip", async (importOriginal) => {
   const actual = await importOriginal<typeof import("client-zip")>();
   return {
     ...actual,
     downloadZip: (...args: Parameters<typeof actual.downloadZip>) => {
-      const response = actual.downloadZip(...args);
       return {
-        blob: async () => new NodeBlob([Buffer.from(await response.arrayBuffer())]),
+        blob: async () => {
+          // The SAME realm gap, now on the input side. The staging fake hands back **Node**
+          // Blobs (undici's fetch will not send jsdom's), and client-zip type-checks its
+          // inputs against the GLOBAL Blob — jsdom's — so a Node Blob comes back as
+          // "Unsupported input format". In a browser there is one Blob and the question
+          // never arises. Read to bytes here so the real zipper still runs on the real
+          // content.
+          const entries = args[0] as Iterable<{ name: string; input: unknown }>;
+          const normalised = [];
+          for (const entry of entries) {
+            zippedEntryNames.push(entry.name);
+            const input = entry.input;
+            normalised.push({
+              name: entry.name,
+              input:
+                input && typeof (input as Blob).arrayBuffer === "function"
+                  ? new Uint8Array(await (input as Blob).arrayBuffer())
+                  : (input as string),
+            });
+          }
+          const response = actual.downloadZip(normalised);
+          return new NodeBlob([Buffer.from(await response.arrayBuffer())]);
+        },
       };
     },
   };
@@ -70,6 +100,18 @@ const BASE = "https://sandbox.zenodo.org/api";
 type FakeEntry = { key: string; status: string; size: number; checksum: string | null };
 const drafts = new Map<string, FakeEntry[]>();
 const uploaded = new Map<string, Uint8Array>();
+/**
+ * Draft metadata, stored and served back.
+ *
+ * Needed because shard linking no longer overwrites metadata — it READS the draft, appends
+ * the sibling identifiers, writes it back, and reads again to confirm nothing else moved.
+ * A fake that only accepted the PUT would let a merge that silently dropped the title pass.
+ */
+const draftMetadata = new Map<string, Record<string, unknown>>();
+/** Communities asked to take a record, in the order the runner asked. */
+const communityRequests: { recordId: string; communityId: string }[] = [];
+/** Records created by `POST /records/{id}/versions`, as sourceId → newId. */
+const versionsCreated: { source: string; created: string }[] = [];
 let nextRecordId = 1000;
 /** Set to force a commit to answer with no checksum — the case destinationExpected exists for. */
 let commitChecksumOverride: string | null | undefined;
@@ -77,13 +119,42 @@ let publishedRecords: string[] = [];
 
 function installZenodoHandlers() {
   server.use(
-    http.post(`${BASE}/records`, async () => {
+    http.post(`${BASE}/records`, async ({ request }) => {
       const id = String(nextRecordId++);
       drafts.set(id, []);
+      const body = (await request.json()) as { metadata?: Record<string, unknown> };
+      draftMetadata.set(id, { ...(body.metadata ?? {}) });
       return HttpResponse.json({ id, links: {}, pids: {} }, { status: 201 });
     }),
 
-    http.put(`${BASE}/records/:id/draft`, async () => HttpResponse.json({ ok: true })),
+    // A new version is a fresh, EMPTY draft — measured against sandbox.zenodo.org on
+    // 2026-08-14, where `GET /records/{new}/draft/files` came back `entries: []`. It
+    // inherits the published record's metadata, which is exactly why the runner must not
+    // overwrite it.
+    http.post(`${BASE}/records/:id/versions`, ({ params }) => {
+      const id = String(nextRecordId++);
+      drafts.set(id, []);
+      draftMetadata.set(id, { title: "Inherited from the published version", publisher: "Zenodo" });
+      versionsCreated.push({ source: String(params.id), created: id });
+      return HttpResponse.json({ id, links: {}, pids: {} }, { status: 201 });
+    }),
+
+    http.get(`${BASE}/records/:id/draft`, ({ params }) =>
+      HttpResponse.json({ id: params.id, metadata: draftMetadata.get(String(params.id)) ?? {} }),
+    ),
+
+    http.put(`${BASE}/records/:id/draft`, async ({ params, request }) => {
+      const body = (await request.json()) as { metadata?: Record<string, unknown> };
+      // Replaces, exactly like the real endpoint — which is why the runner reads first.
+      draftMetadata.set(String(params.id), { ...(body.metadata ?? {}) });
+      return HttpResponse.json({ ok: true });
+    }),
+
+    http.put(`${BASE}/records/:id/draft/review`, async ({ params, request }) => {
+      const body = (await request.json()) as { receiver?: { community?: string } };
+      communityRequests.push({ recordId: String(params.id), communityId: String(body.receiver?.community) });
+      return HttpResponse.json({ id: "req-1", status: "created" });
+    }),
 
     http.post(`${BASE}/records/:id/draft/files`, async ({ params, request }) => {
       const id = String(params.id);
@@ -161,6 +232,7 @@ function installZenodoHandlers() {
 
 const metadata: ZenodoMetadata = {
   title: "Test project",
+  publisher: "Zenodo",
   publication_date: "2026-01-01",
   resource_type: { id: "dataset" },
   creators: [{ person_or_org: { type: "personal", family_name: "Probe" } }],
@@ -216,7 +288,7 @@ async function planWith(files: FixtureFile[]): Promise<ExportPlan> {
       downloadUrl: `https://files.osf.io/v1/${f.id}`,
       md5: declared.md5,
       sha256: declared.sha256,
-      provider: "osfstorage",
+      sourceGuid: "abc12",
     });
   }
 
@@ -227,6 +299,7 @@ async function planWith(files: FixtureFile[]): Promise<ExportPlan> {
     doi: null,
     files: planFiles,
     extras: [{ path: "metadata/osf-project.json", text: "{}" }],
+    coveredNodes: [{ guid: "abc12", title: "Test project", kind: "project", fileCount: planFiles.length }],
     contributors: [],
     crateInput: {
       description: "",
@@ -261,6 +334,10 @@ function run(plan: ExportPlan, extra: Partial<Parameters<typeof runTransfer>[0]>
 beforeEach(() => {
   drafts.clear();
   uploaded.clear();
+  draftMetadata.clear();
+  zippedEntryNames.length = 0;
+  communityRequests.length = 0;
+  versionsCreated.length = 0;
   publishedRecords = [];
   commitChecksumOverride = undefined;
   installZenodoHandlers();
@@ -350,7 +427,7 @@ describe("runTransfer", () => {
       downloadUrl: "https://files.osf.io/v1/missing",
       md5: "b".repeat(32),
       sha256: "b".repeat(64),
-      provider: "osfstorage",
+      sourceGuid: "abc12",
     });
 
     const result = await run(plan);
@@ -643,12 +720,290 @@ describe("runTransfer — destination-key collisions (Sonnet, 2026-08-13)", () =
     expect(first.size).not.toBe(second.size);
 
     const result = await run(plan);
+    // Read the size column by NAME. Hard-coding index 4 silently started reading
+    // `osf_node_url` when the per-file node columns were added, and the assertion compared
+    // NaN against NaN's neighbours rather than failing on the thing it was written for.
+    const header = result.crosswalkCsv.split("\n")[0]!.split(",");
+    const sizeColumn = header.indexOf("size_bytes");
+    expect(sizeColumn).toBeGreaterThan(-1);
     const sizes = result.crosswalkCsv
       .split("\n")
       .filter((l) => l.includes("caf"))
-      .map((l) => Number(l.split(",")[4]));
+      .map((l) => Number(l.split(",")[sizeColumn]));
 
     // Both real sizes appear exactly once; neither file borrowed the other's.
     expect(sizes.sort((a, b) => a - b)).toEqual([first.size, second.size].sort((a, b) => a - b));
+  });
+});
+
+/**
+ * Where the deposit lands (v1.12).
+ *
+ * Every shape asserted here was measured against sandbox.zenodo.org on 2026-08-14 before
+ * any of it was written — see the docs on `createNewVersion`, `requestCommunityReview` and
+ * `appendRelatedIdentifiers` for the exact responses.
+ */
+describe("runTransfer — destination options", () => {
+  it("adds to an existing draft instead of creating one, and leaves its metadata alone", async () => {
+    // A draft the user already has, with metadata they curated and one file of their own.
+    drafts.set("777", [{ key: "notes/theirs.txt", status: "completed", size: 12, checksum: "md5:aa" }]);
+    draftMetadata.set("777", { title: "A title they wrote", publisher: "Zenodo", description: "theirs" });
+
+    const plan = await planWith([{ id: "f1", path: "osfstorage/a.csv", body: "aaa" }]);
+    const result = await run(plan, { destination: { kind: "existing-draft", recordId: "777" } });
+
+    expect(result.records.map((r) => r.recordId)).toEqual(["777"]);
+    expect(result.verdict.status).toBe("complete");
+    // Their file is untouched and ours is alongside it.
+    expect((drafts.get("777") ?? []).map((e) => e.key).sort()).toEqual(
+      ["betterosf-supplement.zip", "notes/theirs.txt", "osfstorage/a.csv"].sort(),
+    );
+    // Their metadata is exactly as it was: no crosswalk was written over the top.
+    expect(draftMetadata.get("777")).toEqual({
+      title: "A title they wrote",
+      publisher: "Zenodo",
+      description: "theirs",
+    });
+    expect(result.destinationKind).toBe("existing-draft");
+  });
+
+  it("says in the report that the draft already held files it did not verify", async () => {
+    drafts.set("778", [{ key: "notes/theirs.txt", status: "completed", size: 12, checksum: "md5:aa" }]);
+    draftMetadata.set("778", { title: "Theirs" });
+    const plan = await planWith([{ id: "f1", path: "osfstorage/a.csv", body: "aaa" }]);
+    const result = await run(plan, { destination: { kind: "existing-draft", recordId: "778" } });
+
+    expect(result.reportMarkdown).toMatch(/already held 1 file/);
+    expect(result.reportMarkdown).toMatch(/left its metadata alone/);
+  });
+
+  it("counts what the draft already holds against the per-record cap", async () => {
+    // Two slots, one already used by a file that is not ours, so our two files need a
+    // second record. Assuming an empty draft would have hit Zenodo's cap mid-run.
+    drafts.set("779", [{ key: "notes/theirs.txt", status: "completed", size: 1, checksum: "md5:aa" }]);
+    draftMetadata.set("779", { title: "Theirs" });
+    const plan = await planWith([
+      { id: "f1", path: "osfstorage/a.csv", body: "aaa" },
+      { id: "f2", path: "osfstorage/b.csv", body: "bbb" },
+    ]);
+    const result = await run(plan, {
+      destination: { kind: "existing-draft", recordId: "779" },
+      shardLimits: { maxFiles: 2, maxBytes: 1024 },
+    });
+
+    expect(result.records).toHaveLength(2);
+    expect(result.records[0]!.recordId).toBe("779");
+    expect(result.records[0]!.fileCount).toBe(1);
+    expect(result.verdict.status).toBe("complete");
+  });
+
+  it("does not count OUR OWN keys twice when adding to the same draft again", async () => {
+    // Re-sending a key REPLACES that entry rather than adding one, so a file this deposit
+    // already put there must not be charged against the cap a second time.
+    drafts.set("780", [{ key: "osfstorage/a.csv", status: "completed", size: 3, checksum: "md5:aa" }]);
+    draftMetadata.set("780", { title: "Ours" });
+    const plan = await planWith([
+      { id: "f1", path: "osfstorage/a.csv", body: "aaa" },
+      { id: "f2", path: "osfstorage/b.csv", body: "bbb" },
+    ]);
+    const result = await run(plan, {
+      destination: { kind: "existing-draft", recordId: "780" },
+      shardLimits: { maxFiles: 2, maxBytes: 1024 },
+    });
+    expect(result.records).toHaveLength(1);
+  });
+
+  it("refuses a draft with no room left, before uploading anything", async () => {
+    drafts.set("781", [
+      { key: "a", status: "completed", size: 1, checksum: "md5:a" },
+      { key: "b", status: "completed", size: 1, checksum: "md5:b" },
+    ]);
+    draftMetadata.set("781", { title: "Full" });
+    const plan = await planWith([{ id: "f1", path: "osfstorage/a.csv", body: "aaa" }]);
+
+    await expect(
+      run(plan, {
+        destination: { kind: "existing-draft", recordId: "781" },
+        shardLimits: { maxFiles: 2, maxBytes: 1024 },
+      }),
+    ).rejects.toThrow(/no room left/i);
+    // Nothing was uploaded into it.
+    expect((drafts.get("781") ?? []).map((e) => e.key)).toEqual(["a", "b"]);
+  });
+
+  it("creates a new version of a published record and never imports its old files", async () => {
+    const plan = await planWith([{ id: "f1", path: "osfstorage/a.csv", body: "aaa" }]);
+    const result = await run(plan, { destination: { kind: "new-version", sourceRecordId: "555" } });
+
+    expect(versionsCreated).toHaveLength(1);
+    expect(versionsCreated[0]!.source).toBe("555");
+    const created = versionsCreated[0]!.created;
+    expect(result.records.map((r) => r.recordId)).toEqual([created]);
+    // Only what this run uploaded, plus the report bundle. `files-import` would have
+    // brought the previous version's files across, spending file slots on bytes this run
+    // never checked and leaving two states of the project in one deposit.
+    expect((drafts.get(created) ?? []).map((e) => e.key).sort()).toEqual(
+      ["betterosf-supplement.zip", "osfstorage/a.csv"].sort(),
+    );
+    // The inherited metadata is still the inherited metadata.
+    expect(draftMetadata.get(created)).toEqual({
+      title: "Inherited from the published version",
+      publisher: "Zenodo",
+    });
+    expect(result.destinationKind).toBe("new-version");
+  });
+
+  it("asks a community to take every record, without submitting or publishing anything", async () => {
+    const plan = await planWith([{ id: "f1", path: "osfstorage/a.csv", body: "aaa" }]);
+    const result = await run(plan, { communityId: "comm-uuid" });
+
+    expect(communityRequests).toEqual([
+      { recordId: result.records[0]!.recordId, communityId: "comm-uuid" },
+    ]);
+    expect(result.community.requested).toBe(true);
+    // The measured consequence: an open review request blocks POST /draft/actions/publish.
+    expect(result.community.blocksDirectPublish).toBe(true);
+    expect(publishedRecords).toEqual([]);
+    expect(result.reportMarkdown).toMatch(/curator still has to accept it/);
+  });
+
+  it("does not let a community refusing the request fail the transfer", async () => {
+    server.use(
+      http.put(`${BASE}/records/:id/draft/review`, () =>
+        HttpResponse.json({ message: "community not found" }, { status: 404 }),
+      ),
+    );
+    const plan = await planWith([{ id: "f1", path: "osfstorage/a.csv", body: "aaa" }]);
+    const result = await run(plan, { communityId: "nope" });
+
+    // The files copied and verified; only the community request failed.
+    expect(result.verdict.status).toBe("complete");
+    expect(result.community.requested).toBe(false);
+    expect(result.community.problems).toHaveLength(1);
+    expect(result.community.problems[0]).toMatch(/files are unaffected/i);
+  });
+
+  it("refuses a single-archive deposit into anything but a new record", async () => {
+    const plan = await planWith([{ id: "f1", path: "osfstorage/a.csv", body: "aaa" }]);
+    await expect(
+      run(plan, {
+        packageAsArchive: true,
+        destination: { kind: "existing-draft", recordId: "777" },
+      }),
+    ).rejects.toThrow(/only offered for a new record/i);
+  });
+
+  it("appends sibling links to a split deposit instead of overwriting the metadata", async () => {
+    const plan = await planWith([
+      { id: "f1", path: "osfstorage/a.csv", body: "aaa" },
+      { id: "f2", path: "osfstorage/b.csv", body: "bbb" },
+    ]);
+    const result = await run(plan, { shardLimits: { maxFiles: 1, maxBytes: 1024 } });
+    expect(result.records).toHaveLength(2);
+
+    for (const record of result.records) {
+      const md = draftMetadata.get(record.recordId)!;
+      // The title set at creation survived the linking step. A full-replace PUT looks
+      // identical to this on a fresh record and is destructive on a draft the user chose,
+      // which is exactly why the linking step no longer replaces.
+      expect(String(md.title)).toMatch(/^Test project \(part \d of 2\)$/);
+      expect(md.publisher).toBe("Zenodo");
+      const rels = md.related_identifiers as { identifier: string; relation_type: { id: string } }[];
+      expect(rels.filter((r) => r.relation_type.id === "ispartof")).toHaveLength(1);
+    }
+  });
+});
+
+/**
+ * The single-archive deposit — Lakens's shape, offered as the answer to sharding.
+ *
+ * The thing these tests exist to prevent is the deposit reading as if it carried the same
+ * guarantee as a per-file one. It does not: Zenodo holds ONE checksum, for a container OSF
+ * never had. Every assertion below is about that difference being visible.
+ */
+describe("runTransfer — single-archive deposit", () => {
+  it("puts exactly one archive on the record, beside the report bundle", async () => {
+    const plan = await planWith([
+      { id: "f1", path: "osfstorage/a.csv", body: "aaa" },
+      { id: "f2", path: "osfstorage/sub dir/b.csv", body: "bbb" },
+    ]);
+    const result = await run(plan, { packageAsArchive: true });
+
+    expect(result.records).toHaveLength(1);
+    const keys = (drafts.get(result.records[0]!.recordId) ?? []).map((e) => e.key).sort();
+    expect(keys).toEqual([SUPPLEMENT_KEY, "betterosf-archive.zip"].sort());
+    expect(result.verdict.status).toBe("complete");
+    // Both files are still expected and still individually accounted for.
+    expect(result.verdict.counts.expected).toBe(2);
+    expect(result.verdict.counts.verified).toBe(2);
+  });
+
+  it("says in the verdict that the destination check covers the ARCHIVE, not each file", async () => {
+    const plan = await planWith([{ id: "f1", path: "osfstorage/a.csv", body: "aaa" }]);
+    const result = await run(plan, { packageAsArchive: true });
+
+    expect(result.verdict.summary).toMatch(/covers the ARCHIVE, not each file/);
+    expect(result.verdict.summary).toMatch(/container OSF never had/);
+    // And the per-file wording from the normal path must NOT appear — a researcher
+    // comparing two reports has to see the difference in the sentence.
+    expect(result.verdict.summary).not.toMatch(/transferred and checksum-verified\./);
+  });
+
+  it("names the archive on the record, and points each file inside it", async () => {
+    const plan = await planWith([{ id: "f1", path: "osfstorage/a.csv", body: "aaa" }]);
+    const result = await run(plan, { packageAsArchive: true });
+
+    // Not the bare archive key: that would suggest the file can be fetched on its own,
+    // which is precisely what this trade gives up.
+    expect(result.crosswalkCsv).toMatch(/betterosf-archive\.zip!\/data\/osfstorage\/a\.csv/);
+    expect(result.reportMarkdown).toMatch(/MANIFEST\.tsv/);
+    expect(result.reportMarkdown).toMatch(/one checksum, for the archive/);
+  });
+
+  it("leaves a file that fails its OSF checksum OUT, and refuses to call the run complete", async () => {
+    const plan = await planWith([
+      { id: "f1", path: "osfstorage/good.csv", body: "aaa" },
+      // OSF's declared checksum does not match the bytes: pushing these into a permanent
+      // citable archive is the worst outcome available.
+      { id: "f2", path: "osfstorage/bad.csv", body: "bbb", declared: "wrong" },
+    ]);
+    const result = await run(plan, { packageAsArchive: true });
+
+    expect(result.verdict.status).toBe("incomplete");
+    expect(result.verdict.failed.map((f) => f.path)).toContain("osfstorage/bad.csv");
+    // The archive itself still uploaded and still verified — the failure is about the file.
+    expect(result.verdict.blockers).toEqual([]);
+
+    // And the bytes really are absent. Asserting only on the verdict passed even with the
+    // exclusion removed, because a file left IN still reports "failed" — the verdict is
+    // about the check, not about what went in the archive.
+    expect(zippedEntryNames).toContain("data/osfstorage/good.csv");
+    expect(zippedEntryNames).not.toContain("data/osfstorage/bad.csv");
+    // …but it is still named in the manifest, so its absence is documented rather than silent.
+    expect(zippedEntryNames).toContain("MANIFEST.tsv");
+  });
+
+  it("treats an archive Zenodo could not confirm as a blocker for the whole run", async () => {
+    // The single point of failure a container deposit creates, and the reason it is not
+    // the default: one bad answer invalidates everything inside.
+    commitChecksumOverride = null;
+    const plan = await planWith([{ id: "f1", path: "osfstorage/a.csv", body: "aaa" }]);
+    const result = await run(plan, { packageAsArchive: true });
+
+    expect(result.verdict.status).toBe("incomplete");
+    expect(result.verdict.blockers.join(" ")).toMatch(/did not verify at the destination/);
+    expect(result.verdict.blockers.join(" ")).toMatch(/Nothing inside it can be relied on/);
+    // Every file passed its own checks — which is exactly why the blocker is needed.
+    expect(result.verdict.counts.failed).toBe(0);
+  });
+
+  it("tells the record's readers, in the description, that they are looking at an archive", async () => {
+    const plan = await planWith([{ id: "f1", path: "osfstorage/a.csv", body: "aaa" }]);
+    const result = await run(plan, { packageAsArchive: true });
+
+    const description = String(draftMetadata.get(result.records[0]!.recordId)!.description);
+    expect(description).toMatch(/single archive/i);
+    expect(description).toMatch(/MANIFEST\.tsv/);
+    expect(description).toMatch(/covers the archive, not the individual files/i);
   });
 });

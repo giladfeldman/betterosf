@@ -1,5 +1,116 @@
 # Changelog
 
+## 1.12.0 — 2026-08-14
+
+The five agreed-but-unbuilt items from the 2026-08-14 handoff, plus a bug the probing for
+them uncovered. Everything below rests on measurements taken against live Zenodo and live
+OSF before any of it was written — the last five releases in this project were all
+"assumed instead of measured", and it stopped being a coincidence.
+
+### Fixed
+- **🚨 The browser-direct migration lost a rate limit.** `/api/zip/[guid]` caps anonymous
+  callers at 5/IP/hour; its replacement `/api/zip/[guid]/manifest` shipped with none. It
+  returns a few KB of JSON, but producing it walks up to 500 nodes — roughly 1000 OSF
+  requests per call, made with BetterOSF's **own app token** when the caller is anonymous.
+  Uncapped it was an amplifier against OSF under a shared credential and a hole in exactly
+  the function budget this work exists to protect. Now capped on the *same key*, so a caller
+  cannot take 5 server ZIPs and unlimited manifests.
+- **`package-lock.json` had been stuck at 1.7.1 since v1.7.1** — five releases of version
+  bumps edited `package.json` alone. `npm ci` is the only gate that compares them, and it
+  fails outright when they disagree; nothing else notices. Synced, and the lockfile is now
+  part of a version bump.
+- **🚨 The Zenodo folder-tree downloader had a Zip Slip.** It passed each record's file key
+  straight into a ZIP entry name, and a key is whatever the depositor uploaded. Established
+  by publishing a record for each case on sandbox rather than by reasoning about it:
+  - **`..\windows-escape.txt` and `C:\Windows\evil.dll` upload, commit and PUBLISH**, and
+    appear verbatim on the public record. Many Windows unzippers treat a backslash in an
+    entry name as a separator, so that escapes the extraction directory.
+  - `CON`, `dir/NUL.txt`, `a<b>c"d|e?f*g.txt` and `trailing. ` all publish fine too, and are
+    each unusable or silently renamed on Windows.
+  - `../` traversal, by contrast, **cannot** reach a published record: Zenodo accepts the
+    declare but 404s the content upload, so the file never completes and the draft will not
+    publish. (It also cannot be deleted — declaring one bricks the draft.)
+
+  `zipEntryPath()` now neutralises all of it — *neutralise, never drop*, so the folder
+  structure the page exists to rebuild survives intact — and every name it had to change is
+  listed in the UI and in `ZENODO-MANIFEST.txt`, so nothing is renamed silently. Found while
+  answering "how do I test this?"; six tests were watched failing against the raw-key version.
+- **🚨 Every publish would have failed with an opaque 400.** Zenodo refuses to mint a DOI
+  without `metadata.publisher`, and the crosswalk never set one:
+  `{"field":"metadata.publisher","messages":["Missing publisher field required for DOI
+  registration."]}`. Nothing caught it because creating and filling a draft works fine
+  without it — the only real user run stopped at the draft, so the publish leg had never
+  been exercised end to end. Found by probing `POST /versions`, not by looking for it.
+  The same draft with `publisher: "Zenodo"` published with 202.
+
+### Added
+- **Three Zenodo destinations instead of one.** Every transfer used to create a new record.
+  - *A draft you already have.* BetterOSF adds files to it and **does not author its
+    metadata** — whatever you curated there stays. The per-record file cap is seeded from
+    what the draft actually holds (read from `listDraftFileEntries`, never from the search
+    listing, which reported `files.count: 0` for a draft with a committed file), and a
+    draft with no room left is refused before anything uploads.
+  - *A new version of something you published.* `POST /records/{id}/versions` returns an
+    **empty** draft that inherits the record's metadata. BetterOSF deliberately never calls
+    `files-import`: this run uploads its own verified copy, and importing the old version's
+    files would spend file slots on bytes nothing checked. Offered only behind an explicit
+    "this is the same work" acknowledgement, because a Zenodo version is a revision, not a
+    sequel.
+  - *A community.* Attaching one creates a submission **request**, which BetterOSF never
+    sends — a curator decides, and a refusal says nothing about whether the files copied.
+    The measured consequence is carried into the UI: **an open review request blocks direct
+    publishing** ("You cannot publish a draft with an open review request"), so the publish
+    panel explains that instead of offering a button that 400s.
+- **Components and linked registrations travel with an export.** An export covered ONE
+  node, silently — a project with six components exported as a copy of a seventh of itself,
+  and `reconcile()` called it complete because it reconciles against a plan that never
+  mentioned them. The preflight now lists the component tree, registrations and linked
+  projects with checkboxes. **Components default ON** (same project, same fate);
+  registrations and linked projects default OFF, with the reason next to each. Files nest
+  under `components/<guid>-<title>/`, every file records the node it came from, and the
+  report opens with a table naming every node the export covers.
+- **A single-archive Zenodo deposit, offered only where it is a real choice.** Past
+  Zenodo's 100-file cap a deposit becomes several linked records — and several DOIs for one
+  dataset. "One archive, one DOI" is now offered *at that point and nowhere else*, never as
+  a default. Every file is still downloaded and checked against OSF's checksums before it
+  goes in, a failing file is left OUT, and every digest is written into `MANIFEST.tsv`
+  inside the archive and into the crosswalk CSV. What it costs is stated in the checkbox,
+  in the record description, and in the verdict's own wording: **Zenodo holds one checksum,
+  for a container OSF never had.**
+- **A Zenodo → folder-tree downloader at `/tools/zenodo-download`.** Zenodo has no folders;
+  it stores each key verbatim and its UI renders them as long flat filenames. This rebuilds
+  the tree from the keys, verifies every file against the checksum Zenodo publishes, and
+  refuses to include one that does not match. Public, standalone, no account at either end —
+  it works for any deposit whose names contain paths, not just ours.
+
+### Changed
+- **Whole-project and selected-items ZIPs are assembled in the browser.** They used to
+  fetch every byte server-side and stream it through a Vercel function, so bandwidth equalled
+  project size — the one real cost risk if the app goes public. The browser now fetches one
+  Waterbutler `?zip=` archive per (node, provider) and nests them with `client-zip`, byte for
+  byte the same output. It also removes the 4.5 MB serverless response ceiling.
+  - This works **anonymously**, which looked impossible at first: Waterbutler sends no
+    `Access-Control-Allow-Origin` on an anonymous request, so the browser discards a
+    response it was perfectly willing to serve. It emits CORS headers whenever an
+    `Authorization` header is *present*, whatever its value — and on a private file that
+    same placeholder is still **403**, so it flips the CORS branch and nothing else.
+  - Undocumented, therefore never depended on: **every direct path falls back to the server
+    route** if it fails, and private projects use the server route by design.
+- **The landing page now says what actually shipped.** It described neither the Zenodo
+  transfer's destination options nor the folder-tree downloader, and still said BetterOSF
+  "streams downloads through to you" — which understates the current behaviour: downloading a
+  public project, exporting one, and transferring one to Zenodo now all move the bytes
+  directly between the browser and OSF, never through our servers.
+- **One definition for how a whole-tree ZIP names its folders** (`src/lib/zip/tree-naming.ts`).
+  The archive has two producers — the server route and the browser assembler — and they must
+  agree, because the browser silently falls back to the server and a researcher is never told
+  which built their archive. The helpers had been copied rather than shared, and had already
+  drifted within one session: the partial-failure report carried a different header on each
+  side. Both now import one module, pinned by `tests/unit/zip-tree-naming.test.ts`.
+- The crosswalk CSV gained `osf_node_guid` / `osf_node_url`. It used to stamp the root
+  project's guid on every row, which became wrong the moment an export could span components —
+  and this is the file researchers use to repair links in papers.
+
 ## 1.11.1 — 2026-08-14
 
 ### Fixed

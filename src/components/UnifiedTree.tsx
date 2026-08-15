@@ -779,6 +779,39 @@ export function UnifiedTree({
     if (items.length === 0) return;
     setDownloadingSelection(true);
     setDownloadError(null);
+
+    // Browser-direct first: every byte goes OSF → this tab, so a 5 GB selection costs
+    // BetterOSF nothing and is not capped by the 4.5 MB serverless response limit. Falls
+    // through to the server route on ANY failure — the CORS behaviour it relies on is
+    // undocumented (see osfBrowserAuthHeader), and a private project needs the session's
+    // own token, which lives on the server.
+    const directable = items.every((i) => i.kind === "folder" || Boolean(i.providerPath));
+    if (directable) {
+      try {
+        const { downloadSelection: directDownload } = await import("@/lib/download/browser-zip");
+        await directDownload(
+          guid,
+          items.map((i) =>
+            i.kind === "folder"
+              ? { kind: "folder" as const, guid: i.guid, provider: i.provider, path: i.path, name: i.name }
+              : {
+                  kind: "file" as const,
+                  guid: i.guid,
+                  provider: i.provider,
+                  path: i.path,
+                  name: i.name,
+                  providerPath: i.providerPath!,
+                },
+          ),
+          { token: null },
+        );
+        setDownloadingSelection(false);
+        return;
+      } catch {
+        /* fall through to the server route, which still works for private projects */
+      }
+    }
+
     try {
       const res = await fetch(`/api/zip/${guid}/selection`, {
         method: "POST",
@@ -1024,6 +1057,7 @@ export function UnifiedTree({
                     path: fileSelectionPath(folder.materializedPath, f.name),
                     name: f.name,
                     downloadUrl: f.downloadUrl,
+                    providerPath: f.providerPath,
                     deleteUrl: canDeleteHere ? f.deleteUrl : undefined,
                     parentListingUrl: canDeleteHere ? folder.listingUrl : undefined,
                   },
@@ -1067,6 +1101,7 @@ export function UnifiedTree({
                 path: fileSelectionPath("/", f.name),
                 name: f.name,
                 downloadUrl: f.downloadUrl,
+                providerPath: f.providerPath,
                 deleteUrl: canDeleteHere ? f.deleteUrl : undefined,
                 parentListingUrl: canDeleteHere ? provider.listingUrl : undefined,
               },

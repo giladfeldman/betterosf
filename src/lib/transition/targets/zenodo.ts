@@ -94,6 +94,155 @@ export async function createDraft(
 }
 
 /**
+ * Create the draft that IS a new version of an already-published record.
+ *
+ * Measured against sandbox.zenodo.org on 2026-08-14: `POST /api/records/{id}/versions`
+ * returns **201** with a fresh draft id, and the new draft starts with **zero files**
+ * (`GET /records/{new}/draft/files` → `entries: []`). Zenodo offers
+ * `POST /records/{new}/draft/actions/files-import` to copy the previous version's files
+ * across — **BetterOSF deliberately never calls it.** A transfer is uploading its own
+ * verified copy of every file; importing the old version's would consume file slots with
+ * bytes this run never checked, and then the deposit would hold two states of the project
+ * with no way to tell them apart.
+ *
+ * A Zenodo *version* means a revision of the SAME work. It is the right verb for "the data
+ * changed since I deposited it" and the wrong one for "this is a different project" or
+ * "this is part 2 of a split deposit" — the latter is what `IsPartOf` sharding is for. The
+ * UI only offers this when the user has explicitly identified a prior record as the same
+ * work.
+ */
+export async function createNewVersion(
+  auth: ZenodoAuth,
+  publishedRecordId: string,
+): Promise<DraftRecord> {
+  const res = await zfetch(auth, `/records/${publishedRecordId}/versions`, { method: "POST" });
+  const json = await res.json();
+  return { id: String(json.id), links: json.links ?? {}, doi: json.pids?.doi?.identifier ?? null };
+}
+
+export type ZenodoCommunity = {
+  id: string;
+  slug: string;
+  title: string;
+  url: string;
+  /** "open" = anyone may submit; "closed"/"restricted" = members only. */
+  submissionPolicy: string;
+  /** "open" = published on submission; otherwise a curator decides. */
+  reviewPolicy: string;
+};
+
+/**
+ * Search Zenodo's communities.
+ *
+ * Anonymous and `Access-Control-Allow-Origin: *` (measured 2026-08-14), so the browser can
+ * call it without a token — but the auth header is sent anyway when we have one, since a
+ * signed-in search also surfaces communities the user belongs to.
+ */
+export async function searchCommunities(
+  auth: ZenodoAuth,
+  query: string,
+  size = 10,
+): Promise<ZenodoCommunity[]> {
+  const res = await zfetch(auth, `/communities?q=${encodeURIComponent(query)}&size=${size}`);
+  const json = await res.json();
+  return ((json.hits?.hits ?? []) as RawCommunity[])
+    .filter((c) => typeof c.id === "string" && typeof c.slug === "string")
+    .map((c) => ({
+      id: String(c.id),
+      slug: String(c.slug),
+      title: String(c.metadata?.title ?? c.slug),
+      url: String(c.links?.self_html ?? ""),
+      submissionPolicy: String(c.access?.record_submission_policy ?? "unknown"),
+      reviewPolicy: String(c.access?.review_policy ?? "unknown"),
+    }));
+}
+
+type RawCommunity = {
+  id?: string;
+  slug?: string;
+  metadata?: { title?: string };
+  links?: { self_html?: string };
+  access?: { record_submission_policy?: string; review_policy?: string };
+};
+
+/**
+ * Ask a community to take this record, as a `community-submission` review request.
+ *
+ * **Two measured consequences the caller MUST handle** (sandbox.zenodo.org, 2026-08-14):
+ *
+ *   1. Once a review request exists, `POST /draft/actions/publish` returns **400 — "You
+ *      cannot publish a draft with an open review request. Please cancel the review request
+ *      first."** Community and direct publish are alternative paths, not additive ones.
+ *   2. `POST /draft/actions/submit-review` returns 202 and the record is **not published**;
+ *      it waits for the community to accept. `GET /records/{id}` stayed 404 afterwards.
+ *
+ * So attaching a community is a *request*, and the transfer never submits it. The files
+ * still landed and still verify; the community's answer is a separate, later, human event
+ * that must never be able to read as a failed transfer.
+ */
+export async function requestCommunityReview(
+  auth: ZenodoAuth,
+  recordId: string,
+  communityId: string,
+): Promise<void> {
+  await zfetch(auth, `/records/${recordId}/draft/review`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ receiver: { community: communityId }, type: "community-submission" }),
+  });
+}
+
+export type ZenodoUserRecord = {
+  id: string;
+  title: string;
+  /** "draft" or "published", straight from Zenodo's own listing. */
+  status: string;
+  doi: string | null;
+  updated: string;
+  url: string;
+};
+
+/**
+ * The user's own records — drafts (`published: false`) or published ones.
+ *
+ * ⚠️ **This is a SEARCH INDEX, and it lags.** A draft created seconds earlier returned
+ * `total: 0`, and the same query a few seconds later returned it (measured 2026-08-14). It
+ * is fine for "pick one of your existing deposits" and useless as a source of truth about
+ * what a record currently holds: the same listing reported `files.count: 0` for a draft
+ * that demonstrably had a committed file. **Never seed a capacity plan from this** — ask
+ * `listDraftFileEntries` instead.
+ */
+export async function listUserRecords(
+  auth: ZenodoAuth,
+  opts: { published: boolean; size?: number },
+): Promise<ZenodoUserRecord[]> {
+  const res = await zfetch(
+    auth,
+    `/user/records?is_published=${opts.published ? "true" : "false"}&size=${opts.size ?? 25}&sort=newest`,
+  );
+  const json = await res.json();
+  return ((json.hits?.hits ?? []) as RawUserRecord[])
+    .filter((h) => h.id !== undefined && h.id !== null)
+    .map((h) => ({
+      id: String(h.id),
+      title: String(h.metadata?.title ?? "(untitled)"),
+      status: String(h.status ?? ""),
+      doi: h.pids?.doi?.identifier ? String(h.pids.doi.identifier) : null,
+      updated: String(h.updated ?? ""),
+      url: String(h.links?.self_html ?? ""),
+    }));
+}
+
+type RawUserRecord = {
+  id?: string | number;
+  status?: string;
+  updated?: string;
+  metadata?: { title?: string };
+  pids?: { doi?: { identifier?: string } };
+  links?: { self_html?: string };
+};
+
+/**
  * A file key must be URL-encoded in the request path, but the slashes that give the
  * deposit its folder structure must survive — so encode each segment, not the whole key.
  */
@@ -318,6 +467,111 @@ export async function updateDraftMetadata(
   });
 }
 
+/**
+ * The serialization that round-trips. **Not the default.**
+ *
+ * `GET /records/{id}/draft` with no `Accept` (or `application/json`) answers in Zenodo's
+ * LEGACY deposit shape: `access_right`, `creators: [{name, affiliation}]`,
+ * `related_identifiers: [{relation: "isIdenticalTo"}]` — and **no `publisher` and no
+ * `rights` at all**. Reading that and PUTting it back is silently destructive: measured on
+ * 2026-08-14, one such round trip erased `publisher`, `description` and the
+ * `isidenticalto` relation while returning a cheerful 200.
+ *
+ * `application/vnd.inveniordm.v1+json` returns the real RDM shape, and the same round trip
+ * measured LOSSLESS across title, publisher, description, creators, ORCID, subjects,
+ * rights and relations.
+ */
+const RDM_JSON = "application/vnd.inveniordm.v1+json";
+
+/**
+ * Add related identifiers to a draft **without authoring the rest of its metadata**.
+ *
+ * Needed because a deposit can now land in a draft BetterOSF did not create — one the user
+ * picked, or one inherited from a published record as a new version. Those carry metadata
+ * a researcher curated, and replacing it with a fresh crosswalk of the OSF project would
+ * quietly undo their edits. Sibling shard links still have to get on there.
+ *
+ * Verifies the merge by reading the draft back: if a field we did not intend to touch
+ * changed, that is reported to the caller rather than left for someone to find on a
+ * published record. Returns null on success, or the reason it could not be done safely.
+ */
+export async function appendRelatedIdentifiers(
+  auth: ZenodoAuth,
+  recordId: string,
+  additions: ZenodoRelatedIdentifierInput[],
+): Promise<string | null> {
+  if (additions.length === 0) return null;
+
+  const before = await readDraftMetadata(auth, recordId);
+  const existing = new Set(
+    ((before.related_identifiers ?? []) as { identifier?: string }[]).map((r) => String(r.identifier)),
+  );
+  const fresh = additions.filter((a) => !existing.has(a.identifier));
+  if (fresh.length === 0) return null;
+
+  const merged = {
+    ...before,
+    related_identifiers: [...((before.related_identifiers as unknown[]) ?? []), ...fresh],
+  };
+  await zfetch(auth, `/records/${recordId}/draft`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ metadata: merged }),
+  });
+
+  const after = await readDraftMetadata(auth, recordId);
+  const drift = describeMetadataDrift(before, after);
+  if (drift) {
+    return `Adding the sibling links to record ${recordId} changed its metadata unexpectedly (${drift}). Check the draft before publishing.`;
+  }
+  const landed = new Set(
+    ((after.related_identifiers ?? []) as { identifier?: string }[]).map((r) => String(r.identifier)),
+  );
+  const missing = fresh.filter((f) => !landed.has(f.identifier));
+  if (missing.length > 0) {
+    return `Zenodo accepted the update to record ${recordId} but did not store ${missing.length} of the sibling links.`;
+  }
+  return null;
+}
+
+export type ZenodoRelatedIdentifierInput = {
+  identifier: string;
+  scheme: string;
+  relation_type: { id: string };
+};
+
+/** Read a draft's metadata in the shape that survives being written back. */
+export async function readDraftMetadata(
+  auth: ZenodoAuth,
+  recordId: string,
+): Promise<Record<string, unknown>> {
+  const res = await zfetch(auth, `/records/${recordId}/draft`, { headers: { Accept: RDM_JSON } });
+  const json = await res.json();
+  return (json.metadata ?? {}) as Record<string, unknown>;
+}
+
+/**
+ * Did anything OTHER than related identifiers change across the merge?
+ *
+ * Deliberately compares the fields a researcher would notice on a published record rather
+ * than deep-equalling the whole object: Zenodo expands vocabularies with localised titles
+ * on read, so a deep comparison would report drift on every successful call.
+ */
+export function describeMetadataDrift(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): string | null {
+  const changed: string[] = [];
+  for (const key of ["title", "publisher", "description", "publication_date"]) {
+    if (JSON.stringify(before[key] ?? null) !== JSON.stringify(after[key] ?? null)) changed.push(key);
+  }
+  const count = (v: unknown) => (Array.isArray(v) ? v.length : v == null ? 0 : 1);
+  for (const key of ["creators", "subjects", "rights"]) {
+    if (count(before[key]) !== count(after[key])) changed.push(key);
+  }
+  return changed.length > 0 ? changed.join(", ") : null;
+}
+
 /** Delete one declared-but-unwanted file entry from a draft. */
 export async function deleteDraftFile(
   auth: ZenodoAuth,
@@ -412,11 +666,24 @@ export type ShardPlan<T> = {
 export function planShards<T extends { path: string; size: number }>(
   files: T[],
   limits: ShardLimits = { maxFiles: ZENODO_MAX_FILES_PER_RECORD, maxBytes: ZENODO_MAX_BYTES_PER_RECORD },
+  /**
+   * What the FIRST record already holds, when the deposit is being added to an existing
+   * draft rather than a fresh one.
+   *
+   * Seeded from `listDraftFileEntries`, never from the search listing — that reported
+   * `files.count: 0` for a draft with a committed file (measured 2026-08-14). Assuming an
+   * empty record here is how a run discovers Zenodo's 100-file cap at file 101, with the
+   * first hundred already uploaded.
+   */
+  occupied: { files: number; bytes: number } = { files: 0, bytes: 0 },
 ): ShardPlan<T> {
   const shards: T[][] = [];
   const unplaceable: { file: T; reason: string }[] = [];
   let current: T[] = [];
-  let currentBytes = 0;
+  // The first record starts partly full. Every later one starts empty, so these are reset
+  // to zero at each shard boundary below.
+  let currentBytes = Math.max(0, occupied.bytes);
+  let currentFiles = Math.max(0, occupied.files);
 
   for (const file of files) {
     if (!Number.isFinite(file.size) || file.size < 0) {
@@ -438,18 +705,64 @@ export function planShards<T extends { path: string; size: number }>(
     }
 
     const wouldExceed =
-      current.length + 1 > limits.maxFiles || currentBytes + file.size > limits.maxBytes;
-    if (wouldExceed && current.length > 0) {
+      currentFiles + 1 > limits.maxFiles || currentBytes + file.size > limits.maxBytes;
+    if (wouldExceed) {
+      // Pushed even when `current` is EMPTY, which happens only for an anchor draft that
+      // was already too full to take a single file. An empty leading shard is the honest
+      // representation of "the draft you picked has no room" — `firstShardIsFull` below
+      // turns it into a refusal in the preflight, rather than a silent extra record.
       shards.push(current);
       current = [];
       currentBytes = 0;
+      currentFiles = 0;
     }
     current.push(file);
     currentBytes += file.size;
+    currentFiles += 1;
   }
 
   if (current.length > 0) shards.push(current);
   return { shards, unplaceable };
+}
+
+/**
+ * Did the chosen anchor draft have no room at all?
+ *
+ * `planShards` says so by emitting an empty first shard. Callers turn that into "pick a
+ * different draft" before anything is uploaded.
+ */
+export function firstShardIsFull<T>(plan: ShardPlan<T>): boolean {
+  return plan.shards.length > 0 && plan.shards[0]!.length === 0;
+}
+
+/**
+ * How much of a record the files already on it consume, for seeding `planShards`.
+ *
+ * Keys that our own run is going to write are NOT counted: Waterbutler-sourced paths are
+ * stable, so re-sending `osfstorage/data.csv` REPLACES the entry rather than adding a
+ * second one, and counting it twice would shard a deposit that fits.
+ */
+export function occupancyExcluding(
+  entries: { key: string; size: number | null }[],
+  ourKeys: Iterable<string>,
+): { files: number; bytes: number; unsizedFiles: number } {
+  const ours = new Set(ourKeys);
+  let files = 0;
+  let bytes = 0;
+  let unsizedFiles = 0;
+  for (const e of entries) {
+    if (ours.has(e.key)) continue;
+    files += 1;
+    if (typeof e.size === "number" && Number.isFinite(e.size)) {
+      bytes += e.size;
+    } else {
+      // A size Zenodo did not report is NOT zero, and pretending otherwise makes the byte
+      // plan optimistic by an unknown amount. It is counted separately and surfaced, so
+      // the preflight can say the byte figure is a lower bound rather than a fact.
+      unsizedFiles += 1;
+    }
+  }
+  return { files, bytes, unsizedFiles };
 }
 
 /**

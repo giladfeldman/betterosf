@@ -48,7 +48,7 @@ function plan(count: number): ExportPlan {
       size: 3,
       downloadUrl: `https://files.osf.io/v1/resources/abc12/providers/osfstorage/${i}?direct=`,
       ...h,
-      provider: "osfstorage",
+      sourceGuid: "abc12",
     };
   });
   return {
@@ -58,6 +58,7 @@ function plan(count: number): ExportPlan {
     doi: null,
     files,
     extras: [],
+    coveredNodes: [{ guid: "abc12", title: "Test project", kind: "project", fileCount: files.length }],
     contributors: [],
     crateInput: { description: "", datePublished: "2026-01-01", dateModified: "2026-01-02", keywords: [], license: null },
   };

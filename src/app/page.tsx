@@ -26,7 +26,12 @@ const CAPABILITIES = [
   {
     title: "Get your projects out before OSF freezes",
     body:
-      "OSF Projects becomes read-only on 19 February 2027. BetterOSF gives you an inventory of every project you can reach, tells you which ones actually need moving (most public ones do not), and takes a checksum-verified copy of files, wikis, metadata and contributors — the things OSF offers no way to export.",
+      "OSF Projects becomes read-only on 19 February 2027. BetterOSF gives you an inventory of every project you can reach, tells you which ones actually need moving (most public ones do not), and takes a checksum-verified copy of files, wikis, metadata and contributors — the things OSF offers no way to export. Components come along by default; registrations and linked projects are offered separately, because they are not going anywhere.",
+  },
+  {
+    title: "Move a project to Zenodo, and get it back out again",
+    body:
+      "Transfer to your own Zenodo account as a new record, a draft you already have, or a new version of something you published — optionally asking a community to take it. Every file is checked against OSF's checksum on the way out and Zenodo's on the way in. Zenodo has no folders, so the folder-tree downloader rebuilds the structure from any public record, for anyone, with no account.",
   },
   {
     title: "One tree, every provider",
@@ -42,7 +47,7 @@ const CAPABILITIES = [
   },
   {
     title: "Download a whole project as one ZIP",
-    body: "Stream an entire project — root, every component, every linked project, across every provider — into a single archive. Failures are recorded inside the ZIP instead of silently truncating it.",
+    body: "Stream an entire project — root, every component, every linked project, across every provider — into a single archive. For a public project the archive is built in your own browser, so the files go straight from OSF to your computer and never through our servers. Failures are recorded inside the ZIP instead of silently truncating it.",
   },
   {
     title: "Search across OSF",
@@ -161,8 +166,10 @@ export default function Landing() {
         <h2 className="mb-3 text-xl font-semibold">Where your data goes</h2>
         <ul className="space-y-2 text-sm text-neutral-700 dark:text-neutral-300">
           <li>
-            <strong>Files stay on OSF.</strong> BetterOSF reads through the public OSF API and streams
-            downloads through to you. It never stores your research files.
+            <strong>Files stay on OSF.</strong> BetterOSF reads through the public OSF API and never
+            stores your research files. Downloading a public project, exporting one, or transferring
+            it to Zenodo all move the bytes <em>directly</em> between your browser and OSF — they do
+            not pass through our servers at all.
           </li>
           <li>
             <strong>Public browsing needs no account.</strong> Sign in only to see private projects or

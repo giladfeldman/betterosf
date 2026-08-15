@@ -21,6 +21,7 @@ import { CitationExport } from "@/components/CitationExport";
 import { SplitPane } from "@/components/SplitPane";
 import { UnifiedTree } from "@/components/UnifiedTree";
 import { UploadFilesButton } from "@/components/UploadFilesButton";
+import { WholeTreeZipButton } from "@/components/WholeTreeZipButton";
 import { PaginatedSection, parsePagination } from "@/components/PaginatedSection";
 import type { NodeView } from "@/lib/osf/parse";
 import type { RegistrationView } from "@/lib/osf/registrations";
@@ -489,13 +490,7 @@ export default async function ProjectPage({
             <a href={node.osfUrl} className="text-blue-600 hover:underline">View on OSF</a>
           </div>
           <div>
-            <a
-              href={`/api/zip/${guid}`}
-              className="block border rounded px-3 py-2 text-center hover:bg-neutral-50 dark:hover:bg-neutral-900"
-            >
-              <span aria-hidden="true">⬇</span> <span>Download whole project as ZIP</span>
-            </a>
-            <p className="text-xs text-neutral-500 mt-1">Bundles every storage provider, every component, every linked project. Per-provider archives are nested inside the outer ZIP.</p>
+            <WholeTreeZipButton guid={guid} isPublic={node.public} />
           </div>
           <CitationExport guid={guid} />
         </aside>

@@ -32,13 +32,27 @@ import type { ContributorView } from "@/lib/osf/contributors";
 
 export type PlannedExportFile = {
   osfFileId: string;
-  /** Path inside the bag's data/ directory, e.g. "osfstorage/sub/a.csv". */
+  /**
+   * Path inside the bag's data/ directory, e.g. `osfstorage/sub/a.csv`, or
+   * `components/<guid>-<title>/osfstorage/sub/a.csv` for a file on a component.
+   */
   path: string;
   size: number;
   downloadUrl: string;
   md5: string | null;
   sha256: string | null;
-  provider: string;
+  /**
+   * The OSF node the file lives on — the root project, or one of its components,
+   * registrations or linked projects. Carried so the report can say where each file came
+   * from; an export spanning several nodes cannot answer that from the path alone without
+   * re-parsing a naming convention.
+   *
+   * (There used to be a `provider` field here, derived by both callers as
+   * `path.split("/")[0]`. Nothing ever read it, and once component files gained a path
+   * prefix that derivation started returning "components". A field no consumer reads is
+   * not a fact, it is a liability.)
+   */
+  sourceGuid: string;
 };
 
 export type ExportSelection = {
@@ -58,6 +72,14 @@ export type ExportPlan = {
   files: PlannedExportFile[];
   /** Non-file content already fetched as text, keyed by path within the bag. */
   extras: { path: string; text: string }[];
+  /**
+   * Every OSF node this plan covers, root first.
+   *
+   * Rendered into the report so the SCOPE of an export is stated rather than inferred from
+   * folder names. A project with six components used to export as a copy of a seventh of
+   * itself, and nothing said so.
+   */
+  coveredNodes: { guid: string; title: string; kind: string; fileCount: number }[];
   contributors: ContributorView[];
   crateInput: {
     description: string;
@@ -456,7 +478,9 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
       size: bagFiles.find((b) => b.path === v.path)?.size ?? 0,
       sha256: bagFiles.find((b) => b.path === v.path)?.sha256 ?? null,
       state: v.state,
+      sourceGuid: plan.files.find((f) => f.osfFileId === v.osfFileId)?.sourceGuid ?? null,
     })),
+    coveredNodes: plan.coveredNodes,
     createdAt,
     appVersion: opts.appVersion,
   };

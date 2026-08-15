@@ -15,7 +15,14 @@ vi.mock("@/lib/transition/guard", () => ({
   guardResponse: (r: { status: number; error: string }) =>
     Response.json({ error: r.error }, { status: r.status }),
 }));
-vi.mock("@/lib/osf/nodes", () => ({ getNode: vi.fn() }));
+vi.mock("@/lib/osf/nodes", () => ({
+  getNode: vi.fn(),
+  // The plan covers components since v1.12. Both default to empty here so these tests keep
+  // testing the one thing they are about: the URL handed to the browser.
+  getAllChildren: vi.fn().mockResolvedValue([]),
+  getAllLinkedNodes: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("@/lib/osf/registrations", () => ({ getNodeRegistrations: vi.fn().mockResolvedValue([]) }));
 vi.mock("@/lib/osf/files", () => ({ getProviderRoots: vi.fn(), getFolderContents: vi.fn() }));
 vi.mock("@/lib/osf/wikis", () => ({ getNodeWikis: vi.fn().mockResolvedValue([]) }));
 vi.mock("@/lib/osf/contributors", () => ({ getNodeContributors: vi.fn().mockResolvedValue([]) }));

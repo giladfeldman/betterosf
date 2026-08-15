@@ -7,6 +7,7 @@ import { getProviderRoots } from "@/lib/osf/files";
 import { fetchProviderZip } from "@/lib/waterbutler/zip";
 import { contentDisposition } from "@/lib/http/content-disposition";
 import { mapWithConcurrency } from "@/lib/util/concurrency";
+import { safeFolderName, nodeFolder, errorsFileName, errorsFileBody } from "@/lib/zip/tree-naming";
 
 export const runtime = "nodejs";
 export const maxDuration = 600; // 10 minutes
@@ -15,11 +16,6 @@ export const maxDuration = 600; // 10 minutes
 // The archive stream itself is consumed serially by archiver, so this only
 // parallelizes the OSF round-trips that decide WHAT to append.
 const PROVIDER_LIST_CONCURRENCY = 6;
-
-function safeFolderName(s: string): string {
-  // Strip path separators and trim
-  return s.replace(/[\\/]/g, "_").slice(0, 80).trim() || "untitled";
-}
 
 export async function GET(
   req: Request,
@@ -101,9 +97,13 @@ export async function GET(
   (async () => {
     try {
       for (const { node, providers, error } of nodeProviders) {
-        const folder = node.guid === guid
-          ? rootTitle
-          : `${rootTitle}/${node.linked ? "linked_" : ""}${safeFolderName(node.title)}_${node.guid}`;
+        const folder = nodeFolder({
+          rootTitle,
+          guid: node.guid,
+          title: node.title,
+          linked: node.linked,
+          isRoot: node.guid === guid,
+        });
 
         if (error) {
           errors.push(`[${node.guid} "${node.title}"] ${error}`);
@@ -125,10 +125,8 @@ export async function GET(
       if (errors.length > 0) {
         console.warn(`[zip/${guid}] completed with ${errors.length} partial failure(s)`);
         archive.append(
-          `BetterOSF whole-tree ZIP — partial failures\n` +
-          `Generated for OSF project ${guid} at ${new Date().toISOString()}\n\n` +
-          errors.map((e) => `- ${e}`).join("\n") + "\n",
-          { name: `${rootTitle}/_BETTEROSF_ERRORS.txt` }
+          errorsFileBody({ guid, generatedAt: new Date().toISOString(), problems: errors }),
+          { name: errorsFileName(rootTitle) }
         );
       } else {
         console.info(`[zip/${guid}] assembled ${tree.length} node(s) cleanly`);

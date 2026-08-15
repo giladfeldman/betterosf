@@ -144,6 +144,7 @@ describe.skipIf(!enabled)("Zenodo sandbox round trip", () => {
     // "resumable on both legs" claim in the docs becomes false and must be corrected.
     const draft = await createDraft(auth, {
       title: "BetterOSF multipart probe — safe to delete",
+      publisher: "Zenodo",
       publication_date: "2026-08-13",
       resource_type: { id: "dataset" },
       creators: [{ person_or_org: { type: "personal", family_name: "Probe" } }],
@@ -168,6 +169,7 @@ describe.skipIf(!enabled)("Zenodo sandbox round trip", () => {
     // on this call, so if Zenodo changes it the shards silently stop being related.
     const draft = await createDraft(auth, {
       title: "BetterOSF shard-link probe — safe to delete",
+      publisher: "Zenodo",
       publication_date: "2026-08-13",
       resource_type: { id: "dataset" },
       creators: [{ person_or_org: { type: "personal", family_name: "Probe" } }],
@@ -177,6 +179,7 @@ describe.skipIf(!enabled)("Zenodo sandbox round trip", () => {
       const sibling = "https://sandbox.zenodo.org/records/999999";
       await updateDraftMetadata(auth, draft.id, {
         title: "BetterOSF shard-link probe — safe to delete",
+        publisher: "Zenodo",
         publication_date: "2026-08-13",
         resource_type: { id: "dataset" },
         creators: [{ person_or_org: { type: "personal", family_name: "Probe" } }],

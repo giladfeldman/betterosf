@@ -277,6 +277,21 @@ export type ReconciliationInput = {
    * (Codex consult 2026-08-13; reproduced in tests/integration/transition-transfer.test.ts.)
    */
   blockers?: string[];
+  /**
+   * Set when the deposit is ONE archive rather than one destination key per file.
+   *
+   * This changes what the destination can be asked. Normally the third comparison is "the
+   * destination reports the same checksum for THIS file" — N independent confirmations
+   * about the researcher's actual files. Inside a container there is exactly one, and it is
+   * about a container OSF never held: it proves the archive arrived intact, and says
+   * nothing about any individual file beyond what was already checked locally.
+   *
+   * So the per-file destination-key check is skipped (every path would read as missing),
+   * the container's own check becomes a blocker when it fails, and the summary states the
+   * weaker guarantee in words. A container deposit's verdict must never be presented as
+   * equivalent to a per-file one.
+   */
+  container?: { key: string; verified: boolean; detail: string } | null;
 };
 
 export type ReconciliationVerdict = {
@@ -313,7 +328,16 @@ export type ReconciliationVerdict = {
  * looked at nothing.
  */
 export function reconcile(input: ReconciliationInput): ReconciliationVerdict {
-  const blockers = input.blockers ?? [];
+  const container = input.container ?? null;
+  const blockers = [
+    ...(input.blockers ?? []),
+    ...(container && !container.verified
+      ? [
+          `The archive holding every file (${container.key}) did not verify at the destination: ` +
+            `${container.detail} Nothing inside it can be relied on.`,
+        ]
+      : []),
+  ];
   const expectedIds = new Set(input.expected.map((f) => f.osfFileId));
   const resultIds = new Set(input.results.map((r) => r.osfFileId));
 
@@ -364,7 +388,9 @@ export function reconcile(input: ReconciliationInput): ReconciliationVerdict {
   /** The colliding keys themselves, for callers that must find the affected rows. */
   const collidingKeys: string[] = [];
 
-  if (input.destinationKeys) {
+  // Skipped for a container deposit: the destination holds one key, so every file's path
+  // would read as missing. The container's own verification is a blocker instead.
+  if (input.destinationKeys && !container) {
     const keys = new Set(input.destinationKeys);
     for (const r of transferred) {
       if (!keys.has(r.path)) destinationMissing.push(r.path);
@@ -415,11 +441,21 @@ export function reconcile(input: ReconciliationInput): ReconciliationVerdict {
     blockers,
     collisions: collidingKeys,
     summary: complete
-      ? unverifiable.length > 0
-        ? `All ${input.expected.length} files transferred. ${verified.length} were checksum-verified; ` +
-          `${unverifiable.length} could not be verified because OSF supplied no checksum for them ` +
-          `(usually files in third-party storage). Those are listed individually.`
-        : `All ${input.expected.length} files transferred and checksum-verified.`
+      ? container
+        ? // Deliberately different wording from the per-file case. The guarantee IS
+          // different, and a researcher comparing two BetterOSF reports has to be able to
+          // see that from the sentence rather than from the fine print.
+          `All ${input.expected.length} files were downloaded from OSF and checked against OSF's own ` +
+          `checksums (${verified.length} verified, ${unverifiable.length} with no checksum published), ` +
+          `then packaged into a single archive which Zenodo stored intact. ` +
+          `The destination-side check covers the ARCHIVE, not each file: Zenodo holds one checksum, for ` +
+          `a container OSF never had. Per-file checksums are in the archive's manifest and in the ` +
+          `crosswalk CSV — verify them after unpacking if the individual files matter to you.`
+        : unverifiable.length > 0
+          ? `All ${input.expected.length} files transferred. ${verified.length} were checksum-verified; ` +
+            `${unverifiable.length} could not be verified because OSF supplied no checksum for them ` +
+            `(usually files in third-party storage). Those are listed individually.`
+          : `All ${input.expected.length} files transferred and checksum-verified.`
       : `INCOMPLETE. ${verified.length} of ${input.expected.length} verified; ` +
         `${failed.length} failed, ${allMissing.length} missing, ${extra.length} unexpected. ` +
         (blockers.length > 0

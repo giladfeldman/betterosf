@@ -1,10 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { runTransfer, FILES_PER_RECORD, type TransferProgress, type TransferResult } from "@/lib/transition/run-transfer";
 import { createBrowserLedger, getLocalJob, listLocalJobs } from "@/lib/transition/ledger";
 import { crosswalk, blockingGaps, type CrosswalkResult } from "@/lib/transition/crosswalk";
-import { planShards, checkZenodoReachable, ZENODO_MAX_BYTES_PER_RECORD } from "@/lib/transition/targets/zenodo";
+import {
+  planShards,
+  checkZenodoReachable,
+  ZENODO_MAX_BYTES_PER_RECORD,
+  type ZenodoAuth,
+  type ZenodoCommunity,
+} from "@/lib/transition/targets/zenodo";
+import { DestinationPicker, destinationReady, type DestinationChoice } from "./DestinationPicker";
 import { RESOURCE_TYPES, DEFAULT_RESOURCE_TYPE_ID, SUGGESTED_RESOURCE_TYPE_IDS } from "@/lib/transition/resource-types";
 import { opfsAvailable } from "@/lib/transition/stage-opfs";
 import { keepScreenAwake, wakeLockSupported } from "@/lib/transition/wake-lock";
@@ -16,6 +24,7 @@ import { ErrorNotice } from "@/components/ErrorNotice";
 import { Working } from "@/components/Progress";
 import { fetchExtras } from "./plan-extras";
 import { RunLog } from "./RunLog";
+import { coveredNodesFrom } from "./covered-nodes";
 import { Stat } from "./Stat";
 import { PublishPanel } from "./PublishPanel";
 import type { PlanResponse } from "./plan-types";
@@ -55,6 +64,15 @@ export function ZenodoTransferPanel({
   const [connection, setConnection] = useState<Connection>({ phase: "checking" });
   const [resourceTypeId, setResourceTypeId] = useState<string>(DEFAULT_RESOURCE_TYPE_ID);
   const [isMirror, setIsMirror] = useState(true);
+  const [destination, setDestination] = useState<DestinationChoice>({ kind: "new" });
+  const [community, setCommunity] = useState<ZenodoCommunity | null>(null);
+  /**
+   * Deposit one archive rather than one Zenodo file per OSF file.
+   *
+   * Never on by default, and only reachable when the deposit would otherwise shard — see
+   * the checkbox below the shard warning for the trade it makes.
+   */
+  const [asArchive, setAsArchive] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
   const [runPhase, setRunPhase] = useState<RunPhase>("idle");
   const [progress, setProgress] = useState<TransferProgress | null>(null);
@@ -93,6 +111,23 @@ export function ZenodoTransferPanel({
   useEffect(() => {
     void checkConnection();
   }, [checkConnection]);
+
+  /**
+   * The run token, fetched on demand for the preflight pickers.
+   *
+   * Same posture as the run itself: `no-store`, held only for the call that needs it, never
+   * put in state. The default destination never calls this, so a plain "new record"
+   * transfer still touches the token exactly once, when it starts.
+   */
+  const getAuth = useCallback(async (): Promise<ZenodoAuth> => {
+    const res = await fetch("/api/zenodo/token", { cache: "no-store" });
+    if (!res.ok) {
+      const err = await readApiError(res, "/api/zenodo/token");
+      throw new Error(err.action ? `${err.message} ${err.action}` : err.message);
+    }
+    const { token, env } = await res.json();
+    return { accessToken: token, env };
+  }, []);
 
   // An unfinished run for THIS project, from this browser. Offered rather than resumed
   // automatically: silently continuing into somebody's Zenodo account is not a decision
@@ -209,8 +244,9 @@ export function ZenodoTransferPanel({
         projectTitle: plan.title,
         osfUrl: plan.osfUrl,
         doi: plan.doi,
-        files: plan.files.map((f) => ({ ...f, provider: f.path.split("/")[0] ?? "osfstorage" })),
+        files: plan.files,
         extras: await fetchExtras(plan),
+        coveredNodes: coveredNodesFrom(plan),
         contributors: plan.contributors ?? [],
         crateInput: {
           description: plan.description,
@@ -235,6 +271,19 @@ export function ZenodoTransferPanel({
         resumeRecordIds: resume ? resume.records.map((rec) => rec.recordId) : null,
         onProgress: setProgress,
         log: runLog.current,
+        // A resumed run keeps the records it already created; re-deriving the destination
+        // from the picker would mint a second anchor next to the half-filled one.
+        destination: resume
+          ? { kind: "new" }
+          : destination.kind === "existing-draft"
+            ? { kind: "existing-draft", recordId: destination.recordId }
+            : destination.kind === "new-version"
+              ? { kind: "new-version", sourceRecordId: destination.sourceRecordId }
+              : { kind: "new" },
+        communityId: community?.id ?? null,
+        // Only ever honoured for a fresh record; the runner refuses the combination too,
+        // so an unticked-then-retargeted form cannot smuggle it through.
+        packageAsArchive: asArchive && destination.kind === "new",
       });
 
       setResult(r);
@@ -419,6 +468,19 @@ export function ZenodoTransferPanel({
           </button>
         </div>
 
+        {result.community.problems.length > 0 ? (
+          <p className="mt-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            {result.community.problems[0]}
+          </p>
+        ) : result.community.requested ? (
+          <p className="mt-3 rounded border border-blue-300 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200">
+            A submission request to <strong>{community?.title ?? "the community"}</strong> was added to{" "}
+            {result.records.length === 1 ? "the draft" : `all ${result.records.length} drafts`}. Send it from
+            Zenodo when you are ready — a curator decides, and they may decline. Either way your files are
+            already here and already verified.
+          </p>
+        ) : null}
+
         {jobId ? (
           <PublishPanel
             jobId={jobId}
@@ -426,6 +488,7 @@ export function ZenodoTransferPanel({
             publishable={complete}
             site={connection.site}
             env={connection.env}
+            communityPending={result.community.blocksDirectPublish}
           />
         ) : null}
 
@@ -449,6 +512,15 @@ export function ZenodoTransferPanel({
           >
             Download a verified archive as well →
           </button>
+          <p className="mt-3 text-xs text-neutral-600 dark:text-neutral-400">
+            You can also get this deposit back out of Zenodo at any time, as the folder tree it came
+            from:{" "}
+            <Link href="/tools/zenodo-download" className="underline">
+              the folder-tree downloader
+            </Link>{" "}
+            takes a record id and rebuilds the structure, checking every file against Zenodo&apos;s
+            published checksums. It needs no account, so a collaborator can use it too.
+          </p>
         </div>
 
         <RunLog entries={logView} />
@@ -598,12 +670,54 @@ export function ZenodoTransferPanel({
           </dl>
 
           {shardPlan.shards.length > 1 ? (
-            <p className="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-              Zenodo allows {FILES_PER_RECORD + 1} files and{" "}
-              {Math.round(ZENODO_MAX_BYTES_PER_RECORD / 1024 ** 3)} GB per record, so this project will be
-              split across <strong>{shardPlan.shards.length} linked records</strong> (each declaring the
-              others as parts of the same deposit). Publishing them mints {shardPlan.shards.length} DOIs.
-            </p>
+            <div className="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+              <p>
+                Zenodo allows {FILES_PER_RECORD + 1} files and{" "}
+                {Math.round(ZENODO_MAX_BYTES_PER_RECORD / 1024 ** 3)} GB per record, so this project will be
+                split across <strong>{shardPlan.shards.length} linked records</strong> (each declaring the
+                others as parts of the same deposit). Publishing them mints {shardPlan.shards.length} DOIs.
+              </p>
+
+              {/*
+                The ZIP alternative is offered HERE and nowhere else. It is not a general
+                preference — it is the answer to this specific problem, and offering it to
+                someone whose 12-file project fits in one record would trade away per-file
+                verification for nothing at all.
+              */}
+              <label className="mt-3 flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={asArchive}
+                  disabled={destination.kind !== "new" || totalBytes > ZENODO_MAX_BYTES_PER_RECORD}
+                  onChange={(e) => setAsArchive(e.target.checked)}
+                  className="mt-1 h-4 w-4 shrink-0"
+                />
+                <span>
+                  <strong>Deposit one archive instead — one record, one DOI.</strong> Every file is still
+                  downloaded and checked against OSF&apos;s checksums before it goes in, and every digest is
+                  written into a manifest inside the archive and into the crosswalk CSV.{" "}
+                  <strong>
+                    What you give up: Zenodo reports one checksum, for the archive, not one per file
+                  </strong>{" "}
+                  — so the &ldquo;the destination stored what we sent&rdquo; check stops being about your
+                  individual files. Zenodo also cannot serve, preview or search a single file from inside an
+                  archive, and this browser has to hold the whole project ({formatBytes(totalBytes)}) at once
+                  while the archive is built.
+                </span>
+              </label>
+              {destination.kind !== "new" ? (
+                <p className="mt-1 text-xs">
+                  Only available for a new record — an archive dropped into an existing deposit changes what
+                  that deposit is.
+                </p>
+              ) : null}
+              {totalBytes > ZENODO_MAX_BYTES_PER_RECORD ? (
+                <p className="mt-1 text-xs">
+                  Not available: at {formatBytes(totalBytes)} this project is over Zenodo&apos;s per-record
+                  size limit, and an archive cannot be split across records.
+                </p>
+              ) : null}
+            </div>
           ) : null}
 
           {shardPlan.unplaceable.length > 0 ? (
@@ -664,6 +778,15 @@ export function ZenodoTransferPanel({
             </table>
           </details>
 
+          <DestinationPicker
+            value={destination}
+            onChange={setDestination}
+            community={community}
+            onCommunityChange={setCommunity}
+            getAuth={getAuth}
+            site={connection.site}
+          />
+
           <div className="mt-6 rounded border border-neutral-300 bg-neutral-50 p-4 dark:border-neutral-700 dark:bg-neutral-900">
             <h3 className="text-sm font-semibold">Before you start</h3>
             <ul className="mt-2 space-y-2 text-sm text-neutral-700 dark:text-neutral-300">
@@ -690,15 +813,31 @@ export function ZenodoTransferPanel({
 
           <button
             type="button"
-            disabled={!acknowledged || !opfsAvailable() || plan.files.length === 0}
+            disabled={
+              !acknowledged ||
+              !opfsAvailable() ||
+              plan.files.length === 0 ||
+              !destinationReady(destination)
+            }
             onClick={() => void start(null)}
             className="mt-4 rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-neutral-900"
           >
-            Start transfer
+            {destination.kind === "existing-draft"
+              ? "Add to that draft"
+              : destination.kind === "new-version"
+                ? "Create the new version"
+                : "Start transfer"}
           </button>
           {plan.files.length === 0 ? (
             <p className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">
               This project has no files, so there is nothing to transfer.
+            </p>
+          ) : null}
+          {!destinationReady(destination) ? (
+            <p className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">
+              {destination.kind === "existing-draft"
+                ? "Choose which draft to add to."
+                : "Choose the published record this is a new version of, and confirm it is the same work."}
             </p>
           ) : null}
         </>

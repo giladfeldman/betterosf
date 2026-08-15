@@ -19,10 +19,11 @@ export type TreeNodeKind =
   | "registration"
   | "parent";
 
-// IMPORTANT: TreeSelectionPayload is duplicated in UnifiedTreeNode.tsx to break the
-// circular import described above. Any change here MUST be mirrored there in the same
-// commit — the two copies have drifted before. tests/unit/unified-tree-node.test.tsx
-// carries a structural cross-check that fails if they diverge.
+// This is the ONE definition. `UnifiedTreeNode.tsx` re-exports it (`export type {
+// TreeSelectionPayload }`) rather than declaring its own — the comment that used to sit
+// here warned about keeping two hand-written copies in step, which stopped being true when
+// the duplicate was replaced by a re-export, and a warning about a hazard that no longer
+// exists sends the next reader looking for a file to edit that has nothing to edit.
 export type TreeSelectionPayload =
   | {
       kind: "file";
@@ -31,6 +32,14 @@ export type TreeSelectionPayload =
       path: string;
       name: string;
       downloadUrl: string;
+      /**
+       * OSF's provider-side path ("/659f816e…" for osfstorage), which is what a
+       * BROWSER-fetchable Waterbutler URL is built from. `downloadUrl` above is
+       * `osf.io/download/<id>/`, which sends no CORS headers at all — see
+       * `waterbutlerDownloadUrl`. Optional because older callers predate it; a selection
+       * without it simply falls back to the server route.
+       */
+      providerPath?: string;
       /**
        * OSF's own Waterbutler delete link. Populated ONLY for writable osfstorage
        * targets — absence is what suppresses the delete affordance for registrations,

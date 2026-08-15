@@ -20,8 +20,6 @@ const read = (p: string) => readFileSync(resolve(root, p), "utf8");
 
 const SKILL = ".claude/skills/betterosf-qa/SKILL.md";
 const REF = ".claude/skills/betterosf-qa/references/destructive-gates.md";
-const AGENTS_SKILL = ".agents/skills/betterosf-qa/SKILL.md";
-const AGENTS_REF = ".agents/skills/betterosf-qa/references/destructive-gates.md";
 
 const skill = read(SKILL);
 const reference = read(REF);
@@ -74,8 +72,10 @@ describe("betterosf-qa skill retains every destructive-path safety rule", () => 
     expect(reference).toMatch(/NEVER be wired into/i);
   });
 
-  it("keeps the .agents mirror byte-identical, so both agents read the same rules", () => {
-    expect(read(AGENTS_SKILL)).toBe(skill);
-    expect(read(AGENTS_REF)).toBe(reference);
-  });
+  // The byte-identical `.agents` mirror assertion that used to live here was removed on
+  // 2026-08-14. Pinning a duplicate is the weaker remedy: it keeps two files that must agree
+  // and merely watches them, and it only ever covered ONE of the five duplicated files — the
+  // other four had already drifted, including a review copy missing every destructive-
+  // operation rule. `.agents/` is now pointers, and
+  // `tests/unit/agent-docs-single-source.test.ts` makes a copy impossible to reintroduce.
 });

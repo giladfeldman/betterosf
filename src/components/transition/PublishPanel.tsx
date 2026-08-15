@@ -35,12 +35,22 @@ export function PublishPanel({
   publishable,
   site,
   env,
+  communityPending = false,
 }: {
   jobId: string;
   records: RecordSummary[];
   publishable: boolean;
   site: string;
   env: string;
+  /**
+   * A community submission request is open on these drafts.
+   *
+   * Measured against sandbox.zenodo.org on 2026-08-14: `POST /draft/actions/publish` then
+   * returns **400 — "You cannot publish a draft with an open review request. Please cancel
+   * the review request first."** Offering the button anyway would spend a researcher's
+   * nerve on the one irreversible control in the app and hand back an opaque Zenodo error.
+   */
+  communityPending?: boolean;
 }) {
   const [state, setState] = useState<PublishState>({ phase: "idle" });
   const [typed, setTyped] = useState("");
@@ -103,6 +113,33 @@ export function PublishPanel({
           record. The draft is still in your Zenodo account: fix what the report lists and run the transfer
           again, or publish it yourself from {site.replace(/^https:\/\//, "")} if you have read the report and
           mean to.
+        </p>
+      </div>
+    );
+  }
+
+  if (communityPending) {
+    return (
+      <div className="mt-6 rounded border border-neutral-300 bg-neutral-50 p-4 text-sm dark:border-neutral-700 dark:bg-neutral-900">
+        <h3 className="text-sm font-semibold">This deposit is waiting on a community</h3>
+        <p className="mt-1 text-neutral-700 dark:text-neutral-300">
+          A submission request is open on {records.length === 1 ? "the draft" : "these drafts"}, and Zenodo
+          will not publish a draft while one is. That is Zenodo&apos;s rule, not ours. On{" "}
+          {site.replace(/^https:\/\//, "")} you can either <strong>submit it to the community</strong> — they
+          publish it if they accept — or <strong>cancel the request</strong> and publish it yourself here.
+        </p>
+        <ul className="mt-2 space-y-1">
+          {records.map((r) => (
+            <li key={r.recordId}>
+              <a href={r.draftUrl} className="underline" target="_blank" rel="noopener noreferrer">
+                Open draft {r.recordId}
+              </a>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-2 text-neutral-700 dark:text-neutral-300">
+          Your files are already there and already verified. Whatever the community decides has no bearing
+          on that.
         </p>
       </div>
     );
