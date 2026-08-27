@@ -14,6 +14,8 @@ export type LogType =
   | "rename"
   /** OSF Transition Toolkit: consent, inventory crawls, export and deposit runs. */
   | "transition"
+  /** SES/SNS delivery feedback — bounces, complaints, and shapes we could not read. */
+  | "email"
   | "db"
   | "admin"
   | "uncaught"

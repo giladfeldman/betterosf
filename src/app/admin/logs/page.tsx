@@ -49,7 +49,9 @@ export default async function AdminLogsPage({
           ))}
         </select>
         <select name="type" defaultValue={sp.type ?? "all"} className="rounded border px-2 py-1 bg-white dark:bg-neutral-900">
-          {["all", "auth", "osf", "upload", "db", "admin", "request", "uncaught", "other"].map((t) => (
+          {/* Must list every LogType in src/lib/logger.ts — a type missing here is a log
+              nobody can filter for, which is most of the value of writing it. */}
+          {["all", "auth", "osf", "upload", "delete", "rename", "transition", "email", "db", "admin", "request", "uncaught", "other"].map((t) => (
             <option key={t} value={t}>{t}</option>
           ))}
         </select>

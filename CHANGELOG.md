@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.12.1 — 2026-08-27
+
+### Fixed
+- **🚨 Every bounce and complaint SES sent us was silently discarded.** SES speaks two
+  shapes for the same event: identity-level notifications say `notificationType`, and
+  configuration-set EVENT DESTINATIONS say `eventType`. This handler only ever knew the
+  first, and BetterOSF is wired entirely through the second — `ses-events-betterosf-config`
+  → topic `ses-events-betterosf` → `/api/email/webhook`, with no identity-level bounce topic
+  on the sending identity. So 100% of real bounces matched no branch, returned
+  `{ inserted: 0 }` and answered HTTP 200; SNS recorded a successful delivery each time.
+  Measured before the fix: 10 `sent` rows, **0 bounce, 0 complaint**. Same defect and same
+  fix as Metaventory v0.7.20.
+- **The miss was silent, which was the worse half of the bug.** An SNS notification that
+  matches no branch — or a `Message` body that is not JSON — now leaves a trace naming the
+  event type and the message's top-level KEYS (never values: the payload carries recipient
+  addresses). A `KNOWINGLY_IGNORED_EVENTS` set keeps "ignored on purpose"
+  (Delivery/Send/Reject/Open/Click/Rendering Failure/DeliveryDelay/Subscription) visibly
+  distinct from "never seen before". The trace is awaited, not fire-and-forget — a floating
+  insert dies with the serverless instance, which is the same failure being fixed.
+- Operational logs gained an `email` type, and `/admin/logs` now offers every `LogType` in
+  its filter (`delete`, `rename`, `transition` and `email` were all missing) — a log nobody
+  can filter for is most of the value of writing it thrown away.
+
+
 ## 1.12.0 — 2026-08-14
 
 The five agreed-but-unbuilt items from the 2026-08-14 handoff, plus a bug the probing for
