@@ -1,0 +1,6 @@
+{
+  "src": ["src"],
+  "shell": "src/app/layout.tsx",
+  "menuComponent": "MobileNavMenu",
+  "breakpoint": "md", "breakpointPx": 768, "minTapPx": 36
+}

@@ -131,7 +131,7 @@ export function PptxViewer({ url, filename }: { url: string; filename: string })
         </a>
       </div>
       <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[13rem_1fr]">
-        <nav aria-label="Slides" className="max-h-64 overflow-auto border-b border-neutral-200 p-2 dark:border-neutral-800 md:max-h-none md:border-b-0 md:border-r">
+        <nav aria-label="Slides" className="max-h-64 overflow-y-auto border-b border-neutral-200 p-2 dark:border-neutral-800 md:max-h-none md:border-b-0 md:border-r">
           {slides.map((slide, idx) => (
             <button
               key={slide.index}

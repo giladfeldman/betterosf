@@ -8,6 +8,8 @@ import { QuotaBanner } from "@/components/QuotaBanner";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BetterOsfLogo } from "@/components/BetterOsfLogo";
 import { VersionBadge } from "@/components/VersionBadge";
+import { MobileNavMenu } from "@/components/MobileNavMenu";
+import { NAV_ITEMS } from "@/lib/nav-config";
 
 export const metadata: Metadata = {
   title: "BetterOSF",
@@ -38,13 +40,24 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <Link href="/" className="font-semibold" aria-label="BetterOSF home">
                 <BetterOsfLogo variant="compact" className="h-8" />
               </Link>
-              <Link href="/search" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">Search</Link>
-              <Link href="/bookmarklet" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">Bookmarklet</Link>
-              <Link href="/about" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">About</Link>
+              {/* The inline half. Its md:hidden twin is <MobileNavMenu />, and both
+                  map NAV_ITEMS, so a new destination cannot reach only one width. */}
+              <nav aria-label="Main" className="hidden items-center gap-4 md:flex">
+                {NAV_ITEMS.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </nav>
             </div>
             <div className="flex items-center gap-3">
               <ThemeToggle />
               <UserMenu />
+              <MobileNavMenu />
             </div>
           </header>
           <QuotaBanner />
