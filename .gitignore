@@ -29,3 +29,4 @@ test-results/
 # Internal strategy memo — reflects a confidential pre-publication communication.
 # Marked NOT FOR PUBLICATION; must not enter git history.
 docs/osf-exit-strategy.md
+.mobile-ux-output/

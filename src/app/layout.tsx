@@ -47,7 +47,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   <Link
                     key={item.href}
                     href={item.href}
-                    className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+                    className="inline-flex min-h-9 items-center text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
                   >
                     {item.label}
                   </Link>
@@ -72,7 +72,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 <a href="https://osf.io" className="hover:underline">OSF</a>.
               </span>
             </span>
-            <span className="flex gap-4">
+            <span className="flex flex-wrap gap-x-4 gap-y-1">
               <Link href="/about" className="hover:underline">About</Link>
               <Link href="/bookmarklet" className="hover:underline">Bookmarklet</Link>
               <Link href="/feedback" className="hover:underline">Report a bug</Link>

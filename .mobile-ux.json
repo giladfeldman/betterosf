@@ -1,6 +1,26 @@
 {
-  "src": ["src"],
+  "src": [
+    "src"
+  ],
   "shell": "src/app/layout.tsx",
   "menuComponent": "MobileNavMenu",
-  "breakpoint": "md", "breakpointPx": 768, "minTapPx": 36
+  "breakpoint": "md",
+  "breakpointPx": 768,
+  "minTapPx": 36,
+  "//selectors": "Measured 2026-08-27: with no selectors the runner guessed, clicked something else, and reported R7-menu-empty plus 'Search/Bookmarklet/About are simply gone' against a menu that works. These pin the real elements. The trigger's aria-label flips to 'Close navigation menu' when open, so match the OPEN label.",
+  "menuTrigger": "button[aria-label=\"Open navigation menu\"]",
+  "menuPanel": "nav[aria-label=\"Main navigation\"]",
+  "menuItem": "nav[aria-label=\"Main navigation\"] a",
+  "requiredMenuEntries": [
+    "search",
+    "bookmarklet",
+    "about"
+  ],
+  "url": "http://localhost:4747",
+  "routes": [
+    "/",
+    "/about",
+    "/bookmarklet"
+  ],
+  "outDir": "node_modules/.cache/mobile-ux/output"
 }
