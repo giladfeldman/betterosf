@@ -30,3 +30,5 @@ test-results/
 # Marked NOT FOR PUBLICATION; must not enter git history.
 docs/osf-exit-strategy.md
 .mobile-ux-output/
+
+communications/
