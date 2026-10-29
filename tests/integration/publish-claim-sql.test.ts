@@ -18,7 +18,7 @@ const JOB = "33333333-3333-4333-8333-333333333333";
 
 async function published(): Promise<unknown[]> {
   const rows = await current.select({ p: schema.transitionJobs.publishedRecords }).from(schema.transitionJobs);
-  return rows[0].p as unknown[];
+  return rows[0]!.p as unknown[];
 }
 
 let fresh: Awaited<ReturnType<typeof freshDb>>;
@@ -36,7 +36,7 @@ beforeEach(async () => {
     .returning();
   await current.insert(schema.transitionJobs).values({
     id: JOB,
-    userId: user.id,
+    userId: user!.id,
     osfUserId: "osf1",
     guid: "abc12",
     destination: "zenodo",
