@@ -229,3 +229,41 @@ describe("a user-requested stop", () => {
     expect(result.blob.size).toBeGreaterThan(0);
   });
 });
+
+// Wiring check: a reviewer found LICENSE.txt was never written because the caller passed no
+// licence. This drives the real runExport and reads the ZIP's entry names.
+describe("LICENSE.txt in the export ZIP", () => {
+  // Read via stream(): `new Response(jsdomBlob)` serialises to "[object Blob]" (see the
+  // jsdom notes in references/claude-md/transition-toolkit.md). The polyfilled stream works.
+  const zipText = async (b: Blob) => {
+    const reader = b.stream().getReader();
+    let out = "";
+    const dec = new TextDecoder("latin1");
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return out + dec.decode();
+      out += dec.decode(value, { stream: true });
+    }
+  };
+
+  it("is written when OSF asserts a licence", async () => {
+    const p = { ...plan(1), licence: { name: "CC0 1.0 Universal", text: null, copyrightHolders: [], year: null } };
+    const result = await run(p);
+    const text = await zipText(result.blob);
+    expect(text).toContain("LICENSE.txt");
+    expect(text).toContain("Licensed under: CC0 1.0 Universal");
+  });
+
+  it("is absent when OSF asserts none", async () => {
+    const result = await run({ ...plan(1), licence: null });
+    const text = await zipText(result.blob);
+    expect(text).not.toContain("LICENSE.txt");
+    expect(text).not.toContain("LICENCE-NOT-CHECKED.txt");
+  });
+
+  it("says the licence was not checked when the lookup failed (never reads as none)", async () => {
+    const text = await zipText((await run({ ...plan(1), licence: undefined })).blob);
+    expect(text).toContain("LICENCE-NOT-CHECKED.txt");
+    expect(text).not.toContain("LICENSE.txt");
+  });
+});

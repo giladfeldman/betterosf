@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.13.0 — 2026-10-29
+
+### Added
+- **Licence check** (`/tools/licence-check`). Lists every OSF project and component the
+  signed-in user can reach with its licence status (Licensed / No licence / "Other" /
+  Couldn't check), one OSF call per 100 projects. Users with write permission can set one
+  licence on many projects at once (CC BY 4.0 preselected); each change is PATCHed, then
+  read back, and only the read-back marks it confirmed. Write access is requested at the
+  point of use; the apply route refuses from 2027-02-19, when OSF goes read-only.
+  Bulk-select guard: only "No licence" and "Other" rows are tickable (a row that already has a
+  real licence cannot be overwritten), and "Select all" takes only "No licence" rows, because
+  "Other" may carry custom licence text a bulk apply would replace.
+  Background: Siepe, Heck & Quintana (psyarxiv 4rjg3).
+- **"Where should this go?" guide** on each project's transition page: three questions
+  (pseudonymised data? mainly code? by hand?) → one suggested destination following Lakens
+  (2026-08), with steps for Zenodo, DataverseNL, institutional repositories, Harvard
+  Dataverse, ResearchBox and GitHub. Pseudonymised data is never pointed at Zenodo.
+- **`LICENSE.txt` in the export ZIP** when OSF asserts a real licence: name, copyright
+  line, and OSF's stored licence text (none for "No license" / "Other"). When the licence
+  lookup FAILED the ZIP carries `LICENCE-NOT-CHECKED.txt` instead, so a failed lookup is never
+  mistaken for "no licence".
+
 ## 1.12.1 — 2026-08-27
 
 ### Fixed

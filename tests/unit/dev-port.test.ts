@@ -106,8 +106,16 @@ function isExempt(relPath: string): boolean {
   // would erase the reason the rule exists. They are NOT unguarded — the
   // "no runnable command" suite below covers them, which is the property that
   // actually matters for prose: an agent copy-pastes commands, not sentences.
-  if (NARRATIVE_DOCS.has(p)) return true;
+  if (NARRATIVE_DOCS.has(p) || NARRATIVE_DOCS.has(p.toLowerCase())) return true;
   if (p.endsWith("_project/lessons.md") || p.endsWith("LESSONS.md")) return true;
+  // The same narrative, at the paths the 2026-10-01 docs split moved it to: CLAUDE.md detail
+  // (moved verbatim to references/claude-md/), the lessons journal (one card per entry), the
+  // TODO archive, and gitignored past correspondence. Exempt for the reason above, still
+  // covered by the "no runnable command" suite.
+  if (p.startsWith("references/claude-md/")) return true;
+  if (p.startsWith(".claude/skills/_project/lessons/")) return true;
+  if (p.toLowerCase() === "todo-archive.md") return true;
+  if (p.startsWith("communications/")) return true;
   return false;
 }
 

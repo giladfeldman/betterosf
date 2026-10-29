@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { TransitionGate } from "@/components/transition/TransitionGate";
 import { ExportRunner } from "@/components/transition/ExportRunner";
+import { DestinationGuide } from "@/components/transition/DestinationGuide";
 import { APP_VERSION } from "@/lib/version";
 
 export const metadata: Metadata = {
@@ -27,6 +28,9 @@ export default async function TransitionProjectPage({
 
       <div className="mt-6">
         <TransitionGate>
+          <div className="mb-6">
+            <DestinationGuide />
+          </div>
           <ExportRunner guid={guid} appVersion={APP_VERSION} />
         </TransitionGate>
       </div>

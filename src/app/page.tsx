@@ -34,6 +34,11 @@ const CAPABILITIES = [
       "Transfer to your own Zenodo account as a new record, a draft you already have, or a new version of something you published — optionally asking a community to take it. Every file is checked against OSF's checksum on the way out and Zenodo's on the way in. Zenodo has no folders, so the folder-tree downloader rebuilds the structure from any public record, for anyone, with no account.",
   },
   {
+    title: "Check and set licences before OSF freezes",
+    body:
+      "The licence check lists every project and component you can reach with its licence status, then lets you set one licence (CC BY 4.0 preselected) on many at once; each change is read back from OSF before it counts as done. On each project's transition page a short three-question guide suggests where to move it, and the export ZIP includes a LICENSE.txt when OSF holds a real licence.",
+  },
+  {
     title: "One tree, every provider",
     body: "OSF splits files across osfstorage, GitHub, Dropbox, Google Drive and more, each behind its own tab. BetterOSF merges them into a single navigator you can expand, filter, and depth-limit.",
   },

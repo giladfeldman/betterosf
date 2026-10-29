@@ -73,7 +73,7 @@ type NodeCollectionResponse = {
 };
 
 /** OSF's own count of a collection, or null when it did not say. Never a page length. */
-function collectionTotal(links: NodeCollectionResponse["links"]): number | null {
+export function collectionTotal(links: NodeCollectionResponse["links"]): number | null {
   const total = links?.meta?.total;
   return typeof total === "number" && Number.isFinite(total) ? total : null;
 }

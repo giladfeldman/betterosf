@@ -18,7 +18,7 @@ after 2027-02-19.** Export and migration are the point of the app from here.
 | `zenodo.org` | `ACAO: *`, `authorization`, `PUT` on `/api/records` and `/api/files/{bucket}/{name}` | **Zenodo is the browser-direct target** — not figshare. |
 | `api.osf.io` | **none at all** | Every metadata call must be proxied by us → enrichment is BATCHED. |
 | figshare | no `Access-Control-Allow-Origin` | Browser-direct blocked; would need a byte-proxy. |
-| Dataverse | per-instance (demo allows, Harvard blocks) | Cannot be offered generically. |
+| Dataverse | per-instance. Re-probed 2026-10-29: Harvard, AUSSDA, demo allow `*` + `PUT` + `X-Dataverse-key`; DataverseNL sends no CORS; unimi allows one other origin | Cannot be offered generically; Harvard is now viable (`docs/licence-check-and-destinations.md`). |
 
 Also verified against sandbox.zenodo.org: **slash-containing file keys work** (deposits
 keep OSF folder structure; URL-encode the key in the request path), and **multipart
@@ -122,6 +122,17 @@ re-derive; do re-probe before trusting any of it a year from now.
   skips the per-file destination check, turns a failed container checksum into a blocker,
   and produces a **different summary sentence**. A container deposit's verdict must never
   read as equivalent to a per-file one.
+
+### v1.13.0 - licence check and destination guide
+
+Full write-up: `docs/licence-check-and-destinations.md`. Code: `src/lib/licence/check.ts`, `src/lib/osf/licences.ts`, `/api/licences`, `/api/licences/apply`.
+
+- **Write scope is requested at the point of use**, not at sign-in; a user who only wants the report is never asked for write access.
+- **Only the read-back decides "confirmed".** Each change is PATCHed, then the node is read again; a 200 on the PATCH alone is never shown as done.
+- **The apply route refuses from 2027-02-19** (OSF read-only), so the UI cannot promise a write that has no server.
+- **Bulk-select guard.** Only "No licence" and "Other" rows are tickable; "Select all" takes only "No licence" rows, because "Other" may carry custom text a bulk apply would replace.
+- **`LICENCE-NOT-CHECKED.txt` in the ZIP means the lookup FAILED**, never "no licence". `LICENSE.txt` is written only when OSF asserts a real licence.
+- **The destination guide never points pseudonymised data at Zenodo.**
 
 ### 🚨 Names crossing a boundary are sanitised in ONE place, both directions
 

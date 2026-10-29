@@ -15,6 +15,19 @@ export default function TransitionPage() {
     <main className="mx-auto max-w-6xl px-4 py-10">
       <TransitionDeadlines />
 
+      {/* Outside the gate: checking licences only reads, and is worth doing before anything else. */}
+      <section className="mt-6 rounded border border-neutral-200 p-4 dark:border-neutral-800">
+        <h2 className="text-base font-semibold">First: do your projects have a licence?</h2>
+        <p className="mt-1 max-w-3xl text-sm text-neutral-600 dark:text-neutral-400">
+          A project&apos;s licence freezes when OSF becomes read-only, and an unlicensed project
+          can then only be reused by emailing you. The{" "}
+          <Link href="/tools/licence-check" className="underline">
+            licence check
+          </Link>{" "}
+          lists every project without one and lets you set a licence on several at once.
+        </p>
+      </section>
+
       <div className="mt-8">
         <TransitionGate>
           <section>

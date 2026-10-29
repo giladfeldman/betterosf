@@ -157,6 +157,8 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
         extras: await fetchExtras(plan),
         coveredNodes: coveredNodesFrom(plan),
         contributors: plan.contributors ?? [],
+        // undefined = the lookup failed (not "no licence"); run-export says so in the ZIP.
+        licence: plan.licenseLookupFailed ? undefined : plan.license ?? null,
         crateInput: {
           description: plan.description,
           datePublished: plan.dateCreated.slice(0, 10),

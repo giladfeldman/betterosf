@@ -29,6 +29,7 @@ import { buildBagTagFiles, type BagFile, type BagInfo } from "./package-bagit";
 import { buildRoCrate, type CrateFile } from "./ro-crate";
 import { renderReportMarkdown, renderCrosswalkCsv, reportFilename, type ReportInput } from "./report";
 import type { ContributorView } from "@/lib/osf/contributors";
+import { renderLicenceFile } from "./destination-guide";
 
 export type PlannedExportFile = {
   osfFileId: string;
@@ -87,6 +88,12 @@ export type ExportPlan = {
    */
   coveredNodes: { guid: string; title: string; kind: string; fileCount: number }[];
   contributors: ContributorView[];
+  /**
+   * The licence OSF asserts, for LICENSE.txt. Optional: absent or null writes no file.
+   * Separate from `crateInput.license` (which needs a URL OSF does not give us).
+   */
+  licence?: { name: string; text: string | null; copyrightHolders: string[]; year: string | null } | null;
+  // (absent/undefined = the lookup failed or the caller has no licence data -> LICENCE-NOT-CHECKED.txt)
   crateInput: {
     description: string;
     datePublished: string;
@@ -496,6 +503,19 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
   const crosswalkCsv = renderCrosswalkCsv(reportInput);
   archiveEntries.push({ name: "EXPORT-REPORT.md", input: reportMarkdown });
   archiveEntries.push({ name: "osf-to-destination.csv", input: crosswalkCsv });
+  // Lets the files carry their licence to a destination with no licence field of its own
+  // (a GitHub repository, a hand-built ResearchBox). Absent when OSF asserts no licence.
+  const licenceFile = renderLicenceFile(plan.licence ?? null, { title: plan.projectTitle, osfUrl: plan.osfUrl });
+  if (licenceFile) archiveEntries.push({ name: "LICENSE.txt", input: licenceFile });
+  else if (plan.licence === undefined) {
+    // Never let a failed lookup read as "no licence": say we could not find out.
+    archiveEntries.push({
+      name: "LICENCE-NOT-CHECKED.txt",
+      input: `BetterOSF could not read this project's licence from OSF during the export, so this ZIP has no licence file.
+That does not mean the project has no licence. Check it at ${plan.osfUrl}
+`,
+    });
+  }
 
   // client-zip streams; JSZip would buffer the whole archive in memory and cannot
   // produce a multi-gigabyte export.
