@@ -1,5 +1,6 @@
 import { requireTransitionActor, guardResponse } from "@/lib/transition/guard";
 import { selectToken } from "@/lib/osf/tokens";
+import { isOsfTimeout } from "@/lib/osf/error-response";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -30,10 +31,25 @@ export async function GET(
     return Response.json({ error: "Not a valid wiki id." }, { status: 400, headers: noStore });
   }
 
-  const upstream = await fetch(`https://api.osf.io/v2/wikis/${wikiId}/content/`, {
-    headers: { Authorization: `Bearer ${await selectToken()}` },
-    redirect: "follow",
-  });
+  // Bounded, and a failure to reach OSF is reported as OSF's (d-08edd3): 504 when it was
+  // slow, 502 when the connection failed — never an unhandled 500.
+  let upstream: Response;
+  try {
+    upstream = await fetch(`https://api.osf.io/v2/wikis/${wikiId}/content/`, {
+      headers: { Authorization: `Bearer ${await selectToken()}` },
+      redirect: "follow",
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (e) {
+    const timedOut = isOsfTimeout(e);
+    return Response.json(
+      {
+        error: timedOut ? "OSF is slow to respond right now." : "Could not reach OSF for this wiki page.",
+        code: timedOut ? "osf_timeout" : "osf_unreachable",
+      },
+      { status: timedOut ? 504 : 502, headers: noStore },
+    );
+  }
 
   if (!upstream.ok) {
     return Response.json(

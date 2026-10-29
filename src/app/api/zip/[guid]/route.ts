@@ -2,6 +2,7 @@ import archiver from "archiver";
 import { Readable } from "node:stream";
 import { isValidGuid } from "@/lib/osf/guid";
 import { OsfError } from "@/lib/osf/types";
+import { osfErrorResponse } from "@/lib/osf/error-response";
 import { collectNodeTree, type TreeNode } from "@/lib/osf/tree";
 import { getProviderRoots } from "@/lib/osf/files";
 import { fetchProviderZip } from "@/lib/waterbutler/zip";
@@ -60,6 +61,10 @@ export async function GET(
     if (e instanceof OsfError && e.code === "not_found") {
       return new Response("Project not found", { status: 404 });
     }
+    // An OSF timeout, rate limit or expired token is OSF's condition, not a BetterOSF bug
+    // (d-08edd3): give it its real status instead of a 500.
+    const mapped = osfErrorResponse(e, { endpoint: `/api/zip/${guid}` });
+    if (mapped) return mapped;
     // Don't leak internal exception text to the client; log it server-side.
     console.error(`[zip/${guid}] failed to walk node tree:`, e);
     return new Response("Failed to assemble this project's ZIP. Please try again later.", { status: 500 });

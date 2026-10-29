@@ -86,6 +86,23 @@ describe("/api/files/[guid]/folder maps OSF failures honestly", () => {
     expect(res.status).toBe(404);
   });
 
+  // d-08edd3: an OSF timeout (the client's per-attempt AbortSignal, rethrown after its
+  // retries) is OSF being slow, not a BetterOSF bug. It flaked visual-qa on 2026-10-29 as a
+  // 500. 504 "OSF is slow" is honest, and it is never cached.
+  it.each([
+    ["AbortError", new DOMException("The operation was aborted.", "AbortError")],
+    ["TimeoutError", new DOMException("The operation timed out.", "TimeoutError")],
+  ])("returns 504 'OSF is slow' (not 500) on an OSF %s", async (_n, err) => {
+    getFolderContents.mockRejectedValue(err);
+    const { GET } = await import("@/app/api/files/[guid]/folder/route");
+    const res = await GET(req(), { params: Promise.resolve({ guid: "ezcuj" }) });
+    expect(res.status).toBe(504);
+    expect(res.headers.get("Cache-Control")).toMatch(/no-store/);
+    const body = (await res.json()) as { code: string; error: string };
+    expect(body.code).toBe("osf_timeout");
+    expect(body.error).toMatch(/OSF is slow/i);
+  });
+
   it("still 500s a genuine unexpected error (a real bug must not be disguised)", async () => {
     getFolderContents.mockRejectedValue(new TypeError("x is not a function"));
     const { GET } = await import("@/app/api/files/[guid]/folder/route");

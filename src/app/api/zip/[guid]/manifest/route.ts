@@ -80,8 +80,6 @@ export async function GET(
     // server broke. The browser-direct button then falls back to the SERVER route, which is
     // the expensive path — so mislabelling a rate limit makes the app answer OSF asking it
     // to slow down by working OSF harder.
-    const mapped = osfErrorResponse(e, { endpoint: `/api/zip/${guid}/manifest` });
-    if (mapped) return mapped;
 
     // A timeout talking to OSF is not an `OsfError` — the client's per-attempt AbortSignal
     // fires and the raw `AbortError` is rethrown after its retries. Observed in production
@@ -100,6 +98,10 @@ export async function GET(
         logType: "osf",
       });
     }
+
+    // After the timeout branch, which keeps its project-specific wording.
+    const mapped = osfErrorResponse(e, { endpoint: `/api/zip/${guid}/manifest` });
+    if (mapped) return mapped;
 
     console.error(`[zip/${guid}/manifest] failed to walk node tree:`, e);
     return appErrorResponse({
