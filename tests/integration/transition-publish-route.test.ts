@@ -12,7 +12,12 @@ vi.mock("@/lib/db/transition-consents", () => ({
   userHasToolkitConsent: vi.fn().mockResolvedValue(true),
   listToolkitConsents: vi.fn(),
 }));
-vi.mock("@/lib/db/transition-jobs", () => ({ getJob: vi.fn(), claimPublish: vi.fn() }));
+vi.mock("@/lib/db/transition-jobs", () => ({
+  getJob: vi.fn(),
+  claimPublish: vi.fn(),
+  releasePublishClaim: vi.fn(),
+  recordPublishedDoi: vi.fn(),
+}));
 vi.mock("@/lib/transition/targets/zenodo", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/transition/targets/zenodo")>();
   return { ...actual, listDraftFiles: vi.fn(), publishDraft: vi.fn() };
@@ -33,8 +38,8 @@ vi.mock("next/headers", () => ({
 
 import { GET, POST } from "@/app/api/transition/publish/route";
 import { requireAppUser } from "@/lib/db/require-user";
-import { getJob, claimPublish } from "@/lib/db/transition-jobs";
-import { listDraftFiles, publishDraft } from "@/lib/transition/targets/zenodo";
+import { getJob, claimPublish, releasePublishClaim, recordPublishedDoi } from "@/lib/db/transition-jobs";
+import { listDraftFiles, publishDraft, ZenodoError } from "@/lib/transition/targets/zenodo";
 import { recordConsent } from "@/lib/db/transition-consents";
 import { publishConfirmationPhrase } from "@/lib/transition/consent";
 import { ZENODO_SESSION_COOKIE, seal } from "@/lib/transition/zenodo-session";
@@ -83,6 +88,8 @@ beforeEach(() => {
     .mockResolvedValue({ id: "555", links: {}, doi: "10.5072/zenodo.555" });
   vi.mocked(recordConsent).mockReset().mockResolvedValue(undefined);
   vi.mocked(claimPublish).mockReset().mockResolvedValue(true);
+  vi.mocked(releasePublishClaim).mockReset().mockResolvedValue(true);
+  vi.mocked(recordPublishedDoi).mockReset().mockResolvedValue(undefined);
 });
 
 describe("GET /api/transition/publish", () => {
@@ -302,5 +309,69 @@ describe("POST /api/transition/publish — replay (Sonnet review, 2026-08-13)", 
     );
     expect(res.status).toBe(503);
     expect(publishDraft).not.toHaveBeenCalled();
+  });
+});
+
+// d-baf04b (review R-0164): the claim was taken before calling Zenodo and NEVER released,
+// so one failed publish — Zenodo refusing it, say for a missing field — locked that record
+// out of BetterOSF for good. A definite failure must release it; an unknown outcome must not.
+describe("POST /api/transition/publish — releasing the claim (R-0164)", () => {
+  const phrase = () => publishConfirmationPhrase({ fileCount: 3 });
+
+  it("releases the claim when Zenodo definitely refused (4xx), so the user can retry", async () => {
+    connect();
+    vi.mocked(publishDraft).mockRejectedValue(
+      new ZenodoError("400", 400, '{"message":"Missing publisher field required for DOI registration."}'),
+    );
+    const res = await POST(post({ jobId: JOB_ID, recordId: "555", typedPhrase: phrase() }));
+    expect(res.status).toBe(502);
+    expect(releasePublishClaim).toHaveBeenCalledWith("osf1", JOB_ID, "555");
+    const body = await res.json();
+    expect(body.code).toBe("zenodo_error");
+  });
+
+  it("releases the claim when consent could not be recorded (Zenodo never called)", async () => {
+    connect();
+    vi.mocked(recordConsent).mockRejectedValue(new Error("db down"));
+    const res = await POST(post({ jobId: JOB_ID, recordId: "555", typedPhrase: phrase() }));
+    expect(res.status).toBe(503);
+    expect(publishDraft).not.toHaveBeenCalled();
+    expect(releasePublishClaim).toHaveBeenCalledWith("osf1", JOB_ID, "555");
+  });
+
+  it.each([
+    ["a network failure after the request was sent", () => new TypeError("fetch failed")],
+    ["a timeout", () => new DOMException("aborted", "AbortError")],
+    ["a Zenodo 5xx (it may have published before failing)", () => new ZenodoError("502", 502, "bad gateway")],
+  ])("KEEPS the claim on %s and tells the user to check Zenodo before retrying", async (_l, err) => {
+    connect();
+    vi.mocked(publishDraft).mockRejectedValue(err());
+    const res = await POST(post({ jobId: JOB_ID, recordId: "555", typedPhrase: phrase() }));
+    expect(releasePublishClaim).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(body.code).toBe("publish_outcome_unknown");
+    expect(body.error).toMatch(/check .*Zenodo.* before/i);
+  });
+
+  it("a claim with no DOI on a retry is reported as an unknown outcome, not as 'already published'", async () => {
+    connect();
+    vi.mocked(claimPublish).mockResolvedValue(false);
+    vi.mocked(getJob).mockResolvedValue({
+      ...completeJob,
+      publishedRecords: [{ recordId: "555", doi: null, publishedAt: "2026-08-13T00:00:00Z" }],
+    });
+    const res = await POST(post({ jobId: JOB_ID, recordId: "555", typedPhrase: phrase() }));
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.code).toBe("publish_outcome_unknown");
+    expect(publishDraft).not.toHaveBeenCalled();
+  });
+
+  it("records the DOI on success, so a later retry can name it", async () => {
+    connect();
+    const res = await POST(post({ jobId: JOB_ID, recordId: "555", typedPhrase: phrase() }));
+    expect(res.status).toBe(200);
+    expect(recordPublishedDoi).toHaveBeenCalledWith("osf1", JOB_ID, "555", "10.5072/zenodo.555");
+    expect(releasePublishClaim).not.toHaveBeenCalled();
   });
 });

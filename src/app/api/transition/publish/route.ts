@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { cookies } from "next/headers";
 import { requireTransitionActor, guardResponse } from "@/lib/transition/guard";
-import { getJob, claimPublish } from "@/lib/db/transition-jobs";
+import { getJob, claimPublish, releasePublishClaim, recordPublishedDoi } from "@/lib/db/transition-jobs";
 import { recordConsent } from "@/lib/db/transition-consents";
 import { publishConfirmationPhrase, publishConfirmationMatches } from "@/lib/transition/consent";
 import { listDraftFiles, publishDraft, ZenodoError } from "@/lib/transition/targets/zenodo";
@@ -185,6 +185,11 @@ export async function POST(req: Request): Promise<Response> {
   }
   if (!claimed) {
     const already = context.job.publishedRecords.find((r) => r.recordId === recordId);
+    if (already && !already.doi) {
+      // A claim without a DOI: an earlier attempt's outcome was never confirmed. It may
+      // have published. Sending it again could mint a second DOI, so the user checks first.
+      return outcomeUnknown(context.env, recordId, 409);
+    }
     return Response.json(
       {
         error: "This record has already been published from BetterOSF.",
@@ -199,21 +204,46 @@ export async function POST(req: Request): Promise<Response> {
 
   // Awaited, never fire-and-forget: the record of consent must exist BEFORE the act it
   // authorises. Same rule the delete route follows.
-  await recordConsent({
-    userId: guard.actor.userId,
-    osfUserId: guard.actor.osfUserId,
-    scope: "publish",
-    jobId,
-    typedPhrase,
-    itemCount: fileCount,
-    userAgent: req.headers.get("user-agent"),
-  });
+  try {
+    await recordConsent({
+      userId: guard.actor.userId,
+      osfUserId: guard.actor.osfUserId,
+      scope: "publish",
+      jobId,
+      typedPhrase,
+      itemCount: fileCount,
+      userAgent: req.headers.get("user-agent"),
+    });
+  } catch (e) {
+    // Zenodo was never called, so the claim is released: nothing happened.
+    console.error("[transition/publish] could not record consent:", e);
+    await releaseQuietly(guard.actor.osfUserId, jobId, recordId);
+    return Response.json(
+      { error: "Could not record your confirmation, so nothing was published. Try again." },
+      { status: 503, headers: noStore },
+    );
+  }
 
   let published;
   try {
     published = await publishDraft(context.auth, recordId);
   } catch (e) {
-    return zenodoFailure(e);
+    // A 4xx is Zenodo refusing: certainly not published, so release the claim and let
+    // the user fix and retry (d-baf04b). Anything else — a 5xx, a timeout, a dropped
+    // connection, an unreadable 200 — leaves the outcome unknown; the claim stays.
+    if (e instanceof ZenodoError && e.status >= 400 && e.status < 500) {
+      await releaseQuietly(guard.actor.osfUserId, jobId, recordId);
+      return zenodoFailure(e);
+    }
+    console.error("[transition/publish] outcome unknown:", e);
+    return outcomeUnknown(context.env, recordId, 502);
+  }
+
+  try {
+    await recordPublishedDoi(guard.actor.osfUserId, jobId, recordId, published.doi);
+  } catch (e) {
+    // The publication happened; failing to note its DOI must not report it as failed.
+    console.error("[transition/publish] could not store the DOI:", e);
   }
 
   await logEventAwaited(
@@ -305,6 +335,32 @@ async function loadContext(osfUserId: string, jobId: string, recordId: string): 
   }
 
   return { job, auth: { accessToken: session.accessToken, env }, env };
+}
+
+/**
+ * The publish request may or may not have taken effect. Never a "try again": a retry could
+ * mint a second permanent DOI. The user looks at Zenodo first.
+ */
+function outcomeUnknown(env: ReturnType<typeof zenodoEnv>, recordId: string, status: number): Response {
+  return Response.json(
+    {
+      error:
+        "BetterOSF could not confirm whether this record was published. Please check it on Zenodo before retrying: " +
+        "if it shows as published, it is done; if it is still a draft, contact us with this record id rather than retrying.",
+      code: "publish_outcome_unknown",
+      recordId,
+      url: zenodoRecordUrl(env, recordId),
+    },
+    { status, headers: noStore },
+  );
+}
+
+async function releaseQuietly(osfUserId: string, jobId: string, recordId: string): Promise<void> {
+  try {
+    await releasePublishClaim(osfUserId, jobId, recordId);
+  } catch (e) {
+    console.error("[transition/publish] could not release the claim:", e);
+  }
 }
 
 /** Zenodo's own refusal, passed through rather than replaced with a guess. */

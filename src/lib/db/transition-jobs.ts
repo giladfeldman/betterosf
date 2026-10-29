@@ -154,6 +154,56 @@ export async function claimPublish(
   return updated.length > 0;
 }
 
+/**
+ * Undo a `claimPublish` after a DEFINITE failure (d-baf04b, review R-0164).
+ *
+ * The claim is taken before Zenodo is called and used to be permanent, so one refused
+ * publish (a missing field, an expired token) locked that record out of BetterOSF for
+ * good. Call this only when Zenodo certainly did not publish: it answered with a 4xx, or
+ * it was never called. When the outcome is unknown — a timeout or a 5xx after the request
+ * left — the claim must stay, because a retry could mint a second DOI.
+ *
+ * Only an entry with no DOI is removed: a recorded DOI is proof of a real publication.
+ */
+export async function releasePublishClaim(osfUserId: string, jobId: string, recordId: string): Promise<boolean> {
+  const db = requireDb();
+  const updated = await db
+    .update(transitionJobs)
+    .set({
+      publishedRecords: sql`COALESCE((
+        SELECT jsonb_agg(e) FROM jsonb_array_elements(${transitionJobs.publishedRecords}) AS e
+        WHERE NOT (e->>'recordId' = ${recordId} AND (e->'doi' IS NULL OR e->'doi' = 'null'::jsonb))
+      ), '[]'::jsonb)`,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(transitionJobs.id, jobId), eq(transitionJobs.osfUserId, osfUserId)))
+    .returning({ id: transitionJobs.id });
+  return updated.length > 0;
+}
+
+/** After a successful publish, store the DOI on the claim so a retry can name it. */
+export async function recordPublishedDoi(
+  osfUserId: string,
+  jobId: string,
+  recordId: string,
+  doi: string | null,
+): Promise<void> {
+  if (!doi) return;
+  const db = requireDb();
+  await db
+    .update(transitionJobs)
+    .set({
+      publishedRecords: sql`(
+        SELECT COALESCE(jsonb_agg(
+          CASE WHEN e->>'recordId' = ${recordId} THEN e || jsonb_build_object('doi', ${doi}::text) ELSE e END
+        ), '[]'::jsonb)
+        FROM jsonb_array_elements(${transitionJobs.publishedRecords}) AS e
+      )`,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(transitionJobs.id, jobId), eq(transitionJobs.osfUserId, osfUserId)));
+}
+
 export type ItemUpsert = {
   osfFileId: string;
   path: string;
