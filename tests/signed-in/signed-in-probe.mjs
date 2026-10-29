@@ -141,7 +141,7 @@ async function main() {
     const shown = await page.getByText(FILE_TEXT).first().waitFor({ timeout: 30_000 }).then(() => true, () => false);
     r.text = await page.locator("body").innerText();
     ok = r.status === 200 && shown;
-    check("signed in: deep file view renders the file", ok, `HTTP ${r.status}${ok ? "" : ` ${snip(r.text)}`}`);
+    check("signed in: deep file view renders the file", ok, `HTTP ${r.status}${ok ? "" : ` …${JSON.stringify(r.text.replace(/\s+/g, " ").slice(-500))}`}`);
     const cite = await page.request.get(`${BASE}/api/osf/citation/${guid}`);
     check(
       "signed in: citation response is private, never public",
@@ -156,22 +156,31 @@ async function main() {
     const folderPath = mk.ok ? (await mk.json()).data.attributes.path : null;
     check("move: created a destination folder", Boolean(folderPath), `HTTP ${mk.status}`);
     const moveVia = async () => {
-      await visit(`/${guid}/files`);
-      await page.getByRole("button", { name: /Show files/ }).first().click().catch(() => {});
-      await page.getByRole("button", { name: `Move ${FILE_NAME}` }).first().click({ timeout: 20_000 });
-      await page.getByRole("button", { name: "📁 moved-here", exact: true }).click({ timeout: 20_000 });
-      await page.getByRole("button", { name: "Move here" }).click();
-      return page
-        .getByText(/✓ Moved to|already in that folder|Move failed/)
-        .first()
-        .waitFor({ timeout: 30_000 })
-        .then(async () => page.locator("body").innerText(), () => "");
+      let step = "open the file tree";
+      try {
+        await visit(`/${guid}/files`);
+        // Collapse first, so the only visible copy of the file is the one at the root.
+        step = "collapse the tree";
+        await page.getByRole("button", { name: "Collapse all" }).first().click({ timeout: 5_000 }).catch(() => {});
+        await page.getByRole("button", { name: /Show files/ }).first().click({ timeout: 3_000 }).catch(() => {});
+        step = "click Move on the file";
+        await page.getByRole("button", { name: `Move ${FILE_NAME}` }).first().click({ timeout: 20_000 });
+        step = "open the destination folder in the picker";
+        await page.getByRole("button", { name: "📁 moved-here", exact: true }).click({ timeout: 20_000 });
+        step = "click Move here";
+        await page.getByRole("button", { name: "Move here" }).click({ timeout: 10_000 });
+        step = "wait for the outcome message";
+        await page.getByText(/✓ Moved to|already in that folder|Move failed/).first().waitFor({ timeout: 30_000 });
+        return await page.locator("body").innerText();
+      } catch (e) {
+        throw new Error(`could not ${step}: ${String(e?.message ?? e).split(/\r?\n/)[0]}`);
+      }
     };
     const inFolder = async () => {
       const r2 = await osf(`/nodes/${guid}/files/osfstorage${folderPath}`);
       return r2.ok ? (await r2.json()).data.map((e) => e.attributes) : [];
     };
-    if (folderPath) {
+    if (folderPath) try {
       let ui = await moveVia();
       let held = await inFolder();
       check(
@@ -188,6 +197,8 @@ async function main() {
         /already in that folder/.test(ui) && held.find((a) => a.name === FILE_NAME)?.size === firstSize,
         `UI ${/already in that folder/.test(ui) ? "refused" : "did not refuse"}; size ${held.find((a) => a.name === FILE_NAME)?.size} vs ${firstSize}`,
       );
+    } catch (e) {
+      check("move: the UI flow completed", false, String(e?.message ?? e).split(/\r?\n/)[0]);
     }
 
     // Two-sided control: the same private page anonymously must NOT show the project.

@@ -122,8 +122,13 @@ export function MoveControl({
       }
       setMoving(false);
       setDone(`✓ Moved to ${here.materializedPath === "/" ? "OSF Storage" : here.materializedPath}`);
-      onMoved?.(selection, here.listingUrl);
-      doneTimer.current = setTimeout(reset, 1600);
+      // Refresh the tree only AFTER the confirmation has been seen: the refresh removes
+      // this row from its old folder, which unmounts this control and its message.
+      const dest = here.listingUrl;
+      doneTimer.current = setTimeout(() => {
+        reset();
+        onMoved?.(selection, dest);
+      }, 1600);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Move failed");
       setMoving(false);

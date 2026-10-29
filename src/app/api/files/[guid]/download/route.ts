@@ -18,6 +18,7 @@
  */
 import { isValidGuid } from "@/lib/osf/guid";
 import { selectToken } from "@/lib/osf/tokens";
+import { auth } from "@/auth";
 import { contentDisposition } from "@/lib/http/content-disposition";
 
 export const runtime = "nodejs";
@@ -85,6 +86,38 @@ export async function GET(
     return h;
   };
 
+  // A signed-in user's OWN token. Their private files need it on every hop, and fetch
+  // drops Authorization on the cross-host redirect osf.io/download -> files.osf.io, so
+  // OSF then answered with its sign-in HTML page and the viewer showed that page as the
+  // file (found by the local signed-in probe, 2026-10-29). Redirects are therefore
+  // followed by hand, and only to OSF hosts — the token never leaves the allowlist.
+  let userToken: string | null = null;
+  try {
+    const session = await auth();
+    userToken = session?.osfAuthError ? null : session?.accessToken ?? null;
+  } catch { /* anonymous */ }
+
+  if (userToken) {
+    let hop = target;
+    let res: Response | null = null;
+    for (let i = 0; i < 5; i++) {
+      res = await fetch(hop.toString(), { headers: buildFetchHeaders(userToken), redirect: "manual", cache: "no-store" });
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+      if (!location) break;
+      let next: URL;
+      try { next = new URL(location, hop); } catch { return new Response("OSF sent an unreadable redirect", { status: 502 }); }
+      if (next.protocol !== "https:" || !ALLOWED_HOSTS.has(next.host)) {
+        return new Response("OSF redirected outside the OSF allowlist", { status: 502 });
+      }
+      hop = next;
+      res = null;
+    }
+    if (!res || !res.ok || !res.body) {
+      return new Response(`OSF upstream returned ${res?.status ?? 508}`, { status: res?.status && res.status >= 400 ? res.status : 502 });
+    }
+    return relay(res, { filename, forceDownload, privateData: true });
+  }
+
   let token = "";
   try { token = await selectToken(); } catch { /* anonymous */ }
   let upstream = await fetch(target.toString(), {
@@ -110,6 +143,13 @@ export async function GET(
     return new Response(`OSF upstream returned ${upstream.status}`, { status: upstream.status });
   }
 
+  return relay(upstream, { filename, forceDownload, privateData: false });
+}
+
+function relay(
+  upstream: Response,
+  { filename, forceDownload, privateData }: { filename: string; forceDownload: boolean; privateData: boolean },
+): Response {
   const isPartial = upstream.status === 206;
 
   // Strip the OSF-side CORS / framing headers and replace with our own. We
@@ -135,6 +175,7 @@ export async function GET(
     const cl = upstream.headers.get("content-length");
     if (cl) headers.set("content-length", cl);
     headers.set("accept-ranges", "bytes");
+    if (privateData) headers.set("cache-control", "private, no-store");
     return new Response(upstream.body, { status: 206, headers });
   }
 
@@ -146,8 +187,9 @@ export async function GET(
   } else {
     headers.set("content-disposition", "inline");
   }
-  // Edge cache aligned with revalidate above.
-  headers.set("cache-control", "public, max-age=86400");
+  // Bytes fetched with a user's own token may be private: never let a shared cache keep
+  // them. Anonymous responses keep the edge cache aligned with revalidate above.
+  headers.set("cache-control", privateData ? "private, no-store" : "public, max-age=86400");
   // Allow same-origin iframes (HtmlViewer).
   headers.set("x-frame-options", "SAMEORIGIN");
 
