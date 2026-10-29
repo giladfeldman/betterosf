@@ -22,6 +22,17 @@ export interface AdminDigest {
   warnCount: number;
   groups: DigestGroup[];
   recent: DigestRow[];
+  /**
+   * Error/warn events from local, preview or development servers that this digest left out
+   * (d-bf671b). Local dev shares this log table; its failures are not production news.
+   */
+  nonProductionExcluded: number;
+}
+
+/** A row with no `_env` predates the label; it is kept, so an upgrade cannot hide an error. */
+function isProductionRow(context: unknown): boolean {
+  const env = (context as { _env?: unknown } | null)?._env;
+  return env === undefined || env === null || env === "production";
 }
 
 const MAX_ROWS = 1000;
@@ -36,16 +47,24 @@ function eventKey(type: string, message: string): string {
   return `${type}|${message.slice(0, 120)}`;
 }
 
-export async function collectAdminDigest(windowHours = 24): Promise<AdminDigest> {
+export async function collectAdminDigest(
+  windowHours = 24,
+  opts: { scope?: "production" | "non-production" } = {},
+): Promise<AdminDigest> {
+  const scope = opts.scope ?? "production";
   const db = requireDb();
   const since = new Date(Date.now() - windowHours * 3_600_000);
 
-  const rows = await db
+  const fetched = await db
     .select()
     .from(systemLogs)
     .where(and(gte(systemLogs.createdAt, since), inArray(systemLogs.level, ["error", "warn"])))
     .orderBy(desc(systemLogs.createdAt))
     .limit(MAX_ROWS);
+
+  const all = fetched;
+  const rows = all.filter((r) => isProductionRow(r.context) === (scope === "production"));
+  const nonProductionExcluded = scope === "production" ? all.length - rows.length : 0;
 
   const errorCount = rows.filter((r) => r.level === "error").length;
   const warnCount = rows.filter((r) => r.level === "warn").length;
@@ -74,5 +93,5 @@ export async function collectAdminDigest(windowHours = 24): Promise<AdminDigest>
     meta: (r.context as Record<string, unknown> | null) ?? null,
   }));
 
-  return { windowHours, errorCount, warnCount, groups, recent };
+  return { windowHours, errorCount, warnCount, groups, recent, nonProductionExcluded };
 }

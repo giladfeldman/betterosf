@@ -1,3 +1,4 @@
+import { alertEmailPolicy } from "@/lib/alert-env";
 import { auth } from "@/auth";
 import { validateFeedback, truncateUserAgent } from "@/lib/feedback/validate";
 import { insertBugReport } from "@/lib/db/bug-reports";
@@ -118,6 +119,11 @@ async function notifyAdmin(report: {
 }): Promise<boolean> {
   const to = process.env.ADMIN_NOTIFY_EMAIL?.trim();
   if (!to) return false;
+  // Admin emails are for production (d-bf671b). A report filed against a local server is
+  // still stored and visible on /admin/feedback; it is emailed only with the opt-in, and
+  // then labelled so it can never be mistaken for a live user's report.
+  const policy = alertEmailPolicy();
+  if (!policy.send) return false;
 
   const { renderEmail } = await import("@/lib/email/render");
   const { sendEmail } = await import("@/lib/email/send");
@@ -145,9 +151,11 @@ async function notifyAdmin(report: {
   const subjectKind = report.kind === "idea" ? "idea" : report.kind === "question" ? "question" : "bug";
   const result = await sendEmail({
     to,
-    subject: `[BetterOSF] New ${subjectKind}: ${report.message.slice(0, 60).replace(/\s+/g, " ")}`,
-    html,
-    text,
+    subject: policy.subject(`[BetterOSF] New ${subjectKind}: ${report.message.slice(0, 60).replace(/\s+/g, " ")}`),
+    html: policy.banner ? `<p><strong>${policy.banner}</strong></p>${html}` : html,
+    text: policy.banner ? `${policy.banner}
+
+${text}` : text,
     // One email per report — a retry of the same report never double-sends.
     idempotencyKey: `bug-report:${report.id}`,
   });

@@ -3,6 +3,7 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { systemLogs } from "@/lib/db/schema";
+import { deploymentEnvironment } from "@/lib/alert-env";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogType =
@@ -95,7 +96,9 @@ async function writeLog(
       level,
       type,
       message: truncateMessage(message),
-      context: truncateContext(redactContext(context)),
+      // `_env` records where the event HAPPENED (d-bf671b). Local dev shares this table, and
+      // the admin digest emails only production events — it can tell them apart only by this.
+      context: { ...truncateContext(redactContext(context)), _env: deploymentEnvironment() },
       userId: userId ?? null,
     });
     void maybeCleanup();

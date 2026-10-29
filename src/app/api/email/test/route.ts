@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/admin";
 import { sendEmail, renderEmail } from "@/lib/email";
 import { EmailLayout } from "@/lib/email/templates/layout";
 import * as React from "react";
+import { alertEmailPolicy, deploymentEnvironment } from "@/lib/alert-env";
 
 const ALLOW = new Set([
   "admin@example.org",
@@ -41,7 +42,9 @@ export async function POST(req: NextRequest) {
 
   const result = await sendEmail({
     to,
-    subject: "[BetterOSF] SES test",
+    // An explicit admin test, so it is always sent — but from a non-production server the
+    // subject says so (d-bf671b): it must never read as a live-site message.
+    subject: alertEmailPolicy(deploymentEnvironment(), { optIn: true }).subject("[BetterOSF] SES test"),
     html,
     text,
     idempotencyKey: `ses-test-${to}-${new Date().toISOString().slice(0, 13)}`,

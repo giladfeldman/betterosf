@@ -6,20 +6,34 @@ export function AdminDigestEmail({
   appName,
   appUrl,
   digest,
+  banner = null,
 }: {
   appName: string;
   appUrl: string;
   digest: AdminDigest;
+  /** Non-production digests open with this (d-bf671b); null for production. */
+  banner?: string | null;
 }): React.ReactElement {
   const logsUrl = appUrl ? `${appUrl.replace(/\/$/, "")}/admin/logs?level=error` : "";
   return (
     <EmailLayout>
+      {banner && (
+        <p>
+          <strong>{banner}</strong>
+        </p>
+      )}
       <h2>{appName} — error digest</h2>
       <p>
         In the last {digest.windowHours}h: <strong>{digest.errorCount}</strong>{" "}
         error{digest.errorCount === 1 ? "" : "s"}, <strong>{digest.warnCount}</strong>{" "}
         warning{digest.warnCount === 1 ? "" : "s"}.
       </p>
+      {digest.nonProductionExcluded > 0 && (
+        <p>
+          Not counted: {digest.nonProductionExcluded} event{digest.nonProductionExcluded === 1 ? "" : "s"} from
+          local or preview servers (recorded in the logs, not production).
+        </p>
+      )}
 
       {digest.groups.length > 0 && (
         <>
