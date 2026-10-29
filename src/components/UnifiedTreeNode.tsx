@@ -3,6 +3,7 @@
 import { useState, type ReactNode, type DragEvent } from "react";
 import { NewFolderControl } from "./NewFolderControl";
 import { RenameControl } from "./RenameControl";
+import { MoveControl } from "./MoveControl";
 import type { TreeNodeKind, TreeSelectionPayload, TreeUploadTarget, TreeNodeData } from "./tree-types";
 
 // Re-export the tree types so existing `from "./UnifiedTreeNode"` imports keep
@@ -72,6 +73,7 @@ export function UnifiedTreeNode({
   onUpload,
   onDelete,
   onRenamed,
+  onMoved,
   onCreateFolder,
   onDropUpload,
   onRetry,
@@ -92,6 +94,7 @@ export function UnifiedTreeNode({
   onDelete?: (selection: TreeSelectionPayload) => void;
   /** Called AFTER a successful in-place rename, so the parent folder can refresh. */
   onRenamed?: (selection: TreeSelectionPayload) => void;
+  onMoved?: (selection: TreeSelectionPayload, destListingUrl: string) => void;
   onCreateFolder?: (target: TreeUploadTarget) => void;
   onDropUpload?: (target: TreeUploadTarget, items: DataTransferItem[]) => void;
   onRetry?: () => void;
@@ -293,6 +296,10 @@ export function UnifiedTreeNode({
               registration pin and the post-rename refresh. */}
           {node.selection?.deleteUrl && node.selection?.parentListingUrl && (
             <RenameControl selection={node.selection} onRenamed={onRenamed} />
+          )}
+          {/* Move: same gate as Rename, never readOnly alone (d-f2a1e2). */}
+          {node.selection?.deleteUrl && node.selection?.parentListingUrl && (
+            <MoveControl selection={node.selection} onMoved={onMoved} />
           )}
           {/* Only writable osfstorage targets carry deleteUrl (set in UnifiedTree's
               emitters, gated on canUploadHere), so registrations, read-only trees,

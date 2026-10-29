@@ -727,17 +727,12 @@ export function UnifiedTree({
   // After an in-place rename: drop the now-stale selection entry (its path and name
   // changed) and force-refresh the parent folder, exactly as handleDeleted does — the
   // server's ≤5-min cached listing would otherwise keep serving the old name.
-  const handleRenamed = useCallback(
-    (item: TreeSelectionPayload) => {
-      setSelected((prev) => {
-        const next = { ...prev };
-        delete next[selectionKey(item)];
-        return next;
-      });
-      if (!item.parentListingUrl) return;
+  // Re-fetch every loaded folder whose listing is `listingUrl` (after a rename or move).
+  const refreshListing = useCallback(
+    (listingUrl: string) => {
       const params = folderParamsRef.current;
       for (const [key, recorded] of params.entries()) {
-        if (recorded.listingUrl !== item.parentListingUrl) continue;
+        if (recorded.listingUrl !== listingUrl) continue;
         setLoadedEntries((prev) => {
           const next = { ...prev };
           delete next[key];
@@ -747,6 +742,28 @@ export function UnifiedTree({
       }
     },
     [fetchFiles]
+  );
+
+  const handleRenamed = useCallback(
+    (item: TreeSelectionPayload) => {
+      setSelected((prev) => {
+        const next = { ...prev };
+        delete next[selectionKey(item)];
+        return next;
+      });
+      if (!item.parentListingUrl) return;
+      refreshListing(item.parentListingUrl);
+    },
+    [refreshListing]
+  );
+
+  // A move changes two folders: the one it left and the one it arrived in.
+  const handleMoved = useCallback(
+    (item: TreeSelectionPayload, destListingUrl: string) => {
+      handleRenamed(item);
+      refreshListing(destListingUrl);
+    },
+    [handleRenamed, refreshListing]
   );
 
   const refreshUploadTarget = useCallback(
@@ -1847,6 +1864,7 @@ export function UnifiedTree({
                   onUpload={openUploadDialog}
                   onDelete={openRowDelete}
                   onRenamed={handleRenamed}
+                  onMoved={handleMoved}
                   onCreateFolder={refreshUploadTarget}
                   onDropUpload={handleDropUpload}
                   onRetry={

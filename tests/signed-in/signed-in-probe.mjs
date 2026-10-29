@@ -25,7 +25,7 @@
  *
  * Covers: deep project pages signed in (with an anonymous control that must NOT see the
  * private project), the 401 path (an invalid token must read "connection expired", never a
- * 500), the citation route's 401, and /tools/licence-check end to end — list, tick, bulk set,
+ * 500), the citation route's 401, Move (success and a refused name clash), and /tools/licence-check end to end — list, tick, bulk set,
  * and OSF's own read-back of the licence.
  *
  * Not in `npm test`, CI or /ship's production pass: it writes to OSF (a throwaway account).
@@ -148,6 +148,47 @@ async function main() {
       cite.status() === 200 && /private/.test(cite.headers()["cache-control"] ?? "") && !/public/.test(cite.headers()["cache-control"] ?? ""),
       `HTTP ${cite.status()} ${cite.headers()["cache-control"]}`,
     );
+
+    // ---------------------------------------------------------------- move (d-f2a1e2)
+    // Through the real UI: move the probe file into a new folder, then try to move a
+    // second file of the same name there — that must be refused and overwrite nothing.
+    const mk = await osf(`${WB}/resources/${guid}/providers/osfstorage/?kind=folder&name=moved-here`, { method: "PUT" });
+    const folderPath = mk.ok ? (await mk.json()).data.attributes.path : null;
+    check("move: created a destination folder", Boolean(folderPath), `HTTP ${mk.status}`);
+    const moveVia = async () => {
+      await visit(`/${guid}/files`);
+      await page.getByRole("button", { name: /Show files/ }).first().click().catch(() => {});
+      await page.getByRole("button", { name: `Move ${FILE_NAME}` }).first().click({ timeout: 20_000 });
+      await page.getByRole("button", { name: "📁 moved-here", exact: true }).click({ timeout: 20_000 });
+      await page.getByRole("button", { name: "Move here" }).click();
+      return page
+        .getByText(/✓ Moved to|already in that folder|Move failed/)
+        .first()
+        .waitFor({ timeout: 30_000 })
+        .then(async () => page.locator("body").innerText(), () => "");
+    };
+    const inFolder = async () => {
+      const r2 = await osf(`/nodes/${guid}/files/osfstorage${folderPath}`);
+      return r2.ok ? (await r2.json()).data.map((e) => e.attributes) : [];
+    };
+    if (folderPath) {
+      let ui = await moveVia();
+      let held = await inFolder();
+      check(
+        "move: the file moved, per OSF's own listing",
+        /✓ Moved to/.test(ui) && held.some((a) => a.name === FILE_NAME),
+        `UI ${/✓ Moved to/.test(ui) ? "said moved" : "did not confirm"}; folder holds [${held.map((a) => a.name).join(", ")}]`,
+      );
+      const firstSize = held.find((a) => a.name === FILE_NAME)?.size;
+      await osf(`${WB}/resources/${guid}/providers/osfstorage/?kind=file&name=${FILE_NAME}`, { method: "PUT", body: "second, different bytes" });
+      ui = await moveVia();
+      held = await inFolder();
+      check(
+        "move: a name clash is refused and overwrites nothing",
+        /already in that folder/.test(ui) && held.find((a) => a.name === FILE_NAME)?.size === firstSize,
+        `UI ${/already in that folder/.test(ui) ? "refused" : "did not refuse"}; size ${held.find((a) => a.name === FILE_NAME)?.size} vs ${firstSize}`,
+      );
+    }
 
     // Two-sided control: the same private page anonymously must NOT show the project.
     const anon = await browser.newContext();

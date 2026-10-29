@@ -240,6 +240,7 @@ describe("UnifiedTreeNode: rename/delete affordance gating", () => {
       />
     );
     expect(screen.getByRole("button", { name: /^rename a\.csv/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^move a\.csv/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^delete/i })).toBeInTheDocument();
   });
 
@@ -258,6 +259,7 @@ describe("UnifiedTreeNode: rename/delete affordance gating", () => {
     );
     expect(screen.queryByRole("button", { name: /rename/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^move/i })).not.toBeInTheDocument();
   });
 
   it("suppresses Rename when parentListingUrl is missing (registration pin + refresh need it)", () => {
@@ -272,6 +274,7 @@ describe("UnifiedTreeNode: rename/delete affordance gating", () => {
       />
     );
     expect(screen.queryByRole("button", { name: /rename/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^move/i })).not.toBeInTheDocument();
   });
 
   it("opens an inline input prefilled with the current name", () => {

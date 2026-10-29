@@ -209,6 +209,39 @@ export function resolveRenameUrl(target: RenameTarget): string {
   });
 }
 
+export function resolveMoveUrl(target: RenameTarget): string {
+  return resolveItemActionUrl(target, target.moveUrl, {
+    providerRefusal: "Moving is only supported for OSF Storage.",
+    registrationRefusal:
+      "Moving is only supported for project and component OSF Storage. Registrations are permanent and cannot be modified.",
+    rootRefusal: "BetterOSF will not move an OSF Storage root.",
+  });
+}
+
+/**
+ * The Waterbutler provider path of a move DESTINATION, derived from the folder's OSF API
+ * listing URL — never taken from the client as a path. Only two shapes are accepted, both
+ * on the SAME node and on osfstorage:
+ *   https://api.osf.io/v2/nodes/<guid>/files/osfstorage/              → "/"  (the root)
+ *   https://api.osf.io/v2/nodes/<guid>/files/osfstorage/<24 hex>/     → "/<24 hex>/"
+ * An osfstorage folder's id in the listing URL IS its provider path (measured 2026-10-29).
+ * Anything else — a registration, another node, another provider, a query string — throws.
+ */
+export function moveDestinationPath(guid: string, destListingUrl: string): string {
+  if (!isValidGuid(guid)) throw new OsfWriteError(400, "invalid", "Invalid GUID");
+  const prefix = `https://api.osf.io/v2/nodes/${guid}/files/${OSF_STORAGE}/`;
+  const rest = destListingUrl.startsWith(prefix) ? destListingUrl.slice(prefix.length) : null;
+  const m = rest === null ? null : /^(?:([0-9a-f]{24})\/)?$/.exec(rest);
+  if (!m) {
+    throw new OsfWriteError(
+      400,
+      "invalid",
+      "Items can only be moved to a folder in the same project's OSF Storage.",
+    );
+  }
+  return m[1] ? `/${m[1]}/` : "/";
+}
+
 /**
  * Shared validation core for per-item Waterbutler actions (delete, rename).
  * The ORDER of the checks — registration pin, then host pin, then query strip,
@@ -280,7 +313,7 @@ export function readableUpstreamBody(body: string): string {
   return trimmed.replace(/\s+/g, " ").slice(0, 300);
 }
 
-export function mapUploadStatus(status: number, body: string, verb: "upload" | "delete" | "rename" = "upload"): OsfWriteError {
+export function mapUploadStatus(status: number, body: string, verb: "upload" | "delete" | "rename" | "move" = "upload"): OsfWriteError {
   const message = readableUpstreamBody(body);
   if (status === 401) return new OsfWriteError(401, "unauthorized", "Your OSF session expired. Sign in again.");
   if (status === 403) return new OsfWriteError(403, "forbidden", "You may not have write permission on this project or component.");

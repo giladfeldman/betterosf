@@ -8,7 +8,9 @@ import {
   cleanName,
   cleanRenameName,
   mapUploadStatus,
+  moveDestinationPath,
   resolveDeleteUrl,
+  resolveMoveUrl,
   resolveRenameUrl,
   validateUploadTarget,
   type DeleteTarget,
@@ -17,7 +19,7 @@ import {
 } from "./waterbutler-url";
 
 // Re-export the shared types/helpers so existing server-side imports keep working.
-export { OsfWriteError, validateUploadTarget, resolveDeleteUrl, resolveRenameUrl, cleanRenameName };
+export { OsfWriteError, validateUploadTarget, resolveDeleteUrl, resolveRenameUrl, resolveMoveUrl, moveDestinationPath, cleanRenameName };
 export type { UploadTarget, DeleteTarget, RenameTarget };
 
 const MAX_FILE_SIZE = OSF_MAX_FILE_SIZE;
@@ -212,4 +214,64 @@ export function writeErrorResponse(error: unknown): Response {
   // we never leak internal strings (stack fragments, upstream URLs) to the client.
   console.error("[osf/write] unexpected error:", error);
   return Response.json({ error: "Upload failed due to an unexpected server error. Please try again.", code: "upstream" }, { status: 500 });
+}
+
+export type MoveOutcome = {
+  path: string;
+  name: string;
+  kind: "file" | "folder";
+  status: "moved" | "failed";
+  code?: string;
+  message?: string;
+};
+
+/**
+ * Move ONE file/folder to another folder in the same project's OSF Storage.
+ *
+ * `conflict` is always "warn": a same-named item in the destination makes Waterbutler
+ * answer 409 and move nothing. "replace" would overwrite that item, and OSF has no trash.
+ */
+export async function moveInOsfStorage(
+  target: RenameTarget,
+  destProviderPath: string,
+  token: string,
+): Promise<MoveOutcome> {
+  const base = { path: target.path, name: target.name, kind: target.kind };
+  try {
+    const url = resolveMoveUrl(target);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ action: "move", path: destProviderPath, conflict: "warn" }),
+      cache: "no-store",
+    });
+    if (res.status === 200 || res.status === 201) return { ...base, status: "moved" };
+    if (res.status === 409) {
+      return {
+        ...base,
+        status: "failed",
+        code: "conflict",
+        message: `Something named "${target.name}" is already in that folder. Nothing was moved. Rename one of them first.`,
+      };
+    }
+    if (res.status === 404 || res.status === 410) {
+      return {
+        ...base,
+        status: "failed",
+        code: "upstream",
+        message: "This item no longer exists on OSF. Refresh the tree and try again.",
+      };
+    }
+    const body = await res.text().catch(() => "");
+    const mapped = mapUploadStatus(res.status, body.slice(0, 500), "move");
+    return { ...base, status: "failed", code: mapped.code, message: mapped.message };
+  } catch (e) {
+    if (e instanceof OsfWriteError) return { ...base, status: "failed", code: e.code, message: e.message };
+    console.error("[osf/move] unexpected error:", e);
+    return { ...base, status: "failed", code: "upstream", message: "Could not reach OSF to move this item. It was NOT moved." };
+  }
 }

@@ -13,6 +13,7 @@ export type LogType =
   | "upload"
   | "delete"
   | "rename"
+  | "move"
   /** OSF Transition Toolkit: consent, inventory crawls, export and deposit runs. */
   | "transition"
   /** SES/SNS delivery feedback — bounces, complaints, and shapes we could not read. */

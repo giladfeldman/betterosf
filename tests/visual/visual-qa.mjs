@@ -397,6 +397,8 @@ async function main() {
     // registration must never expose it either.
     const regRenameButtons = await page.getByRole("button", { name: /^rename/i }).count();
     record("registration shows NO rename buttons (immutable)", regRenameButtons === 0, `renameButtons=${regRenameButtons}`);
+    const regMoveButtons = await page.getByRole("button", { name: /^move /i }).count();
+    record("registration shows NO move buttons (immutable)", regMoveButtons === 0, `moveButtons=${regMoveButtons}`);
 
     // Progressive auto-load: deep folders/files appear WITHOUT clicking through
     // each level (the reported annoyance). The default "Directory" view hides
@@ -823,6 +825,8 @@ async function main() {
   // for a signed-out visitor would be the same class of bug as the 2026-08-03 incident.
   const anonRowRenames = await page.locator('[role="tree"] button', { hasText: /^rename/i }).count();
   record("anonymous file tree exposes NO row rename buttons", anonRowRenames === 0, `renameButtons=${anonRowRenames}`);
+  const anonRowMoves = await page.locator('[role="tree"] button', { hasText: /^move$/i }).count();
+  record("anonymous file tree exposes NO row move buttons", anonRowMoves === 0, `moveButtons=${anonRowMoves}`);
 
   await page.goto(`${BASE}/${MANY_LABS_GUID}/files`, { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
