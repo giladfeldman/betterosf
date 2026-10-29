@@ -26,7 +26,7 @@ import {
 } from "./stage-opfs";
 import { verifyFile, reconcile, type FileVerification, type ReconciliationVerdict } from "./verify";
 import { buildBagTagFiles, type BagFile, type BagInfo } from "./package-bagit";
-import { buildRoCrate, type CrateFile } from "./ro-crate";
+import { buildRoCrate, wikiPagesFromExtras, type CrateFile } from "./ro-crate";
 import { renderReportMarkdown, renderCrosswalkCsv, reportFilename, type ReportInput } from "./report";
 import type { ContributorView } from "@/lib/osf/contributors";
 import { renderLicenceFile } from "./destination-guide";
@@ -78,7 +78,7 @@ export type ExportPlan = {
   doi: string | null;
   files: PlannedExportFile[];
   /** Non-file content already fetched as text, keyed by path within the bag. */
-  extras: { path: string; text: string }[];
+  extras: { path: string; text: string; wikiName?: string }[];
   /**
    * Every OSF node this plan covers, root first.
    *
@@ -470,9 +470,7 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
     license: plan.crateInput.license,
     contributors: plan.contributors,
     files: crateFiles,
-    wikiPages: plan.extras
-      .filter((e) => e.path.startsWith("wikis/"))
-      .map((e) => ({ name: e.path.replace(/^wikis\//, "").replace(/\.md$/, ""), path: `data/${e.path}` })),
+    wikiPages: wikiPagesFromExtras(plan.extras, "data/"),
     appVersion: opts.appVersion,
     createdAt,
   });

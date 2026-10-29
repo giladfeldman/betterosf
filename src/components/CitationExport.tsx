@@ -19,6 +19,9 @@ type Formats = { apa: string; mla: string; chicago: string; bibtex: string; ris:
 export function CitationExport({ guid }: { guid: string }) {
   const [formats, setFormats] = useState<Formats | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+  // The route's own message ("Your OSF connection expired. Sign out and sign in again…"),
+  // so an expired token is never shown as a generic, retry-forever failure.
+  const [errorText, setErrorText] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
   const copy = (label: string, text: string) => {
@@ -31,7 +34,12 @@ export function CitationExport({ guid }: { guid: string }) {
     setState("loading");
     try {
       const res = await fetch(`/api/osf/citation/${guid}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string; action?: string } | null;
+        setErrorText(body?.error ? [body.error, body.action].filter(Boolean).join(" ") : null);
+        throw new Error(`HTTP ${res.status}`);
+      }
+      setErrorText(null);
       setFormats((await res.json()) as Formats);
       setState("idle");
     } catch {
@@ -45,7 +53,7 @@ export function CitationExport({ guid }: { guid: string }) {
         <h3 className="font-semibold mb-2">Cite this</h3>
         {state === "error" ? (
           <p className="text-xs text-red-600 dark:text-red-400">
-            Couldn&apos;t load citations from OSF.{" "}
+            {errorText ?? "Couldn’t load citations from OSF."}{" "}
             <button type="button" onClick={load} className="underline">
               Retry
             </button>

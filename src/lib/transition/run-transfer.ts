@@ -26,7 +26,7 @@ import { stageFile, stagedBlob, discardStaged, clearStaging, requestPersistence,
 import { verifyFile, reconcile, type FileVerification, type ReconciliationVerdict } from "./verify";
 import { hashBytes } from "./hash";
 import { renderReportMarkdown, renderCrosswalkCsv, reportFilename, type ReportInput } from "./report";
-import { buildRoCrate, type CrateFile } from "./ro-crate";
+import { buildRoCrate, wikiPagesFromExtras, type CrateFile } from "./ro-crate";
 import { renderDisclaimer } from "./package-bagit";
 import { describeError, type ExportPlan, type RunLogEntry } from "./run-export";
 import type { FidelityRow, ZenodoMetadata } from "./crosswalk";
@@ -1561,9 +1561,7 @@ async function depositSupplement(
     license: opts.plan.crateInput.license,
     contributors: opts.plan.contributors,
     files: input.crateFiles,
-    wikiPages: opts.plan.extras
-      .filter((e) => e.path.startsWith("wikis/"))
-      .map((e) => ({ name: e.path.replace(/^wikis\//, "").replace(/\.md$/, ""), path: e.path })),
+    wikiPages: wikiPagesFromExtras(opts.plan.extras, ""),
     appVersion: opts.appVersion,
     createdAt: input.createdAt,
   });

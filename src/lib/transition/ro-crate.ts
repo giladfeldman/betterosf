@@ -161,3 +161,22 @@ function personId(c: ContributorView): string {
 export function encodeCrateId(path: string): string {
   return path.split("/").map(encodeURIComponent).join("/");
 }
+
+/**
+ * The wiki pages of an export, for the crate, named by their REAL OSF names.
+ *
+ * Both the local export and the Zenodo transfer call this, so the two cannot drift. The
+ * name is never recovered from the file path: the path went through the sanitiser and a
+ * collision suffix, and reading it back would present the rewritten name as the wiki's.
+ */
+export function wikiPagesFromExtras(
+  extras: { path: string; wikiName?: string }[],
+  pathPrefix: string,
+): { name: string; path: string }[] {
+  return extras
+    .filter((e) => e.path.startsWith("wikis/"))
+    .map((e) => ({
+      name: e.wikiName ?? e.path.replace(/^wikis\//, "").replace(/\.md$/, ""),
+      path: `${pathPrefix}${e.path}`,
+    }));
+}

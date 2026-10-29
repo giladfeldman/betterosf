@@ -109,7 +109,38 @@ function mapOsfError(e: OsfError): Mapped | null {
   }
 }
 
+/**
+ * An OSF request that hit our per-attempt timeout (`client.ts` aborts a hung connection
+ * after 8 s). That is OSF being slow, not a BetterOSF bug, so it must not be a 500 — and
+ * "OSF is slow" is advice a user can act on (wait, retry), where "server error" is not.
+ */
+export function isOsfTimeout(e: unknown): boolean {
+  if (e instanceof OsfError) return false;
+  const name = (e as { name?: unknown } | null)?.name;
+  return name === "AbortError" || name === "TimeoutError";
+}
+
+const TIMEOUT: Mapped = {
+  status: 504,
+  code: "osf_timeout",
+  error: "OSF is slow to respond right now.",
+  action: "Wait a moment, then retry. Nothing was changed.",
+};
+
 export function osfErrorResponse(e: unknown, context: { endpoint?: string } = {}): Response | null {
+  if (isOsfTimeout(e)) {
+    const requestId = newRequestId();
+    logWarn("osf", "OSF timeout", { requestId, endpoint: context.endpoint ?? null });
+    const body: ApiErrorBody = {
+      error: TIMEOUT.error,
+      code: TIMEOUT.code,
+      action: TIMEOUT.action,
+      detail: `OSF did not answer in time${context.endpoint ? ` for ${context.endpoint}` : ""}.`,
+      requestId,
+      at: new Date().toISOString(),
+    };
+    return Response.json(body, { status: TIMEOUT.status, headers: { "Cache-Control": "private, no-store" } });
+  }
   if (!(e instanceof OsfError)) return null;
   const mapped = mapOsfError(e);
   if (!mapped) return null;
