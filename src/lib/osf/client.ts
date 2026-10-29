@@ -27,6 +27,50 @@ const responseCache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<unknown>>();
 let appTokenCooldownUntil = 0;
 
+/**
+ * Circuit breaker (d-24c4e3): during an OSF outage or throttle, back off instead of hammering.
+ *
+ *  - **5xx / network storm.** After `failureThreshold` consecutive calls that ended in an
+ *    upstream failure (each already retried once), calls fail fast for `cooldownMs` without
+ *    touching OSF. When the cooldown ends, calls go through again; one more failure re-opens
+ *    the breaker at once, one success closes it.
+ *  - **Anonymous 429.** OSF's anonymous bucket is shared by this server's IP. Once it says
+ *    429, anonymous calls skip straight to the app-token fallback until its Retry-After
+ *    passes, instead of spending one throttled call per request to re-learn it.
+ *  - **Both throttled.** With the anonymous bucket and the app token both cooling down, a
+ *    call fails fast as `rate_limited` and OSF is not asked at all.
+ *
+ * 4xx answers prove OSF is up and reset the count. The state is per server instance; a
+ * fleet-wide breaker needs a shared store (Vercel KV), which is not provisioned (cost
+ * decision, owner-gated). User-token 429s are that user's own quota and do not trip it.
+ */
+export const OSF_BREAKER = { failureThreshold: 5, cooldownMs: 30_000 } as const;
+let consecutiveUpstreamFailures = 0;
+let breakerOpenUntil = 0;
+let anonCooldownUntil = 0;
+
+function breakerGuard(): void {
+  if (Date.now() < breakerOpenUntil) {
+    throw new OsfError(503, "upstream", "OSF is failing repeatedly; BetterOSF is backing off for a moment");
+  }
+}
+
+function recordOutcome(outcome: "ok" | "upstream"): void {
+  if (outcome === "ok") {
+    consecutiveUpstreamFailures = 0;
+    return;
+  }
+  consecutiveUpstreamFailures += 1;
+  if (consecutiveUpstreamFailures >= OSF_BREAKER.failureThreshold) {
+    breakerOpenUntil = Date.now() + OSF_BREAKER.cooldownMs;
+  }
+}
+
+/** A response we got back: 5xx counts against OSF's health, anything else proves it is up. */
+function recordStatus(status: number): void {
+  recordOutcome(status >= 500 ? "upstream" : "ok");
+}
+
 function retryAfterMs(res: Response): number {
   const raw = res.headers.get("retry-after");
   if (!raw) return 60_000;
@@ -163,29 +207,50 @@ export async function osfGetUrl<T = unknown>(
     throw lastError; // unreachable; satisfies the type checker
   }
 
+  // Every network attempt goes through here so the breaker sees its outcome.
+  async function attempt(
+    headers: HeadersInit,
+    opts: { sharedCache: boolean },
+  ): Promise<{ ok: true; value: T } | { ok: false; res: Response; body: string }> {
+    let result;
+    try {
+      result = await fetchJson(headers, opts);
+    } catch (e) {
+      recordOutcome("upstream"); // network failure or timeout, after its retry
+      throw e;
+    }
+    recordStatus(result.ok ? 200 : result.res.status);
+    return result;
+  }
+
   const work = (async (): Promise<T> => {
+    breakerGuard();
+
     if (userToken) {
-      const result = await fetchJson(bearerHeaders(userToken), { sharedCache: false });
+      const result = await attempt(bearerHeaders(userToken), { sharedCache: false });
       if (!result.ok) throw mapError(result.res.status, result.body);
       return result.value;
     }
 
-    const anonymous = await fetchJson(ANON_HEADERS, { sharedCache: true });
-    if (anonymous.ok) {
-      writeCache(key, anonymous.value, revalidate);
-      return anonymous.value;
-    }
+    if (Date.now() >= anonCooldownUntil) {
+      const anonymous = await attempt(ANON_HEADERS, { sharedCache: true });
+      if (anonymous.ok) {
+        writeCache(key, anonymous.value, revalidate);
+        return anonymous.value;
+      }
 
-    if (anonymous.res.status !== 429) {
-      throw mapError(anonymous.res.status, anonymous.body);
+      if (anonymous.res.status !== 429) {
+        throw mapError(anonymous.res.status, anonymous.body);
+      }
+      anonCooldownUntil = Date.now() + retryAfterMs(anonymous.res);
     }
 
     if (Date.now() < appTokenCooldownUntil) {
-      throw mapError(anonymous.res.status, anonymous.body);
+      throw new OsfError(429, "rate_limited", "OSF rate limit exceeded (anonymous and app token both cooling down)");
     }
 
     const token = await selectToken().catch(() => env().OSF_APP_TOKEN);
-    const appToken = await fetchJson(bearerHeaders(token), { sharedCache: true });
+    const appToken = await attempt(bearerHeaders(token), { sharedCache: true });
     const today = new Date().toISOString().slice(0, 10);
     void incrementDaily(`app:osf:calls:${today}`);
 
@@ -212,6 +277,9 @@ export function _resetOsfClientForTests(): void {
   responseCache.clear();
   inFlight.clear();
   appTokenCooldownUntil = 0;
+  consecutiveUpstreamFailures = 0;
+  breakerOpenUntil = 0;
+  anonCooldownUntil = 0;
 }
 
 /*
