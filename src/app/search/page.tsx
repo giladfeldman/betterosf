@@ -1,4 +1,4 @@
-import { searchNodes, searchFiles, searchRegistrations, searchUsers, searchInProjectScope, searchFilesInProjectScope, type SearchPage as SearchPageResult } from "@/lib/osf/search";
+import { searchNodes, searchFiles, searchRegistrations, searchUsers, searchInProjectScope, searchFilesInProjectScope, type SearchPage as SearchPageResult, type ProjectSearchCoverage } from "@/lib/osf/search";
 import { searchUserNodes } from "@/lib/osf/users";
 import { SearchTypeChips, type SearchType } from "@/components/SearchTypeChips";
 import { ProjectResult, FileResult, RegistrationResult, UserResult } from "@/components/SearchResultRow";
@@ -161,13 +161,15 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     ) : <SearchError reason={result.reason} />;
   } else if (isProjectScope && type === "files") {
     const guid = scope.slice("project:".length);
-    const matched = await searchFilesInProjectScope(guid, q);
+    const { files: matched, coverage } = await searchFilesInProjectScope(guid, q);
     const filtered = ext ? matched.filter((f) => matchesExt(f.name, ext)) : matched;
     body = (
       <>
         <p className="text-sm text-neutral-600 mb-3">
-          {filtered.length}{ext ? ` filtered of ${matched.length}` : ""} file{filtered.length === 1 ? "" : "s"} match in this project (walked up to 5,000 entries).
+          {filtered.length}{ext ? ` filtered of ${matched.length}` : ""} file{filtered.length === 1 ? "" : "s"} match in this project
+          {coverage.complete ? ` (searched all ${coverage.entriesSearched.toLocaleString()} files and folders).` : "."}
         </p>
+        {!coverage.complete && <SearchCoverageNotice coverage={coverage} />}
         <ul>{filtered.map((f) => <FileResult key={f.id} file={f} terms={terms} />)}</ul>
         {filtered.length === 0 && <p className="text-neutral-500">No files match.</p>}
       </>
@@ -315,3 +317,29 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   );
 }
 
+/**
+ * A project search that did not look everywhere says exactly where it did not look
+ * (d-3fadc2). Without this, "No files match" after a truncated or failed walk would be a
+ * false negative presented as a fact.
+ */
+function SearchCoverageNotice({ coverage }: { coverage: ProjectSearchCoverage }) {
+  return (
+    <div role="status" className="mb-3 rounded border border-amber-400 bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+      <strong>Not every file was searched.</strong>
+      <ul className="ml-5 list-disc">
+        {coverage.truncated.length > 0 && (
+          <li>
+            Showing matches from the first {coverage.maxEntries.toLocaleString()} files and folders only, in{" "}
+            {coverage.truncated.join(", ")}. Files beyond that were not searched.
+          </li>
+        )}
+        {coverage.failed.length > 0 && (
+          <li>Could not read the files of {coverage.failed.join(", ")} (OSF refused or failed), so they were not searched.</li>
+        )}
+        {coverage.componentsUnknown && (
+          <li>Could not list this project&apos;s components, so only the top-level project was searched.</li>
+        )}
+      </ul>
+    </div>
+  );
+}

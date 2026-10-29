@@ -145,8 +145,7 @@ export async function middleware(req: NextRequest) {
     const expensive =
       pathname.startsWith("/api/zip/") ||
       pathname.includes("/download") ||
-      pathname.includes("/folder") ||
-      pathname.includes("/all");
+      pathname.includes("/folder");
     const limit = expensive ? EXPENSIVE_API_LIMIT_PER_MIN : API_LIMIT_PER_MIN;
     const key = `ip:${ip}:api:${expensive ? "expensive" : "general"}:1min`;
     const count = await incrementWindow(key, 60);

@@ -284,60 +284,83 @@ export async function searchInProjectScope(rootGuid: string, query: string): Pro
 }
 
 /**
- * Search files within a project's storage by walking every folder under every
- * provider and filtering by name. Bounded by `fetchAllProjectEntries`'s
- * maxEntries cap (5000 by default).
+ * What a project-scope file search actually covered (d-3fadc2 / d-f8599c).
  *
- * Returns a SearchedFile-shaped array so the existing FileResult component can
- * render the results unchanged.
+ * The walk is bounded (`maxEntries` per node), a component's walk can fail, and the
+ * component list itself can fail to load. Each of those used to collapse into "no
+ * matches" — `.catch(() => [])` — so an incomplete search looked complete, or looked
+ * empty. The page now states every gap.
+ */
+export type ProjectSearchCoverage = {
+  /** True only when every node was walked to the end. */
+  complete: boolean;
+  /** Nodes whose walk stopped at `maxEntries`. */
+  truncated: string[];
+  /** Nodes whose files could not be listed at all. */
+  failed: string[];
+  /** The component list could not be read, so only the root project was searched. */
+  componentsUnknown: boolean;
+  maxEntries: number;
+  entriesSearched: number;
+};
+
+/**
+ * Search files within a project's storage by walking every folder under every provider of
+ * the project and of its components, filtering by name. Bounded per node by `maxEntries`.
+ *
+ * Returns SearchedFile-shaped rows so FileResult renders them unchanged, plus `coverage`.
  */
 export async function searchFilesInProjectScope(
   rootGuid: string,
   query: string,
   opts?: { maxEntries?: number; maxConcurrency?: number }
-): Promise<SearchedFile[]> {
+): Promise<{ files: SearchedFile[]; coverage: ProjectSearchCoverage }> {
   const include = buildIncludeFn(query, "name");
-  const [rootEntries, children] = await Promise.all([
-    fetchAllProjectEntries(rootGuid, { maxEntries: opts?.maxEntries ?? 5000 }).catch(() => []),
-    getAllChildren(rootGuid).catch((): NodeView[] => []),
-  ]);
+  const maxEntries = opts?.maxEntries ?? 5000;
+  const coverage: ProjectSearchCoverage = {
+    complete: true,
+    truncated: [],
+    failed: [],
+    componentsUnknown: false,
+    maxEntries,
+    entriesSearched: 0,
+  };
 
-  const results: SearchedFile[] = rootEntries
-    .filter((e) => e.kind === "file" && include(e.name))
-    .map((e) => ({
-      id: `${rootGuid}:${e.provider}:${e.materializedPath}`,
-      name: e.name,
-      kind: "file" as const,
-      size: null,
-      materializedPath: e.materializedPath,
-      modified: "",
-      downloadUrl: e.downloadUrl ?? "",
-      nodeId: rootGuid,
-    }));
-
-  const componentResults = await mapWithConcurrency(
-    children,
-    opts?.maxConcurrency ?? 4,
-    async (c) => {
-      const entries = await fetchAllProjectEntries(c.id, { maxEntries: opts?.maxEntries ?? 5000 }).catch(() => []);
-      return entries
-        .filter((e) => e.kind === "file" && include(e.name))
-        .map((e) => ({
-          id: `${c.id}:${e.provider}:${e.materializedPath}`,
-          name: e.name,
-          kind: "file" as const,
-          size: null,
-          materializedPath: e.materializedPath,
-          modified: "",
-          downloadUrl: e.downloadUrl ?? "",
-          nodeId: c.id,
-        }));
+  const walk = async (guid: string): Promise<SearchedFile[]> => {
+    let result;
+    try {
+      result = await fetchAllProjectEntries(guid, { maxEntries });
+    } catch {
+      coverage.failed.push(guid);
+      return [];
     }
-  );
+    if (result.truncated) coverage.truncated.push(guid);
+    coverage.entriesSearched += result.entries.length;
+    return result.entries
+      .filter((e) => e.kind === "file" && include(e.name))
+      .map((e) => ({
+        id: `${guid}:${e.provider}:${e.materializedPath}`,
+        name: e.name,
+        kind: "file" as const,
+        size: null,
+        materializedPath: e.materializedPath,
+        modified: "",
+        downloadUrl: e.downloadUrl ?? "",
+        nodeId: guid,
+      }));
+  };
 
-  for (const list of componentResults) {
-    results.push(...list);
-  }
+  const [results, children] = await Promise.all([
+    walk(rootGuid),
+    getAllChildren(rootGuid).catch((): NodeView[] | null => null),
+  ]);
+  if (children === null) coverage.componentsUnknown = true;
 
-  return results;
+  // Two components at a time; each walk lists up to three folders at once, so a search
+  // never has more than ~6 OSF requests in flight.
+  const componentResults = await mapWithConcurrency(children ?? [], opts?.maxConcurrency ?? 2, (c) => walk(c.id));
+  for (const list of componentResults) results.push(...list);
+
+  coverage.complete = coverage.truncated.length === 0 && coverage.failed.length === 0 && !coverage.componentsUnknown;
+  return { files: results, coverage };
 }

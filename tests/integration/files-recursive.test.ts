@@ -35,7 +35,8 @@ describe("fetchAllProjectEntries", () => {
       ),
     );
 
-    const all = await fetchAllProjectEntries("p");
+    const { entries: all, truncated } = await fetchAllProjectEntries("p");
+    expect(truncated).toBe(false);
     const names = all.map((e) => `${e.provider}:${e.materializedPath}`);
     expect(names).toContain("osfstorage:/top.csv");
     expect(names).toContain("osfstorage:/sub/");
@@ -66,6 +67,47 @@ describe("fetchAllProjectEntries", () => {
         })
       ),
     );
-    await expect(fetchAllProjectEntries("big", { maxEntries: 5 })).rejects.toThrow(/maxEntries/);
+    // d-3fadc2: hitting the cap used to THROW, and the search caught that as "[]" — a
+    // truncated walk then read as "no files match". It now returns what it walked and says
+    // it stopped early.
+    const out = await fetchAllProjectEntries("big", { maxEntries: 5 });
+    expect(out.entries).toHaveLength(5);
+    expect(out.truncated).toBe(true);
+  });
+
+  it("lists sibling folders in parallel, bounded (d-bd150b: a serial walk took 8.5 s on 3kmr9)", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const folder = (n: number) => ({
+      id: `d${n}`, type: "files",
+      attributes: { name: `d${n}`, kind: "folder", materialized_path: `/d${n}/` },
+      relationships: { files: { links: { related: { href: `https://api.osf.io/v2/nodes/par/files/osfstorage/d${n}/` } } } },
+    });
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/par/files/", () =>
+        HttpResponse.json({
+          data: [{
+            id: "osfstorage", type: "files",
+            attributes: { name: "osfstorage", provider: "osfstorage", kind: "folder", path: "/" },
+            relationships: { files: { links: { related: { href: "https://api.osf.io/v2/nodes/par/files/osfstorage/" } } } },
+          }],
+          links: { next: null },
+        })
+      ),
+      http.get("https://api.osf.io/v2/nodes/par/files/osfstorage/", () =>
+        HttpResponse.json({ data: Array.from({ length: 8 }, (_, i) => folder(i)), links: { next: null } })
+      ),
+      http.get("https://api.osf.io/v2/nodes/par/files/osfstorage/:d/", async () => {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await new Promise((r) => setTimeout(r, 30));
+        inFlight--;
+        return HttpResponse.json({ data: [], links: { next: null } });
+      }),
+    );
+    const out = await fetchAllProjectEntries("par", { concurrency: 3 });
+    expect(out.entries.filter((e) => e.kind === "folder")).toHaveLength(8);
+    expect(peak).toBeGreaterThan(1); // parallel, not serial
+    expect(peak).toBeLessThanOrEqual(3); // and bounded, so OSF is not flooded
   });
 });

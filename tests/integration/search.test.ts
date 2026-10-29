@@ -217,7 +217,9 @@ describe("searchFilesInProjectScope", () => {
       )
     );
 
-    const out = await searchFilesInProjectScope("root1", "mp4");
+    const result = await searchFilesInProjectScope("root1", "mp4");
+    expect(result.coverage.complete).toBe(true);
+    const out = result.files;
     expect(out).toHaveLength(2);
     expect(out).toContainEqual({
       id: "root1:osfstorage:/root_video.mp4",
@@ -239,5 +241,61 @@ describe("searchFilesInProjectScope", () => {
       downloadUrl: "https://files.osf.io/v1/comp_lecture",
       nodeId: "comp1"
     });
+  });
+});
+
+// d-3fadc2 / d-f8599c: a search that did not look everywhere must never read as complete.
+describe("searchFilesInProjectScope coverage", () => {
+  const providerRoot = (guid: string) =>
+    http.get(`https://api.osf.io/v2/nodes/${guid}/files/`, () =>
+      HttpResponse.json({
+        data: [{ id: "p", type: "files", attributes: { name: "osfstorage", kind: "folder", materialized_path: "/", provider: "osfstorage" }, relationships: { files: { links: { related: { href: `https://api.osf.io/v2/nodes/${guid}/files/osfstorage/` } } } } }],
+        links: { next: null },
+      }),
+    );
+  const files = (guid: string, n: number) =>
+    http.get(`https://api.osf.io/v2/nodes/${guid}/files/osfstorage/`, () =>
+      HttpResponse.json({
+        data: Array.from({ length: n }, (_, i) => ({ id: `${guid}${i}`, type: "files", attributes: { name: `x${i}.csv`, kind: "file", materialized_path: `/x${i}.csv` }, links: { download: "https://files.osf.io/v1/x" } })),
+        links: { next: null },
+      }),
+    );
+
+  it("a walk that hit the cap is reported as truncated, naming the node", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/tr1/children/", () => HttpResponse.json({ data: [], links: { next: null } })),
+      providerRoot("tr1"),
+      files("tr1", 10),
+    );
+    const r = await searchFilesInProjectScope("tr1", "csv", { maxEntries: 4 });
+    expect(r.coverage.complete).toBe(false);
+    expect(r.coverage.truncated).toEqual(["tr1"]);
+    expect(r.coverage.maxEntries).toBe(4);
+    expect(r.files.length).toBeLessThanOrEqual(4);
+  });
+
+  it("a component whose walk FAILED is reported, not silently counted as 'no matches'", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/tr2/children/", () =>
+        HttpResponse.json({ data: [{ id: "bad1", type: "nodes", attributes: { title: "Broken", category: "project", public: true } }], links: { next: null } }),
+      ),
+      providerRoot("tr2"),
+      files("tr2", 1),
+      http.get("https://api.osf.io/v2/nodes/bad1/files/", () => new HttpResponse(null, { status: 403 })),
+    );
+    const r = await searchFilesInProjectScope("tr2", "csv");
+    expect(r.coverage.complete).toBe(false);
+    expect(r.coverage.failed).toEqual(["bad1"]);
+  });
+
+  it("a component list that could not be read means only the root was searched — said so", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/tr3/children/", () => new HttpResponse(null, { status: 404 })),
+      providerRoot("tr3"),
+      files("tr3", 1),
+    );
+    const r = await searchFilesInProjectScope("tr3", "csv");
+    expect(r.coverage.complete).toBe(false);
+    expect(r.coverage.componentsUnknown).toBe(true);
   });
 });
