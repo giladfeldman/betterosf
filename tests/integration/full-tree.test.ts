@@ -82,22 +82,36 @@ describe("collectFullTree", () => {
       http.get("https://api.osf.io/v2/nodes/timeout-root/children/", () =>
         HttpResponse.json({ data: [childNodeRow("slow", "Slow Child")], links: { next: null } })
       ),
-      // Slow child: handler delays 1s longer than our 100ms timeout below
+      // Slow child: answers only when the test releases it, i.e. never before the walk
+      // returns — unless the walk waited for it, which is the bug this test exists to catch.
       http.get("https://api.osf.io/v2/nodes/slow/files/", async () => {
-        await new Promise((r) => setTimeout(r, 1000));
+        await slowGate;
+        slowAnswered = true;
         return HttpResponse.json({ data: [], links: { next: null } });
       }),
     );
-    const t0 = Date.now();
-    const tree = await collectFullTree("timeout-root", { componentTimeoutMs: 100, rootTimeoutMs: 100 });
-    const elapsed = Date.now() - t0;
+    let release!: () => void;
+    let slowAnswered = false;
+    const slowGate = new Promise<void>((r) => (release = r));
+    try {
+      const t0 = Date.now();
+      const tree = await collectFullTree("timeout-root", { componentTimeoutMs: 100, rootTimeoutMs: 100 });
+      const elapsed = Date.now() - t0;
 
-    expect(tree.components).toHaveLength(1);
-    const slow = tree.components[0]!;
-    expect(slow.skeleton).toEqual([]); // timed out → empty
-    expect(slow.skipped).toBe(false); // skipped=false; "timeout" is a different concept from cap-skip
-    // total elapsed should be far less than the 1s the slow child wants
-    expect(elapsed).toBeLessThan(500);
+      expect(tree.components).toHaveLength(1);
+      const slow = tree.components[0]!;
+      expect(slow.skeleton).toEqual([]); // timed out → empty
+      expect(slow.skipped).toBe(false); // skipped=false; "timeout" is a different concept from cap-skip
+      // d-90ad9c: this used to be `elapsed < 500` against a 1 s handler, and flaked under
+      // full-suite load (passing alone). The race is proven by ORDER, not by a wall clock:
+      // the walk returned while the slow request was still unanswered. A walk that waited
+      // for it would never return here at all (the gate is only released below).
+      expect(slowAnswered).toBe(false);
+      // A generous ceiling still catches a timeout that fires far too late.
+      expect(elapsed).toBeLessThan(5_000);
+    } finally {
+      release();
+    }
   });
 
   it("redundant — kept for back-compat assertion that 3 components below the cap all recurse", async () => {
