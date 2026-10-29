@@ -12,6 +12,8 @@ export const maxDuration = 30;
 
 /** Per-IP submission cap. Generous for a human, hostile to a script. */
 const MAX_PER_HOUR = 10;
+/** Ceiling for one address across all signed-in reporters behind it. */
+const MAX_PER_IP_SIGNED_IN = 100;
 
 function clientIp(req: Request): string {
   const h = req.headers;
@@ -35,17 +37,25 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: parsed.error }, { status: 400 });
   }
 
+  // Budgets (d-035eb4). Anonymous: 10/hour per IP. Signed in: 10/hour per OSF user, so a
+  // lab behind one university NAT does not share a single budget. The user id comes from a
+  // server-verified session (`auth()`), never from a cookie merely being present — that
+  // forgeable shortcut is why the middleware keeps ONE flat per-IP limit. A per-IP ceiling
+  // still bounds any single address, however many accounts it signs in with.
   const ip = clientIp(req);
-  const count = await incrementWindow(`ip:${ip}:feedback:1h`, 3600);
-  if (count > MAX_PER_HOUR) {
-    return Response.json(
+  const session = await auth().catch(() => null);
+  const osfUserId = session?.osfUserId ?? null;
+  const tooMany = () =>
+    Response.json(
       { error: "You've sent several reports recently. Please wait a while before sending more." },
       { status: 429, headers: { "Retry-After": "3600" } },
     );
+  if (osfUserId) {
+    if ((await incrementWindow(`ip:${ip}:feedback-ceiling:1h`, 3600)) > MAX_PER_IP_SIGNED_IN) return tooMany();
+    if ((await incrementWindow(`osf:${osfUserId}:feedback:1h`, 3600)) > MAX_PER_HOUR) return tooMany();
+  } else if ((await incrementWindow(`ip:${ip}:feedback:1h`, 3600)) > MAX_PER_HOUR) {
+    return tooMany();
   }
-
-  const session = await auth().catch(() => null);
-  const osfUserId = session?.osfUserId ?? null;
   // Resolve the internal user row so the report survives as a real FK when the
   // reporter is signed in. A lookup failure must not lose the report.
   let userId: string | null = null;
