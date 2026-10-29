@@ -100,6 +100,9 @@ export async function GET(
     userToken = session?.osfAuthError ? null : session?.accessToken ?? null;
   } catch { /* anonymous */ }
 
+  // Set when the user's own token was refused: the retry below is then strictly
+  // anonymous, so bytes fetched with that token can never land in the public cache.
+  let anonymousOnly = false;
   if (userToken) {
     let hop = target;
     let res: Response | null = null;
@@ -108,6 +111,7 @@ export async function GET(
       res = await fetch(hop.toString(), { headers: buildFetchHeaders(onOsf ? userToken : ""), redirect: "manual", cache: "no-store" });
       const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
       if (!location) break;
+      void res.body?.cancel().catch(() => {});
       let next: URL;
       try { next = new URL(location, hop); } catch { return new Response("OSF sent an unreadable redirect", { status: 502 }); }
       // Only OSF itself may send us off the allowlist, and never over plain http.
@@ -117,14 +121,20 @@ export async function GET(
       hop = next;
       res = null;
     }
-    if (!res || !res.ok || !res.body) {
-      return new Response(`OSF upstream returned ${res?.status ?? 508}`, { status: res?.status && res.status >= 400 ? res.status : 502 });
+    if (res && res.ok && res.body) return relay(res, { filename, forceDownload, privateData: true });
+    // A stale or rate-limited token must not break a PUBLIC file: retry anonymously,
+    // exactly as the anonymous path below already does for the app token.
+    if (!res || !(res.status === 401 || res.status === 403 || res.status === 429)) {
+      return new Response(`OSF upstream returned ${res?.status ?? "no response"}`, { status: res?.status && res.status >= 400 ? res.status : 502 });
     }
-    return relay(res, { filename, forceDownload, privateData: true });
+    void res.body?.cancel().catch(() => {});
+    anonymousOnly = true;
   }
 
   let token = "";
-  try { token = await selectToken(); } catch { /* anonymous */ }
+  if (!anonymousOnly) {
+    try { token = await selectToken(); } catch { /* anonymous */ }
+  }
   let upstream = await fetch(target.toString(), {
     headers: buildFetchHeaders(token),
     redirect: "follow",

@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.14.0 — 2026-10-29
+
+### Added
+- **Move a file or folder** to another folder of the same project's OSF Storage. Gated exactly
+  like Rename and Delete (fails closed without verified write access; never offered on
+  registrations). The destination is derived server-side and pinned to this project's OSF
+  Storage; a name clash moves nothing (`conflict=warn`). The picker goes one folder per click.
+- **Local signed-in probe**, `npm run test:signed-in`. Mints a session for a throwaway OSF
+  account, creates and deletes its own private project, and walks deep pages, the 401 path,
+  licence check and Move end to end. There is no test route in the app. Not part of `npm test`.
+- **OSF circuit breaker** (per server instance): 5 consecutive upstream failures fail fast for
+  30 s; an anonymous 429 is remembered until its Retry-After.
+- **Admin alerts record where they happened.** Every log event stores the deployment
+  environment (`_env`, from the platform marker, never `NODE_ENV`). Only production events are
+  emailed. Non-production emails go out only with `ALERT_EMAILS_NON_PRODUCTION=1`, and then the
+  subject starts `[LOCAL TEST - NOT PRODUCTION]`.
+- `.vercel/project.json` is now tracked (project and org ids only) so the CLI cannot create a
+  duplicate Vercel project.
+- Test infrastructure: PGlite (real Postgres in-process) for SQL tests, used for the publish
+  claim and the admin digest.
+
+### Fixed
+- **MLA citations were silently empty since launch.** The citation route asked OSF for the
+  style `mla`, which is a 404 on OSF (`mla.csl is not a known style`). It now requests OSF's
+  real id, `modern-language-association-8th-edition`. Caught by the new signed-in probe.
+- **The citation panel reports OSF failures honestly**: 401 says "sign in again", other failures
+  carry the real status code, errors are never cached, and a signed-in success is `private`.
+- **A signed-in user's private file reached the viewer as OSF's sign-in page.** The download
+  proxy now keeps the user's token across OSF's redirects (sent to OSF hosts only), those
+  bytes are never publicly cached (`private, no-store`), and a stale token falls back to an
+  anonymous fetch so public files still open.
+- **Zenodo publish retry.** A definite Zenodo refusal (4xx) or a failure to record consent now
+  releases the publish claim so the user can retry. An unknown outcome keeps the claim and tells
+  the user to check Zenodo before retrying. The DOI is recorded on success. **Note:** records
+  published before v1.14.0 have no DOI stored, so retrying one now reads "could not confirm
+  whether this record was published" instead of "already published".
+- **Wiki page file names** in export and transfer go through the shared `safeNameSegment`
+  sanitiser, with collision handling.
+- **OSF timeouts answer 504 "OSF is slow to respond right now."** (was 500) on the zip,
+  manifest and wiki routes.
+- **Search no longer says "no matches" for a walk it did not finish.** When the file walk was
+  capped or a folder failed, it says "Not every file was searched".
+- **The daily admin digest filters by environment in SQL before its row cap**, so a noisy local
+  session can no longer push production errors out of the window.
+- **Feedback rate limit**: signed-in reporters get their own 10/hour budget; anonymous keep the
+  per-IP cap; a 100/hour per-IP ceiling applies to both.
+
+### Changed
+- The project file walk lists folders in parallel (at most 3 at a time).
+
+### Removed
+- The orphaned `/api/files/[guid]/all` route (nothing called it).
+
 ## 1.13.0 — 2026-10-29
 
 ### Added

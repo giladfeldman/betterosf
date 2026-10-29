@@ -69,4 +69,20 @@ describe("download proxy, signed-in private file", () => {
     expect(await res.text()).toBe("private bytes");
     expect(res.headers.get("cache-control")).toBe("private, no-store");
   });
+
+  it("a stale or rate-limited user token still gets a PUBLIC file, fetched anonymously (no user token on the retry)", async () => {
+    authMock.mockResolvedValue({ accessToken: "stale-tok", osfUserId: "u1" });
+    const seen: (string | null)[] = [];
+    server.use(
+      http.get(FILE, ({ request }) => {
+        const a = request.headers.get("authorization");
+        seen.push(a);
+        return a ? new HttpResponse("token rejected", { status: 401 }) : new HttpResponse("public bytes");
+      }),
+    );
+    const res = await call(FILE);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("public bytes");
+    expect(seen).toEqual(["Bearer stale-tok", null]);
+  });
 });

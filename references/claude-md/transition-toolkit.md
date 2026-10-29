@@ -134,6 +134,12 @@ Full write-up: `docs/licence-check-and-destinations.md`. Code: `src/lib/licence/
 - **`LICENCE-NOT-CHECKED.txt` in the ZIP means the lookup FAILED**, never "no licence". `LICENSE.txt` is written only when OSF asserts a real licence.
 - **The destination guide never points pseudonymised data at Zenodo.**
 
+### v1.14.0 - publish claim, alert environment
+
+- **Publish claim.** `claimPublish` marks a job as publishing before the Zenodo call. A definite refusal (4xx) or a consent-recording failure calls `releasePublishClaim`, so the user can retry. An unknown outcome (network error, 5xx, timeout) KEEPS the claim: sending again could mint a second permanent DOI. `recordPublishedDoi` stores the DOI on success; a stored claim without a DOI reads "could not confirm whether this record was published". Records published before v1.14.0 have no DOI stored and therefore take that path on retry. The claim SQL is tested on real Postgres (PGlite, `tests/db/pglite.ts`).
+- **Wiki file names** go through `safeNameSegment` with collision suffixes, like every other name crossing the boundary.
+- **Alert environment.** `src/lib/alert-env.ts` is the single definition of where an event happened; the digest filters on it in SQL before its row cap.
+
 ### 🚨 Names crossing a boundary are sanitised in ONE place, both directions
 
 `src/lib/paths/entry-path.ts` is the single definition. Two functions, and the difference

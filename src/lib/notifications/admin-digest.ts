@@ -1,4 +1,4 @@
-import { and, desc, gte, inArray } from "drizzle-orm";
+import { and, count, desc, gte, inArray, sql } from "drizzle-orm";
 import { requireDb } from "@/lib/db";
 import { systemLogs } from "@/lib/db/schema";
 
@@ -55,16 +55,27 @@ export async function collectAdminDigest(
   const db = requireDb();
   const since = new Date(Date.now() - windowHours * 3_600_000);
 
+  // The environment filter is in SQL, BEFORE the row cap: filtering after the cap let a
+  // noisy local session push real production errors out of the window. A row with no
+  // `_env` predates the label and counts as production (see isProductionRow).
+  const isProduction = sql`coalesce(${systemLogs.context}->>'_env', 'production') = 'production'`;
+  const inScope = scope === "production" ? isProduction : sql`not (${isProduction})`;
+  const base = and(gte(systemLogs.createdAt, since), inArray(systemLogs.level, ["error", "warn"]));
+
   const fetched = await db
     .select()
     .from(systemLogs)
-    .where(and(gte(systemLogs.createdAt, since), inArray(systemLogs.level, ["error", "warn"])))
+    .where(and(base, inScope))
     .orderBy(desc(systemLogs.createdAt))
     .limit(MAX_ROWS);
+  // Belt and braces: the same rule in code, so a driver quirk cannot widen the scope.
+  const rows = fetched.filter((r) => isProductionRow(r.context) === (scope === "production"));
 
-  const all = fetched;
-  const rows = all.filter((r) => isProductionRow(r.context) === (scope === "production"));
-  const nonProductionExcluded = scope === "production" ? all.length - rows.length : 0;
+  let nonProductionExcluded = 0;
+  if (scope === "production") {
+    const [excluded] = await db.select({ n: count() }).from(systemLogs).where(and(base, sql`not (${isProduction})`));
+    nonProductionExcluded = Number(excluded?.n ?? 0);
+  }
 
   const errorCount = rows.filter((r) => r.level === "error").length;
   const warnCount = rows.filter((r) => r.level === "warn").length;

@@ -24,6 +24,7 @@ real services. Each is opt-in by environment variable:
 
     npm run test:destructive   # creates and deletes a throwaway OSF project
     npm run test:live-zenodo   # round-trips a real deposit on sandbox.zenodo.org
+    npm run test:signed-in     # local signed-in probe (throwaway OSF account, server on 4747)
 
 `test:live-zenodo` needs `BETTEROSF_LIVE_ZENODO=i-understand` and a
 `ZENODO_SANDBOX_TOKEN` from a throwaway sandbox account. It refuses to run against
@@ -151,6 +152,20 @@ After this release, **provision Vercel KV** at https://vercel.com/your-team/bett
 - Bounce/complaint webhook + suppression (`email_events`); daily cron at 08:00 UTC.
 - Dedicated BetterOSF sending domain still deferred (see `todo.md`).
 
+## v1.14.0 - what is new
+
+- **Move a file or folder** to another folder of the same project's OSF Storage, with the
+  same write-access gate as Rename and Delete. Never offered on registrations; a name clash
+  moves nothing.
+- **MLA citations work.** They were silently empty before: OSF has no style called `mla`.
+- Honest citation errors, a 504 "OSF is slow to respond right now." instead of a 500,
+  "Not every file was searched" instead of a false "no matches", and a circuit breaker that
+  fails fast when OSF is down.
+- Private files open in the viewer for the signed-in owner (the download proxy keeps the
+  token across OSF's redirects, to OSF hosts only).
+- Admin alert emails are production-only; set `ALERT_EMAILS_NON_PRODUCTION=1` to also receive
+  local/preview ones, labelled `[LOCAL TEST - NOT PRODUCTION]`.
+
 ## v1.6.0 (File/folder deletion + local backups) — what's new
 
 - **Delete files and folders from OSF Storage**, with a deliberately slow confirmation
@@ -244,4 +259,4 @@ as *unverifiable*, never as verified, and are listed individually.
 - Full-text search inside file contents
 - Cross-device favorites sync (pins/prefs sync for signed-in users; local backups stay local by design)
 - Pool of multiple OSF app tokens for higher anonymous quota
-- File move / copy (rename shipped in v1.6.1; upload and delete already supported)
+- File copy (rename shipped in v1.6.1, move in v1.14.0; upload and delete already supported)
