@@ -159,9 +159,8 @@ async function main() {
       let step = "open the file tree";
       try {
         await visit(`/${guid}/files`);
-        // Collapse first, so the only visible copy of the file is the one at the root.
-        step = "collapse the tree";
-        await page.getByRole("button", { name: "Collapse all" }).first().click({ timeout: 5_000 }).catch(() => {});
+        // At the default depth, the moved-here folder stays closed: the only visible copy is at the root.
+        step = "reveal files";
         await page.getByRole("button", { name: /Show files/ }).first().click({ timeout: 3_000 }).catch(() => {});
         step = "click Move on the file";
         await page.getByRole("button", { name: `Move ${FILE_NAME}` }).first().click({ timeout: 20_000 });

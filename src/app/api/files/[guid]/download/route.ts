@@ -90,7 +90,10 @@ export async function GET(
   // drops Authorization on the cross-host redirect osf.io/download -> files.osf.io, so
   // OSF then answered with its sign-in HTML page and the viewer showed that page as the
   // file (found by the local signed-in probe, 2026-10-29). Redirects are therefore
-  // followed by hand, and only to OSF hosts — the token never leaves the allowlist.
+  // followed by hand: the token is sent to OSF hosts ONLY. The last hop, measured the
+  // same day, is files.osf.io -> a signed object-storage URL on a non-OSF host; that link
+  // carries its own signature, rejects a request with Authorization (400), and is fetched
+  // without the token.
   let userToken: string | null = null;
   try {
     const session = await auth();
@@ -101,13 +104,15 @@ export async function GET(
     let hop = target;
     let res: Response | null = null;
     for (let i = 0; i < 5; i++) {
-      res = await fetch(hop.toString(), { headers: buildFetchHeaders(userToken), redirect: "manual", cache: "no-store" });
+      const onOsf = ALLOWED_HOSTS.has(hop.host);
+      res = await fetch(hop.toString(), { headers: buildFetchHeaders(onOsf ? userToken : ""), redirect: "manual", cache: "no-store" });
       const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
       if (!location) break;
       let next: URL;
       try { next = new URL(location, hop); } catch { return new Response("OSF sent an unreadable redirect", { status: 502 }); }
-      if (next.protocol !== "https:" || !ALLOWED_HOSTS.has(next.host)) {
-        return new Response("OSF redirected outside the OSF allowlist", { status: 502 });
+      // Only OSF itself may send us off the allowlist, and never over plain http.
+      if (next.protocol !== "https:" || !onOsf) {
+        return new Response("Unexpected redirect while fetching from OSF", { status: 502 });
       }
       hop = next;
       res = null;

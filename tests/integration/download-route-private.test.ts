@@ -46,18 +46,27 @@ describe("download proxy, signed-in private file", () => {
     expect(cc).not.toMatch(/public/);
   });
 
-  it("never follows a redirect off the OSF allowlist with the user's token", async () => {
+  it("follows OSF's signed storage redirect WITHOUT the user's token (it never leaves OSF hosts)", async () => {
+    // Measured 2026-10-29: files.osf.io answers 302 to a signed object-storage URL on a
+    // non-OSF host, and that host rejects a request carrying Authorization (400).
     authMock.mockResolvedValue({ accessToken: "user-tok", osfUserId: "u1" });
     let leaked = false;
     server.use(
-      http.get("https://osf.io/download/6ae3557/", () => HttpResponse.redirect("https://evil.example.com/steal", 302)),
-      http.get("https://evil.example.com/steal", ({ request }) => {
+      http.get("https://osf.io/download/6ae3557/", () => HttpResponse.redirect(`${FILE}?action=download`, 302)),
+      http.get(FILE, ({ request }) =>
+        request.headers.get("authorization") === "Bearer user-tok"
+          ? HttpResponse.redirect("https://bucket.objectstorage.example.com/signed?sig=abc", 302)
+          : new HttpResponse("no", { status: 401 }),
+      ),
+      http.get("https://bucket.objectstorage.example.com/signed", ({ request }) => {
         leaked = request.headers.get("authorization") !== null;
-        return new HttpResponse("x");
+        return leaked ? new HttpResponse("bad request", { status: 400 }) : new HttpResponse("private bytes");
       }),
     );
     const res = await call("https://osf.io/download/6ae3557/");
     expect(leaked).toBe(false);
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("private bytes");
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
   });
 });
