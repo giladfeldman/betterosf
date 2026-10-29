@@ -18,12 +18,23 @@ export async function getCitation(guid: string): Promise<CitationAttributes> {
   return raw.data.attributes;
 }
 
+/**
+ * Our format names → OSF's CSL style ids. OSF has no style called `mla`
+ * (`404 "mla.csl is not a known style."`); each id here was checked against live
+ * OSF on 2026-10-29. Re-check against `/v2/citations/styles/` before adding one.
+ */
+const OSF_STYLE_ID = {
+  apa: "apa",
+  mla: "modern-language-association-8th-edition",
+  "chicago-author-date": "chicago-author-date",
+} as const;
+
 export async function getStyledCitation(
   guid: string,
-  style: "apa" | "mla" | "chicago-author-date",
+  style: keyof typeof OSF_STYLE_ID,
 ): Promise<string> {
   const raw = await osfGet<{ data: { attributes: { citation?: string } } }>(
-    `/nodes/${guid}/citation/${style}/`,
+    `/nodes/${guid}/citation/${OSF_STYLE_ID[style]}/`,
     { tags: [`citation:${guid}`], revalidate: 3600 },
   );
   return raw.data.attributes.citation ?? "";

@@ -128,10 +128,20 @@ async function main() {
 
     let r = await visit(`/${guid}`);
     check("signed in: project overview shows the PRIVATE project", r.status === 200 && r.text.includes(titleShown), `HTTP ${r.status}`);
+    const snip = (t) => JSON.stringify(t.replace(/\s+/g, " ").slice(0, 400));
     r = await visit(`/${guid}/files`);
-    check("signed in: file tree lists the probe file", r.status === 200 && r.text.includes(FILE_NAME), `HTTP ${r.status}`);
+    // The tree opens folders-only; "Show files" reveals the leaves.
+    await page.getByRole("button", { name: /Show files/ }).first().click().catch(() => {});
+    const leaf = await page.locator('[role="tree"]').getByText(FILE_NAME).first().waitFor({ timeout: 20_000 }).then(() => true, () => false);
+    r.text = await page.locator("body").innerText();
+    let ok = r.status === 200 && leaf;
+    check("signed in: file tree lists the probe file", ok, `HTTP ${r.status}${ok ? "" : ` ${snip(r.text)}`}`);
     r = await visit(`/${guid}/files/view/osfstorage/${FILE_NAME}`);
-    check("signed in: deep file view renders the file", r.status === 200 && r.text.includes("signed-in probe file"), `HTTP ${r.status}`);
+    // The viewer fetches the bytes after the page paints.
+    const shown = await page.getByText(FILE_TEXT).first().waitFor({ timeout: 30_000 }).then(() => true, () => false);
+    r.text = await page.locator("body").innerText();
+    ok = r.status === 200 && shown;
+    check("signed in: deep file view renders the file", ok, `HTTP ${r.status}${ok ? "" : ` ${snip(r.text)}`}`);
     const cite = await page.request.get(`${BASE}/api/osf/citation/${guid}`);
     check(
       "signed in: citation response is private, never public",
