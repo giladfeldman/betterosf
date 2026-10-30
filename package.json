@@ -1,6 +1,6 @@
 {
   "name": "betterosf",
-  "version": "1.14.1",
+  "version": "1.14.2",
   "description": "A faster, friendlier interface for the Open Science Framework (OSF): browse, search, export and migrate your projects.",
   "scripts": {
     "dev": "next dev -p 4747",

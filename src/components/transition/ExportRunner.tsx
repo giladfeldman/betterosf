@@ -18,6 +18,7 @@ import { createBrowserLedger } from "@/lib/transition/ledger";
 import { ZenodoTransferPanel } from "./ZenodoTransferPanel";
 import { formatBytes } from "@/lib/transition/format";
 import { readApiError, networkError, type ApiError } from "@/lib/api-error";
+import { dropFromInventoryCache } from "@/lib/transition/inventory-cache";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { Working } from "@/components/Progress";
 import { fetchExtras } from "./plan-extras";
@@ -96,7 +97,13 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
       try {
         const res = await fetch(url, { cache: "no-store" });
         if (!res.ok) {
-          setError(await readApiError(res, `/api/transition/plan/${guid}`));
+          const err = await readApiError(res, `/api/transition/plan/${guid}`);
+          // Deleted on OSF: take it out of the saved project list so it stops being
+          // offered, and say that we did.
+          if (err.code === "osf_deleted" && dropFromInventoryCache(guid) > 0) {
+            err.action = "It has been removed from your saved project list in this browser.";
+          }
+          setError(err);
           setPhase("error");
           return;
         }

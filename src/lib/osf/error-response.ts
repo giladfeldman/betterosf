@@ -62,6 +62,14 @@ type Mapped = {
 function mapOsfError(e: OsfError): Mapped | null {
   switch (e.code) {
     case "not_found":
+      if (e.status === 410) {
+        return {
+          status: 410,
+          code: "osf_deleted",
+          error: "This was deleted on OSF, so there is nothing left to read.",
+          action: "Refresh your project list to drop it. Retrying cannot bring it back.",
+        };
+      }
       return {
         status: 404,
         code: "not_found",

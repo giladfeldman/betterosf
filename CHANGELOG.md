@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.14.1 — 2026-10-30
+## 1.14.2 — 2026-10-30
 
 The repository is now public, under the AGPL-3.0. Documentation and hygiene release; the one
 behaviour change is the admin test-email route.
@@ -20,6 +20,23 @@ behaviour change is the admin test-email route.
   hard-coded list. Covered by `tests/integration/email-test-route.test.ts`.
 - `package.json` carries a real description, licence, repository and keywords.
 - Maintainer-local files (assistant configuration, working notes, plans) are no longer tracked.
+
+## 1.14.1 — 2026-10-30
+
+### Fixed
+- **A project deleted on OSF now says so.** OSF answers HTTP 410 for a deleted project; BetterOSF
+  turned that into a 502 "try again", which could never succeed. The API now returns 410 with
+  code `osf_deleted` ("This was deleted on OSF, so there is nothing left to read."), and the
+  OSF client maps 410 to the same `not_found` error code as 404, so every page's not-found
+  path handles it.
+- **The export page drops a deleted project from the saved project list.** The list kept in
+  this browser is a snapshot that is never refreshed silently; when OSF confirms a project is
+  gone, that one row is removed (and the page says so), so it stops being offered. The list's
+  stale-snapshot note now also mentions deleted projects.
+
+### Security
+- Bumped `next` from `^15.5.18` to `^15.5.28` (GHSA-2464-fhr4-w9xw, GHSA-p3m5-59mp-jv5r,
+  GHSA-673q-mjm6-r5xr).
 
 ## 1.14.0 — 2026-10-29
 

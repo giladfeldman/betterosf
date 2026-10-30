@@ -485,8 +485,8 @@ export function InventoryTable() {
         >
           Project list fetched from OSF <strong>{describeAge(cachedAt, new Date())}</strong> (
           {cachedAt.slice(0, 16).replace("T", " ")} UTC) and saved in this browser, so it loads
-          instantly. Projects created or renamed on OSF since then will not appear until you
-          refresh.
+          instantly. Projects created, renamed or deleted on OSF since then will not show until
+          you refresh.
           {isStale(cachedAt, new Date())
             ? " That is more than a week old — refresh before deciding anything from it."
             : ""}
