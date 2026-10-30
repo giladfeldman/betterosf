@@ -5,10 +5,13 @@ import { EmailLayout } from "@/lib/email/templates/layout";
 import * as React from "react";
 import { alertEmailPolicy, deploymentEnvironment } from "@/lib/alert-env";
 
-const ALLOW = new Set([
-  "admin@example.org",
-  "admin@example.org",
-]);
+/** The operator's own configured addresses; nobody else can be targeted from this route. */
+const allowedRecipients = () =>
+  new Set(
+    [process.env.ADMIN_NOTIFY_EMAIL, process.env.NEXT_PUBLIC_ADMIN_EMAIL]
+      .map((e) => (e ?? "").trim().toLowerCase())
+      .filter(Boolean),
+  );
 
 /** Admin-only test send — allowlisted recipients only. */
 export async function POST(req: NextRequest) {
@@ -27,7 +30,7 @@ export async function POST(req: NextRequest) {
       .toLowerCase();
   }
 
-  if (!to || (!ALLOW.has(to) && !to.endsWith("@simulator.amazonses.com"))) {
+  if (!to || (!allowedRecipients().has(to) && !to.endsWith("@simulator.amazonses.com"))) {
     return NextResponse.json({ error: "recipient_not_allowlisted" }, { status: 400 });
   }
 

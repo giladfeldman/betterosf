@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.14.1 — 2026-10-30
+
+The repository is now public, under the AGPL-3.0. Documentation and hygiene release; the one
+behaviour change is the admin test-email route.
+
+### Added
+- `LICENSE` (AGPL-3.0-only), `SECURITY.md` (private vulnerability reporting), and a rewritten,
+  shorter `README.md`; the About page states the licence.
+- `docs/engineering/`: the deletion, local-first testing, transition-toolkit and stack rules the
+  code relies on, now part of the public documentation.
+- `scripts/public-hygiene.mjs` (also run by `npm test`): fails if a maintainer-local file is
+  tracked, or if the published tree contains an unknown e-mail address, a local path, a cloud
+  account number, a deployment id or a secret-shaped string.
+
+### Changed
+- The admin test-email route (`/api/email/test`) allows only the addresses configured in
+  `ADMIN_NOTIFY_EMAIL` and `NEXT_PUBLIC_ADMIN_EMAIL` (plus the SES simulator) instead of a
+  hard-coded list. Covered by `tests/integration/email-test-route.test.ts`.
+- `package.json` carries a real description, licence, repository and keywords.
+- Maintainer-local files (assistant configuration, working notes, plans) are no longer tracked.
+
 ## 1.14.0 — 2026-10-29
 
 ### Added
@@ -101,7 +122,7 @@
 
 ## 1.12.0 — 2026-08-14
 
-The five agreed-but-unbuilt items from the 2026-08-14 handoff, plus a bug the probing for
+The five agreed-but-unbuilt items carried over from 1.11.1, plus a bug the probing for
 them uncovered. Everything below rests on measurements taken against live Zenodo and live
 OSF before any of it was written — the last five releases in this project were all
 "assumed instead of measured", and it stopped being a coincidence.
@@ -653,7 +674,7 @@ Zip". This release is BetterOSF's answer to that.
   `--max-warnings 0`, in files unrelated to this work). Fixed rather than suppressed.
 
 ### Corrected
-- **`docs/osf-exit-strategy.md` §1 and the matching `todo.md` entry were backwards.**
+- **The earlier internal exit-strategy notes were backwards.**
   They recommended building against figshare first because Zenodo's CORS was believed
   broken. Live probes on 2026-08-13 found the opposite: **Zenodo works browser-direct**
   (`ACAO: *`, `authorization` allowed, `PUT` on both `/api/records` and
@@ -680,9 +701,9 @@ Zip". This release is BetterOSF's answer to that.
 
 ## 1.7.1 — 2026-08-04
 
-Backlog reconciliation: everything in `todo.md` that could be done in-session was
-done, and what remains is now split into "blocked on you" vs "deferred by choice"
-at the top of that file rather than buried in 300 lines of history.
+Backlog reconciliation: everything on the internal backlog that could be done in-session
+was done, and what remains is split into "blocked on the maintainer" vs "deferred by
+choice" rather than buried in 300 lines of history.
 
 ### Fixed
 - **`/api/files/[guid]/folder` mapped an expired OSF token to a 500.** This route is
@@ -706,9 +727,6 @@ at the top of that file rather than buried in 300 lines of history.
   `CREATE TABLE email_events` for a table that already exists in production, which
   would have failed if applied; it now reports "No schema changes, nothing to
   migrate".
-- **`betterosf-qa/SKILL.md` trimmed** 382 → 335 lines by extracting
-  `references/destructive-gates.md`. Every safety-critical rule is pinned by a test,
-  so the trim provably dropped nothing.
 
 ### Notes
 - Two backlog items ("registration file-view breadcrumb", "per-registration expand

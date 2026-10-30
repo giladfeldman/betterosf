@@ -5,7 +5,7 @@
  * `hidden md:flex` strip in `app/layout.tsx` and the `md:hidden`
  * `MobileNavMenu` — so a new entry cannot land in one breakpoint and miss the
  * other. That divergence, not the CSS, is the structural defect behind the
- * portfolio's repeated mobile-nav regressions (mobile-ux rule M7).
+ * repeated mobile-nav regressions (mobile-ux rule M7).
  */
 import type { Route } from "next";
 

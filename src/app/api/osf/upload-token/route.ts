@@ -9,7 +9,7 @@ export const runtime = "nodejs";
  * the BROWSER can PUT file bytes straight to OSF Waterbutler — bypassing Vercel's
  * 4.5 MB function body limit so uploads of any size (up to OSF's 5 GB/file) work.
  *
- * Security posture (see CLAUDE.md "direct browser → OSF" decision):
+ * Security posture (see docs/engineering/stack-and-conventions.md, "File uploads go DIRECT"):
  *  - Only the access token is returned; the refresh token never leaves the server.
  *  - `no-store` so the token is never cached by the browser/proxies.
  *  - The client keeps it in memory only (never localStorage/cookie), pins it to

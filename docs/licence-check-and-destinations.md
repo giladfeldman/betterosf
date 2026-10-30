@@ -126,7 +126,7 @@ adds no hosting cost.
 reusing the Zenodo browser-direct transfer with a Dataverse target. Medium effort; needs a
 token-paste flow and a live test on `demo.dataverse.org` first.
 
-## 6. Owner decisions (2026-10-29)
+## 6. Maintainer decisions (2026-10-29)
 - Q1: CC BY 4.0 preselected in the licence picker.
 - Q2: Bulk apply allowed.
 - Q3: Licence check first, then the destination guide.
@@ -152,11 +152,11 @@ token-paste flow and a live test on `demo.dataverse.org` first.
   of holders. All four fixed and test-pinned. `CITATION.cff` and
   `.zenodo.json` from §5 were NOT built — kept the change small; the GitHub steps rely on
   Zenodo's own GitHub integration instead.
-- **Tested live 2026-10-29** on the throwaway OSF account (`OSF_TEST_TOKEN`, user `wf83z`),
-  using the real `check.ts` functions: new private project (`82y4n`) read as "No licence";
+- **Tested live 2026-10-29** on a throwaway OSF account (`OSF_TEST_TOKEN`),
+  using the real `check.ts` functions: a new private project read as "No licence";
   PATCH CC BY 4.0 -> 200, read-back confirmed; PATCH MIT with two holders (one containing a
   comma) + year -> 200, read-back confirmed with both holders intact; MIT without year ->
   OSF 400 "year must be specified for this license" (and `validateApply` blocks it first);
-  a new component (`vpkd7`) with no licence of its own lists as "MIT License" -> inheritance
+  a new component with no licence of its own lists as "MIT License" -> inheritance
   confirmed live; the `/users/me/nodes/?embed=license` listing returned both rows correctly.
   Both test nodes deleted (204). The page and API routes themselves were not driven while signed in.

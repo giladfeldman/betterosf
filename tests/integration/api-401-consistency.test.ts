@@ -1,5 +1,5 @@
 /**
- * Backlog item (todo.md, 2026-08-04): "Audit remaining `unauthorized` gaps.
+ * Backlog item (maintainer backlog, 2026-08-04): "Audit remaining `unauthorized` gaps.
  * `classifyWalkFailure` + `osfBackpressureKind` cover the deep-path routes and
  * the five backpressure-aware pages. Other OSF callers (API routes under
  * `src/app/api/`) still map 401 ad hoc; worth a sweep for consistency."

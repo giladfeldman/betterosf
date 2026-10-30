@@ -1,13 +1,4 @@
-# Stack reminders, inherited rules, path conventions (moved verbatim from CLAUDE.md)
-
-## Inherited rules from portfolio-wide `~/Vibe/CLAUDE.md`
-
-- **Claude Max only — NEVER the Anthropic API.** All Claude model calls go
-  through the Claude Max subscription via Claude Code (Agent tool, headless
-  `claude -p`, or scheduled tasks). No `import anthropic` / API keys in
-  scripts, hooks, or CI.
-- **Read `todo.md` at session start** so you know what's deferred.
-- **Per-skill backlog discovery via preflight heartbeats.**
+# Stack reminders and path conventions
 
 ## Stack reminders
 
@@ -26,7 +17,7 @@
   `betterosf@scimeto.app` (scimeto.app already verified). Env:
   `AWS_SES_*`, `EMAIL_FROM_ADDRESS`, `EMAIL_CONFIG_SET`, `SNS_TOPIC_ARN`,
   `CRON_SECRET`, `ADMIN_NOTIFY_EMAIL`. Webhook `/api/email/webhook`; cron
-  `/api/cron/admin-error-digest`. Dedicated BetterOSF domain later (see `todo.md`).
+  `/api/cron/admin-error-digest`. A dedicated BetterOSF sending domain is still to do.
   **Feedback arrives ONLY as configuration-set events, which say `eventType`, not the
   identity-level `notificationType`** — dispatch on `msg.notificationType ?? msg.eventType`,
   and never let an unmatched SNS message return silently (v1.12.1; keys never values in the
@@ -58,7 +49,6 @@
 
 ## Documentation locations
 
-- Per-project lessons: `.claude/skills/_project/lessons.md`
-- Project skills: `.claude/skills/betterosf-{qa,review,cleanup,deploy}/`
-- Deferred work: `todo.md`
-- Known external blockers: `KNOWN_ISSUES.md`
+- Release history: [`CHANGELOG.md`](../../CHANGELOG.md)
+- Known external blockers: [`KNOWN_ISSUES.md`](../../KNOWN_ISSUES.md)
+- Engineering rules: this folder

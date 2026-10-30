@@ -6,7 +6,7 @@
 // the same canDeleteHere gating (canUploadHere && confirmed write session) the Delete
 // button uses, threaded through UnifiedTree's emitters. Never gate this on readOnly
 // alone: that is true for signed-out visitors (see the 2026-08-03 leaked-Delete
-// incident in CLAUDE.md).
+// incident in KNOWN_ISSUES.md).
 //
 // The rename itself is a safe, in-place Waterbutler `{"action":"rename"}` on the
 // server route — file identity and history survive, unlike delete + re-upload.

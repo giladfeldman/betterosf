@@ -1,4 +1,4 @@
-# Local-first testing - full text (moved verbatim from CLAUDE.md)
+# Local-first testing
 
 ## 🚨 LOCAL-FIRST TESTING — MANDATORY, NO EXCEPTIONS
 
@@ -16,7 +16,7 @@ itself on the user's URLs after deploy.
 
 ```bash
 # 1. Static gates
-npm test                           # vitest must be fully green (601 tests as of v1.6.0)
+npm test                           # vitest must be fully green 
 npx tsc --noEmit                   # type-check clean
 npm run build                      # production build must succeed
 
@@ -32,7 +32,7 @@ node tests/visual/visual-qa.mjs --local
 
 # 4. Stop the local server — kill ONLY BetterOSF's process, by port.
 #    Do NOT use `taskkill //F //IM node.exe`: it kills every other project's
-#    node processes too (dev servers, test runners, agents) and has already
+#    node processes too (dev servers, test runners) and has already
 #    caused mid-run casualties in a shared session.
 #    Windows (PowerShell):
 #      Get-NetTCPConnection -LocalPort 4747 -State Listen |
@@ -50,8 +50,8 @@ If any of steps 1–3 fails, **fix it locally and re-run.** Do not commit a
 
 ### 🚨 Port 4747, never 3000
 
-**BetterOSF binds `4747` locally. Port 3000 is banned.** `npm run dev`,
-`npm start`, `playwright.config.ts`, `start_app.bat`, and `.env.example` all pin
+**BetterOSF binds `4747` locally. Port 3000 is banned.** `npm start`,
+`playwright.config.ts`, `start_app.bat`, and `.env.example` all pin
 4747; `visual-qa.mjs --local` resolves to `http://localhost:4747`.
 
 Why this is a hard rule, not a preference: 3000 is the default for Next.js,
@@ -64,9 +64,9 @@ returns a confident, wrong answer.
 
 `tests/unit/dev-port.test.ts` enforces this: it scans the operational files
 (package.json, playwright config, start_app.bat, .env.example, visual-qa,
-tests/setup.ts, e2e smoke, CLAUDE.md, AGENTS.md, README.md) and **fails the
+tests/setup.ts, e2e smoke, README.md) and **fails the
 suite if `3000` reappears** in any of them. Historical records under
-`docs/superpowers/**` are excluded on purpose — those document what past
+`docs/superpowers/**` (maintainer-local, not published) are excluded on purpose — those document what past
 sessions actually ran, and rewriting them would be dishonest.
 
 When starting a local server, always confirm it is really *this* project before
@@ -92,8 +92,9 @@ trusting any result — `curl -s localhost:4747 | grep -o "<title>[^<]*</title>"
 - **Auth log noise**: `npm start` logs a long stack on every request when
   no session cookie is present (Auth.js complains, the OSF client swallows
   it). Don't mistake the noise for a bug; the requests still succeed.
-- **Killing the server on Windows**: `taskkill //F //IM node.exe`. (POSIX:
-  `kill $(jobs -p)` or `kill $SERVER_PID` if you captured it.)
+- **Killing the server on Windows**: stop it by port (the `Get-NetTCPConnection`
+  recipe in step 4 above), never by process name. (POSIX: `kill $SERVER_PID` if
+  you captured it.)
 
 ### Why production-only smoke is insufficient
 
@@ -104,8 +105,8 @@ trusting any result — `curl -s localhost:4747 | grep -o "<title>[^<]*</title>"
   per debug round and is impossible to bisect cleanly.
 - Real user-facing pages on prod cache for 5 minutes (revalidate: 300),
   so a fresh broken deploy can briefly read as PASS while caches drain.
-- Every prod-only round adds a "Co-Authored-By Claude" commit to the public
-  branch even when the change is internally just a single-character fix.
+- Every prod-only round adds a commit to the public branch even when the change
+  is internally just a single-character fix.
 
 ### When local-first is allowed to be skipped
 

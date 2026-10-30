@@ -1,5 +1,5 @@
 /**
- * Backlog item (todo.md, 2026-08-04): "`drizzle/meta` snapshot is out of sync
+ * Backlog item (maintainer backlog, 2026-08-04): "`drizzle/meta` snapshot is out of sync
  * with the live schema. `0001_email_events.sql` was applied by hand and never
  * made it into the snapshot, which is why drizzle-kit regenerated it."
  *

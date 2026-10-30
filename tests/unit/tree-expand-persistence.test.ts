@@ -1,5 +1,5 @@
 /**
- * Backlog item (todo.md "Future polish"): "Registration sub-trees default to
+ * Backlog item ("Future polish"): "Registration sub-trees default to
  * collapsed; could remember per-registration expand state in localStorage so
  * users who routinely browse the same registration don't have to re-expand."
  *

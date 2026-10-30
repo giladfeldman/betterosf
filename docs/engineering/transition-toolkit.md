@@ -1,4 +1,4 @@
-# OSF Transition Toolkit - full text (moved verbatim from CLAUDE.md)
+# OSF Transition Toolkit
 
 ## OSF Transition Toolkit (v1.8.0 export, v1.9.0 transfer) — what the app is FOR from here
 
@@ -24,7 +24,7 @@ Also verified against sandbox.zenodo.org: **slash-containing file keys work** (d
 keep OSF folder structure; URL-encode the key in the request path), and **multipart
 upload is live** with per-part URLs that **expire after 14 days**.
 
-`docs/osf-exit-strategy.md` originally recommended the opposite (figshare first) because
+An earlier internal strategy note originally recommended the opposite (figshare first) because
 it reasoned from docs and issue trackers. Re-probe before trusting any of this.
 
 ### Hard rules for this feature
@@ -52,7 +52,7 @@ it reasoned from docs and issue trackers. Re-probe before trusting any of this.
   needs a paid tier it is the wrong design. IndexedDB is the primary ledger; Neon takes
   coarse batched checkpoints only.
 - **`npm run test:live-zenodo` is sandbox-only, opt-in, and never publishes.** It is not
-  in `npm test`, CI, or `/ship`. Same posture as `test:destructive`. Run it with
+  in `npm test` or CI. Same posture as `test:destructive`. Run it with
   `BETTEROSF_LIVE_ZENODO=i-understand` and `ZENODO_SANDBOX_TOKEN` exported — the config
   does not read `.env.local`, and without the token it SKIPS while still reporting green.
 
@@ -60,7 +60,7 @@ it reasoned from docs and issue trackers. Re-probe before trusting any of this.
 
 A 79-file / 145 MB project transferred to **production Zenodo** in a real user run: 80 of
 100 file slots, every file checksum-verified, left as an unpublished draft. Four bugs stood
-between the feature and that run — see `.claude/skills/_project/lessons.md` v1.10.x–v1.11.1
+between the feature and that run — see the v1.10.x–v1.11.1 entries in `CHANGELOG.md`
 for each in full. Two of them are the same shape and must not recur:
 
 - **`connect-src` in `src/middleware.ts` must list every origin the browser fetches.** The

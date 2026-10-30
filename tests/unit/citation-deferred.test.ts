@@ -1,5 +1,5 @@
 /**
- * Backlog item (todo.md, 2026-06-22 prevention): "Defer the overview's 4
+ * Backlog item (maintainer backlog, 2026-06-22 prevention): "Defer the overview's 4
  * citation OSF calls (getCitation + 3× getStyledCitation in
  * src/app/[guid]/page.tsx) to client/on-demand — cuts ~40% of OSF calls per
  * overview render, lowering 429 likelihood. The data is non-critical and

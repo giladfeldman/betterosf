@@ -87,7 +87,7 @@ describe("starred subsets shown inline in dialogs", () => {
 });
 
 describe("load-bearing clauses", () => {
-  // CLAUDE.md and the terms.ts header both warn: a maximalist exemption clause risks
+  // The terms.ts header warns: a maximalist exemption clause risks
   // being struck down IN ITS ENTIRETY under the Hong Kong Control of Exemption Clauses
   // Ordinance (Cap. 71) reasonableness test, taking the enforceable protection with it.
   // The carve-out and severability are what make the rest survivable. Adding transition

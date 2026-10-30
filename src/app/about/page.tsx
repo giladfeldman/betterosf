@@ -63,7 +63,7 @@ export default function AboutPage() {
       <h2>Open source</h2>
       <p>
         Code at <a href="https://github.com/giladfeldman/betterosf" className="text-blue-600 hover:underline">github.com/giladfeldman/betterosf</a>.
-        Issues and PRs welcome.
+        Licensed under AGPL-3.0. Issues and PRs welcome.
       </p>
     </article>
   );

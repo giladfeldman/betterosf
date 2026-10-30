@@ -24,7 +24,7 @@
 //   4. FRESHNESS. We verify the project's `date_created` is within the last few minutes.
 //      An old project can never be a target, even if 1-3 were somehow subverted.
 //   5. EXPLICIT OPT-IN. Requires BETTEROSF_DESTRUCTIVE_TEST=i-understand plus a token.
-//      It cannot run by accident in CI, in /ship, or from a stray npm script.
+//      It cannot run by accident in CI or from a stray npm script.
 //
 // If you are tempted to add a `--guid` flag "just for debugging": don't. That single
 // change removes interlocks 1-4 at once and turns this into a project-deletion weapon.

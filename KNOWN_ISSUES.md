@@ -31,8 +31,8 @@ throwaway OSF project, builds a tree, deletes from it, and verifies each removal
 BETTEROSF_DESTRUCTIVE_TEST=i-understand OSF_TEST_TOKEN=<token> npm run test:destructive
 ```
 
-It needs a human with an OSF token — **an agent cannot run it**, and it must never be wired
-into `/ship`, CI, or `npm test`. Use a **dedicated throwaway OSF account**. The script takes
+It needs a human with an OSF token, and it must never be wired
+into CI or `npm test`. Use a **dedicated throwaway OSF account**. The script takes
 no project argument by design; see its header for the five safety interlocks and why adding
 a `--guid` flag would remove four of them at once.
 
@@ -79,7 +79,7 @@ content signal (text or `img`/`table`/`svg`).
 
 **Was breaking:** every route returned 504 GATEWAY_TIMEOUT after the v0.6 deploy. Root cause: `src/app/[guid]/files/[...path]/view/page.tsx` put a static segment (`view`) AFTER a catch-all (`[...path]`), which Next.js 15.5 rejects at runtime with `Error: Catch-all must be the last part of the URL.` The error is fatal at module-init for the entire app, so even static routes like `/about` and `/` 504'd.
 
-**Fixed in commit `af28a08`:** moved the viewer route to `src/app/[guid]/files/view/[...path]/page.tsx` (`view` BEFORE catch-all). Updated file-leaf hrefs in `UnifiedTree.tsx` (3 places) and E2E URL pattern. Lesson card at `~/.claude/skills/_shared/lessons/nextjs-catchall-must-be-last-breaks-runtime-not-just-build.md`.
+**Fixed in commit `af28a08`:** moved the viewer route to `src/app/[guid]/files/view/[...path]/page.tsx` (`view` BEFORE catch-all). Updated file-leaf hrefs in `UnifiedTree.tsx` (3 places) and E2E URL pattern.
 
 **Lesson:** A "Ready" Vercel deploy with every URL 504'ing means `vercel logs <deploy-url>` is mandatory. Build success ≠ runtime success when Next.js router validation throws at boot.
 
@@ -116,7 +116,7 @@ via `OSF_APP_TOKEN` only.
 
 ## Vercel CLI v53 — `vercel env add NAME preview` requires git branch even with `--value --yes`
 
-When setting environment variables for the **Preview** environment via CLI, even the exact command the CLI itself suggests (`vercel env add NAME preview --value V --yes`) fails with `git_branch_required`. Workaround: set Preview env vars via the dashboard at https://vercel.com/your-team/betterosf/settings/environment-variables.
+When setting environment variables for the **Preview** environment via CLI, even the exact command the CLI itself suggests (`vercel env add NAME preview --value V --yes`) fails with `git_branch_required`. Workaround: set Preview env vars via the Vercel dashboard (Project → Settings → Environment Variables).
 
 Production + Development env-var sets work fine via CLI.
 
@@ -132,6 +132,6 @@ OSF's OAuth app registration UI accepts a single Authorization callback URL. We 
 Not currently blocking — local dev uses anonymous browsing only.
 
 Note: if a dev OAuth app IS registered later, its callback must use port **4747**
-(BetterOSF's local port — see the "Port 4747, never 3000" rule in `CLAUDE.md`).
+(BetterOSF's local port — see [`docs/engineering/local-first-testing.md`](docs/engineering/local-first-testing.md)).
 OSF matches the callback URL exactly, so a mismatched port fails the OAuth
 handshake with an opaque error.

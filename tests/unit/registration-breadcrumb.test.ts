@@ -1,5 +1,5 @@
 /**
- * Backlog item (todo.md "Future polish"): "File-view route for registrations
+ * Backlog item (maintainer backlog "Future polish"): "File-view route for registrations
  * should bypass the `/<guid>/files` breadcrumb link (currently shows nothing
  * useful at that URL for a registration guid)."
  *

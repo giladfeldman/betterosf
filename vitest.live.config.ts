@@ -9,7 +9,7 @@ import path from "node:path";
  * `tests/integration`; nothing under `tests/live` is reachable from it.
  *
  * Same posture as `npm run test:destructive`: opt-in by environment variable, sandbox
- * only, never wired into /ship or CI.
+ * only, never wired into CI.
  */
 export default defineConfig({
   esbuild: { jsx: "automatic" },

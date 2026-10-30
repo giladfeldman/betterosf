@@ -97,6 +97,8 @@ function isExempt(relPath: string): boolean {
   if (p.startsWith("docs/superpowers/")) return true;
   // Scratch output from past review tooling (gitignored).
   if (p.includes("deep-review-tmp/")) return true;
+  // Maintainer-local tooling directory (skills, lessons, git worktrees); not part of the repo.
+  if (p.startsWith(".claude/")) return true;
   // Dependency lockfile (contains version numbers like 1.0.30001793).
   if (p.endsWith("package-lock.json")) return true;
   // This guard itself, which must contain the banned string to test for it.
@@ -109,10 +111,10 @@ function isExempt(relPath: string): boolean {
   if (NARRATIVE_DOCS.has(p) || NARRATIVE_DOCS.has(p.toLowerCase())) return true;
   if (p.endsWith("_project/lessons.md") || p.endsWith("LESSONS.md")) return true;
   // The same narrative, at the paths the 2026-10-01 docs split moved it to: CLAUDE.md detail
-  // (moved verbatim to references/claude-md/), the lessons journal (one card per entry), the
+  // (moved to docs/engineering/), the lessons journal (one card per entry), the
   // TODO archive, and gitignored past correspondence. Exempt for the reason above, still
   // covered by the "no runnable command" suite.
-  if (p.startsWith("references/claude-md/")) return true;
+  if (p.startsWith("docs/engineering/")) return true;
   if (p.startsWith(".claude/skills/_project/lessons/")) return true;
   if (p.toLowerCase() === "todo-archive.md") return true;
   if (p.startsWith("communications/")) return true;
@@ -120,14 +122,13 @@ function isExempt(relPath: string): boolean {
 }
 
 /** Docs allowed to *mention* 3000 while explaining the ban or the migration. */
-const NARRATIVE_DOCS = new Set([
-  "CLAUDE.md",
-  "AGENTS.md",
-  "README.md",
-  "CHANGELOG.md",
-  "KNOWN_ISSUES.md",
-  "todo.md",
-]);
+// Some of these (CLAUDE.md, AGENTS.md, todo.md) are maintainer-local and not in the public
+// repo, so only the ones present in this checkout are scanned.
+const NARRATIVE_DOCS = new Set(
+  ["CLAUDE.md", "AGENTS.md", "README.md", "CHANGELOG.md", "KNOWN_ISSUES.md", "todo.md"].filter(
+    (f) => existsSync(resolve(__dirname, "../..", f)),
+  ),
+);
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -178,7 +179,8 @@ describe("agent docs may explain the 3000 ban but never instruct using it", () =
   // TARGETS 3000 is not — that is what an agent would actually copy and paste.
   // Derived from the exemption set, so exempting a doc can never leave it
   // unguarded — the two lists cannot drift apart.
-  for (const file of [...NARRATIVE_DOCS, ".claude/skills/_project/lessons.md"]) {
+  const LESSONS = ".claude/skills/_project/lessons.md";
+  for (const file of [...NARRATIVE_DOCS, ...(existsSync(resolve(__dirname, "../..", LESSONS)) ? [LESSONS] : [])]) {
     it(`${file} contains no runnable command pointing at port 3000`, () => {
       const source = read(file);
       const bad = [
@@ -194,7 +196,7 @@ describe("agent docs may explain the 3000 ban but never instruct using it", () =
   }
 
   it("both docs state the rule and point at the enforcing test", () => {
-    for (const file of ["CLAUDE.md", "AGENTS.md"]) {
+    for (const file of ["CLAUDE.md", "AGENTS.md"].filter((f) => NARRATIVE_DOCS.has(f))) {
       const source = read(file);
       expect(source).toContain(String(DEV_PORT));
       expect(source).toContain("dev-port.test.ts");

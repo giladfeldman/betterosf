@@ -1,6 +1,6 @@
-# Deletion is irreversible - full text (moved verbatim from CLAUDE.md)
+# Deletion is irreversible
 
-## 🚨 Deletion is irreversible — rules that bind every session (v1.6.0)
+## 🚨 Deletion is irreversible — rules that bind every contributor (v1.6.0)
 
 **OSF has no trash and no restore path.** A bug in the delete path permanently destroys
 someone's research data. These are not style preferences:
@@ -24,5 +24,5 @@ someone's research data. These are not style preferences:
 
 **The live destructive test** (`npm run test:destructive`) creates its own throwaway OSF
 project and is guarded by five interlocks. It takes **no project argument by design** —
-never add a `--guid` flag, and never wire it into `/ship`, CI, or `npm test`. Requires
+never add a `--guid` flag, and never wire it into CI or `npm test`. Requires
 `BETTEROSF_DESTRUCTIVE_TEST=i-understand` + `OSF_TEST_TOKEN` from a **throwaway account**.

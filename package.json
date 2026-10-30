@@ -1,11 +1,7 @@
 {
   "name": "betterosf",
-  "version": "1.14.0",
-  "description": "",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
+  "version": "1.14.1",
+  "description": "A faster, friendlier interface for the Open Science Framework (OSF): browse, search, export and migrate your projects.",
   "scripts": {
     "dev": "next dev -p 4747",
     "build": "next build",
@@ -23,9 +19,17 @@
     "test:destructive": "node tests/destructive/live-delete.mjs",
     "test:live-zenodo": "vitest run --config vitest.live.config.ts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["osf", "open-science", "research-data", "zenodo", "export", "nextjs"],
+  "author": "Gilad Feldman",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/giladfeldman/betterosf.git"
+  },
+  "homepage": "https://betterosf.vercel.app",
+  "bugs": {
+    "url": "https://github.com/giladfeldman/betterosf/issues"
+  },
   "type": "commonjs",
   "dependencies": {
     "@aws-sdk/client-ses": "^3.1090.0",

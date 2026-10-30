@@ -3,7 +3,7 @@
  * AND every UX promise. Beyond screenshots, it CLICKS things and asserts
  * outcomes — the gap that lets bugs through with green test suites.
  *
- * Returns exit code 1 if any required check fails. Suitable for /ship gating.
+ * Returns exit code 1 if any required check fails. Suitable for gating a release.
  *
  * Usage:
  *   node tests/visual/visual-qa.mjs
@@ -26,7 +26,7 @@
  * Optional env:
  *   COLOR_SCHEME — "light" | "dark" (default "dark")
  *   STRICT       — "1" to exit 1 on any failed check (default "1")
- *   SKIP_VISUAL_QA — "1" to skip entirely (rare; used by /ship dry-run)
+ *   SKIP_VISUAL_QA — "1" to skip entirely (rare; used for dry runs)
  */
 import { chromium } from "playwright";
 import { mkdir } from "node:fs/promises";
@@ -183,7 +183,7 @@ async function main() {
     // still lands in it. The final sweep below re-checks every page at end of run, which
     // is what makes those late errors gate the build instead of merely appearing in the
     // summary. Before that sweep existed, a page could print "console-errors:3" and the
-    // suite would still report 93/93 passed. (Found by /ship cleanup, 2026-08-13.)
+    // suite would still report 93/93 passed. (Found in a cleanup pass, 2026-08-13.)
     collected.push({ name, url, status, consoleErrors });
   }
 

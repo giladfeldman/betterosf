@@ -3,7 +3,7 @@ import "server-only";
 let kvImpl: typeof import("@vercel/kv") | null = null;
 // Returns null whenever KV_REST_API_URL / KV_REST_API_TOKEN aren't both set, which is
 // the case in production today (KV is not provisioned for this project — see
-// todo.md). null here means every caller below silently drops into the in-memory
+// KNOWN_ISSUES.md). null here means every caller below silently drops into the in-memory
 // fallback (see memStore comment); there is no separate "unconfigured" signal.
 function getKv() {
   if (kvImpl !== null) return kvImpl;
@@ -24,7 +24,7 @@ function getKv() {
 // Net effect: this provides a speed bump against a single runaway client hitting a
 // single warm instance — it provides essentially no protection against concurrent
 // requests landing on different instances, or a caller who simply waits out a cold
-// start. Real capacity control requires Vercel KV; see todo.md for the exact steps.
+// start. Real capacity control requires Vercel KV; see KNOWN_ISSUES.md.
 const memStore = new Map<string, { value: number; expiresAt: number }>();
 
 function memIncr(key: string, ttlSec: number, by = 1): number {

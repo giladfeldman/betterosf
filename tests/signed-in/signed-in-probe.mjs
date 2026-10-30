@@ -28,7 +28,7 @@
  * 500), the citation route's 401, Move (success and a refused name clash), and /tools/licence-check end to end — list, tick, bulk set,
  * and OSF's own read-back of the licence.
  *
- * Not in `npm test`, CI or /ship's production pass: it writes to OSF (a throwaway account).
+ * Not in `npm test`, CI or any production pass: it writes to OSF (a throwaway account).
  * OSF stops accepting NEW projects on 2026-11-16; after that, point OSF_PROBE_GUID at an
  * existing private test project on the throwaway account (it is then NOT deleted).
  */

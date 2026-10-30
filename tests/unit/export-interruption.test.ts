@@ -234,7 +234,7 @@ describe("a user-requested stop", () => {
 // licence. This drives the real runExport and reads the ZIP's entry names.
 describe("LICENSE.txt in the export ZIP", () => {
   // Read via stream(): `new Response(jsdomBlob)` serialises to "[object Blob]" (see the
-  // jsdom notes in references/claude-md/transition-toolkit.md). The polyfilled stream works.
+  // jsdom notes in docs/engineering/transition-toolkit.md). The polyfilled stream works.
   const zipText = async (b: Blob) => {
     const reader = b.stream().getReader();
     let out = "";

@@ -14,7 +14,7 @@
  *   4. It NEVER publishes. Publishing mints a permanent DOI.
  *   5. It deletes the draft it created, and fails loudly if cleanup fails.
  *
- * Not in `npm test` (see vitest.live.config.ts), not in CI, not in /ship.
+ * Not in `npm test` (see vitest.live.config.ts), not in CI.
  * Run with: npm run test:live-zenodo
  */
 
