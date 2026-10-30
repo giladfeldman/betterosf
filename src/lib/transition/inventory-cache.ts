@@ -166,3 +166,52 @@ export function isStale(fetchedAt: string, now: Date): boolean {
   if (Number.isNaN(then)) return true;
   return now.getTime() - then > STALE_AFTER_DAYS * 24 * 60 * 60 * 1000;
 }
+
+/**
+ * Drop one project from every saved project list in this browser, because OSF says it was
+ * deleted (410). Returns how many saved lists contained it.
+ *
+ * The list is a snapshot that is never refreshed silently (rule 3 above), so a project
+ * deleted on OSF after the snapshot stayed in it, and opening it failed with a misleading
+ * "try again" (production, k3ny2, 2026-10-30). Removing a row OSF has confirmed is gone is
+ * not a silent refresh: it is the one fact we just learned, and the page says so. Every
+ * account's list is checked because the guid is global and the page does not know whose
+ * list it was opened from. OSF's own `total` is lowered with it, so the "is this still
+ * everything" comparison does not start reporting a missing project.
+ */
+export function dropFromInventoryCache(guid: string): number {
+  const store = storage();
+  if (!store) return 0;
+  let dropped = 0;
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < store.length; i++) {
+      const k = store.key(i);
+      if (k && k.startsWith(`${KEY_PREFIX}.v${CACHE_VERSION}.`)) keys.push(k);
+    }
+    for (const k of keys) {
+      const raw = store.getItem(k);
+      if (!raw) continue;
+      const cache = JSON.parse(raw) as InventoryCache;
+      if (!Array.isArray(cache.projects)) continue;
+      const kept = cache.projects.filter((p) => p.guid !== guid);
+      if (kept.length === cache.projects.length) continue;
+      const enriched = { ...(cache.enriched ?? {}) };
+      delete enriched[guid];
+      const next: InventoryCache = {
+        ...cache,
+        projects: kept,
+        enriched,
+        total: typeof cache.total === "number" ? Math.max(0, cache.total - 1) : cache.total,
+      };
+      // An emptied list is removed rather than stored: readInventoryCache refuses an empty
+      // one anyway, and the next visit should simply fetch afresh.
+      if (kept.length === 0) store.removeItem(k);
+      else store.setItem(k, JSON.stringify(next));
+      dropped++;
+    }
+  } catch {
+    /* a corrupt or unwritable entry: the user can still refresh the list by hand */
+  }
+  return dropped;
+}

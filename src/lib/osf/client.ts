@@ -102,8 +102,14 @@ function writeCache(key: string, value: unknown, revalidateSeconds: number): voi
   });
 }
 
-function mapError(status: number, body: string): OsfError {
+/** Exported for its unit test only. */
+export function mapError(status: number, body: string): OsfError {
   if (status === 404) return new OsfError(404, "not_found", "OSF resource not found");
+  // 410 is OSF's answer for a node that was DELETED (measured 2026-10-30 on k3ny2: "The
+  // requested node is no longer available."). It is "not found" for every caller — retrying
+  // can never bring it back — so it shares that code, and keeps its status so the API
+  // routes can say "deleted" rather than "no such id".
+  if (status === 410) return new OsfError(410, "not_found", "OSF resource was deleted");
   if (status === 403) return new OsfError(403, "forbidden", "Access to this OSF resource is forbidden");
   if (status === 401) return new OsfError(401, "unauthorized", "OSF authentication required");
   if (status === 429) return new OsfError(429, "rate_limited", "OSF rate limit exceeded");

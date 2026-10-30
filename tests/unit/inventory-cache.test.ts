@@ -10,6 +10,7 @@ import {
   readInventoryCache,
   writeInventoryCache,
   clearInventoryCache,
+  dropFromInventoryCache,
   describeAge,
   isStale,
   type InventoryCache,
@@ -163,5 +164,37 @@ describe("isStale", () => {
     // Failing toward "check it again" is the safe direction when the basis is a decision
     // about someone's data.
     expect(isStale("nonsense", after(0))).toBe(true);
+  });
+});
+
+describe("dropFromInventoryCache — a project OSF says was deleted (410)", () => {
+  // Production 2026-10-30: k3ny2 was deleted on OSF after the list was saved, stayed in
+  // the list, and opening it failed with "try again".
+  it("removes it, its enrichment, and one from OSF's total", () => {
+    writeInventoryCache(cacheFor("osf-1", { enriched: { aaa11: {} as never, bbb22: {} as never } }));
+    expect(dropFromInventoryCache("aaa11")).toBe(1);
+    const after = readInventoryCache("osf-1")!;
+    expect(after.projects.map((p) => p.guid)).toEqual(["bbb22"]);
+    expect(Object.keys(after.enriched)).toEqual(["bbb22"]);
+    expect(after.total).toBe(1);
+  });
+
+  it("reports 0 and changes nothing when no saved list has it", () => {
+    writeInventoryCache(cacheFor("osf-1"));
+    expect(dropFromInventoryCache("zzz99")).toBe(0);
+    expect(readInventoryCache("osf-1")!.projects).toHaveLength(2);
+  });
+
+  it("removes a list it empties, so the next visit fetches afresh", () => {
+    writeInventoryCache(cacheFor("osf-1", { projects: [project("aaa11")], total: 1 }));
+    expect(dropFromInventoryCache("aaa11")).toBe(1);
+    expect(localStorage.getItem("betterosf.inventory.v1.osf-1")).toBeNull();
+  });
+
+  it("leaves unrelated localStorage keys alone", () => {
+    localStorage.setItem("other.app", JSON.stringify({ projects: [project("aaa11")] }));
+    writeInventoryCache(cacheFor("osf-1"));
+    dropFromInventoryCache("aaa11");
+    expect(JSON.parse(localStorage.getItem("other.app")!).projects).toHaveLength(1);
   });
 });
