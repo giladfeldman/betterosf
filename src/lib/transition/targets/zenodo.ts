@@ -20,7 +20,7 @@
  * it mints a permanent DOI and cannot be undone.
  */
 
-import { zenodoApiBase, type ZenodoEnv } from "../zenodo-env";
+import { zenodoApiBase, zenodoServerHeaders, type ZenodoEnv } from "../zenodo-env";
 import type { ZenodoMetadata } from "../crosswalk";
 
 /** Above this, use multipart so a dropped connection costs one part, not the file. */
@@ -59,6 +59,7 @@ async function zfetch(
   const res = await fetch(`${zenodoApiBase(auth.env)}${path}`, {
     ...init,
     headers: {
+      ...zenodoServerHeaders(),
       Authorization: `Bearer ${auth.accessToken}`,
       ...(init.headers ?? {}),
     },

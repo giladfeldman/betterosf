@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.14.3 — 2026-11-04
+
+### Fixed
+- **Connecting a Zenodo account works again on zenodo.org.** zenodo.org's firewall now answers
+  403 "unusual traffic from your network" to requests carrying Node's default `User-Agent`, so
+  every production connect ended at `?zenodo=exchange_failed` (sandbox.zenodo.org does not block,
+  which is why sandbox tests passed). Every server-side Zenodo request (the OAuth token exchange
+  and the publish route's API calls) now sends a `BetterOSF` User-Agent; browser requests are
+  unchanged. Covered by `tests/unit/zenodo-user-agent.test.ts`.
+
 ## 1.14.2 — 2026-10-30
 
 The repository is now public, under the AGPL-3.0. Documentation and hygiene release; the one

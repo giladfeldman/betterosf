@@ -114,6 +114,11 @@ describe("exchangeZenodoCode", () => {
     expect(captured.body).toContain("client_secret=secret");
   });
 
+  it("adds no custom User-Agent in a browser context (jsdom has a window)", async () => {
+    const { zenodoServerHeaders } = await import("@/lib/transition/zenodo-env");
+    expect(zenodoServerHeaders()).toEqual({});
+  });
+
   it("surfaces the status and body when Zenodo rejects the exchange", async () => {
     await expect(
       exchangeZenodoCode({

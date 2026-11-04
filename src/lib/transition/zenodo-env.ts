@@ -70,6 +70,25 @@ export function zenodoTokenUrl(env: ZenodoEnv): string {
   return `${zenodoSiteUrl(env)}/oauth/token`;
 }
 
+/**
+ * User-Agent sent on every SERVER-side request to Zenodo.
+ *
+ * zenodo.org's firewall answers 403 "unusual traffic from your network" to Node's default
+ * `User-Agent: node` — measured 2026-11-04: `/oauth/token` and `GET /api/records/:id` both
+ * 403 without a UA and pass with this one. sandbox.zenodo.org does not block, which is why
+ * every sandbox test passed while every production Zenodo connect failed (`exchange_failed`).
+ */
+export const ZENODO_SERVER_USER_AGENT = "BetterOSF (+https://betterosf.vercel.app)";
+
+/**
+ * Headers to add to a Zenodo request: the User-Agent on the server, nothing in the browser.
+ * A browser supplies its own UA, and a custom one there would add a header to the CORS
+ * preflight that Zenodo has never been measured to allow.
+ */
+export function zenodoServerHeaders(): Record<string, string> {
+  return typeof window === "undefined" ? { "User-Agent": ZENODO_SERVER_USER_AGENT } : {};
+}
+
 /** Public record page for a published record. */
 export function zenodoRecordUrl(env: ZenodoEnv, recordId: string): string {
   return `${zenodoSiteUrl(env)}/records/${recordId}`;

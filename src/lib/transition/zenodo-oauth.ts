@@ -4,6 +4,7 @@ import {
   ZENODO_SCOPES,
   zenodoAuthorizeUrl,
   zenodoTokenUrl,
+  zenodoServerHeaders,
   type ZenodoEnv,
 } from "./zenodo-env";
 
@@ -87,7 +88,11 @@ export async function exchangeZenodoCode(input: ExchangeInput): Promise<TokenExc
   const doFetch = input.fetchImpl ?? fetch;
   const res = await doFetch(zenodoTokenUrl(input.env), {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+    headers: {
+      ...zenodoServerHeaders(),
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+    },
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code: input.code,
