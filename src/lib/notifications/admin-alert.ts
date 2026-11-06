@@ -10,8 +10,9 @@ import {
 
 /**
  * Event-driven issue alert (admin email standard §1, §5). Called from the logger's
- * error path, so the DB is already awake: one upsert + at most one SES call.
- * Never throws, never awaited by callers.
+ * error path, so the DB is already awake: one upsert, a few indexed reads and at most one SES
+ * call. Never throws. The logger does not await it; the feedback route does, to report whether
+ * the report was emailed.
  *
  * Deliberately BYPASSES sendEmail()'s suppression/idempotency gates and talks to
  * SES directly: the operator must never miss an alert because their address once

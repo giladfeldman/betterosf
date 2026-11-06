@@ -77,13 +77,13 @@ export default function AboutPage() {
         </p>
         <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">How to cite</h3>
         <p>
-          Feldman, G. (2026). <em>betterosf: A faster, friendlier interface for the Open Science Framework (OSF): browse, search, export and migrate your projects.</em> (Version 1.14.3) [Computer software]. https://betterosf.vercel.app
+          Feldman, G. (2026). <em>betterosf: A faster, friendlier interface for the Open Science Framework (OSF): browse, search, export and migrate your projects.</em> (Version 1.14.4) [Computer software]. https://betterosf.vercel.app
         </p>
         <pre className="overflow-x-auto rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 p-3 text-sm">{`@software{feldman_betterosf_2026,
   author = {Feldman, Gilad},
   title = {betterosf: A faster, friendlier interface for the Open Science Framework (OSF): browse, search, export and migrate your projects.},
   year = {2026},
-  version = {1.14.3},
+  version = {1.14.4},
   url = {https://betterosf.vercel.app},
   license = {AGPL-3.0-only}
 }`}</pre>

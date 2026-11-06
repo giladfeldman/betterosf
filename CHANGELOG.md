@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.14.4 — 2026-11-06
 
 ### Changed
 - **Admin email now follows the maintainer's admin-email standard.** Two kinds only: an *issue alert* the moment
