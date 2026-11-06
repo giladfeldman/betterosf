@@ -121,11 +121,6 @@ Issues and pull requests are welcome. Before opening a pull request, run `npm te
 `npx tsc --noEmit` and `npm run build`. By contributing you agree that your contribution is
 licensed under the AGPL-3.0, like the rest of the project.
 
-## Licence
-
-[GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). If you run a modified copy as
-a network service, the AGPL requires you to offer its source to that service's users.
-
 <!-- license-citation:start -->
 ## License and citation
 
