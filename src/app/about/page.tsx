@@ -65,6 +65,32 @@ export default function AboutPage() {
         Code at <a href="https://github.com/giladfeldman/betterosf" className="text-blue-600 hover:underline">github.com/giladfeldman/betterosf</a>.
         Licensed under AGPL-3.0. Issues and PRs welcome.
       </p>
+      <section id="cite" data-license-citation className="space-y-3">
+        <h2>Licence and citation</h2>
+        <p>
+          Copyright (C) 2026 Gilad Feldman. This software is licensed under the{" "}
+          <a href="https://www.gnu.org/licenses/agpl-3.0.html" className="text-blue-600 hover:underline">GNU Affero General Public License v3.0</a>{" "}
+          (AGPL-3.0-only). Anyone may use, modify and share it, including commercially, provided the source of
+          any modified version is published under the same licence, including when it is offered as a hosted
+          service. Commercial licences without these conditions are available from the author. The source code is at{" "}
+          <a href="https://github.com/giladfeldman/betterosf" className="text-blue-600 hover:underline">github.com/giladfeldman/betterosf</a>.
+        </p>
+        <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">How to cite</h3>
+        <p>
+          Feldman, G. (2026). <em>betterosf: A faster, friendlier interface for the Open Science Framework (OSF): browse, search, export and migrate your projects.</em> (Version 1.14.3) [Computer software]. https://betterosf.vercel.app
+        </p>
+        <pre className="overflow-x-auto rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 p-3 text-sm">{`@software{feldman_betterosf_2026,
+  author = {Feldman, Gilad},
+  title = {betterosf: A faster, friendlier interface for the Open Science Framework (OSF): browse, search, export and migrate your projects.},
+  year = {2026},
+  version = {1.14.3},
+  url = {https://betterosf.vercel.app},
+  license = {AGPL-3.0-only}
+}`}</pre>
+        <p>
+          Author: Gilad Feldman, <a href="https://orcid.org/0000-0003-2812-6599" className="text-blue-600 hover:underline">ORCID 0000-0003-2812-6599</a>.
+        </p>
+      </section>
     </article>
   );
 }
