@@ -125,3 +125,18 @@ licensed under the AGPL-3.0, like the rest of the project.
 
 [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). If you run a modified copy as
 a network service, the AGPL requires you to offer its source to that service's users.
+
+<!-- license-citation:start -->
+## License and citation
+
+Copyright (C) 2026 Gilad Feldman.
+
+This software is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only). You may use, study, modify and share it, including for commercial purposes, provided that the complete source code of any modified version is published under the same licence - including when the modified version is offered as a hosted online service.
+
+**Commercial licences** without these conditions are available from the author: Gilad Feldman (https://orcid.org/0000-0003-2812-6599).
+
+**How to cite.** If you use this software in research, please cite it. GitHub's *Cite this repository* button (from [CITATION.cff](CITATION.cff)) gives APA and BibTeX. In APA style:
+
+> Feldman, G. (2026). *betterosf: A faster, friendlier interface for the Open Science Framework (OSF): browse, search, export and migrate your projects.* (Version 1.14.3) [Computer software]. https://betterosf.vercel.app
+
+<!-- license-citation:end -->
