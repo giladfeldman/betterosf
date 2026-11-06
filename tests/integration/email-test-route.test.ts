@@ -15,7 +15,7 @@ vi.mock("@/lib/email", () => ({
 import { POST } from "@/app/api/email/test/route";
 
 const env = process.env as Record<string, string | undefined>;
-const KEYS = ["ADMIN_NOTIFY_EMAIL", "NEXT_PUBLIC_ADMIN_EMAIL"];
+const KEYS = ["ADMIN_NOTIFY_EMAIL", "NEXT_PUBLIC_ADMIN_EMAIL"]; // the second must be ignored (ADMIN_NOTIFY_EMAIL is the only recipient variable)
 const saved = Object.fromEntries(KEYS.map((k) => [k, env[k]]));
 
 const post = (body: unknown) =>
@@ -56,6 +56,13 @@ describe("POST /api/email/test", () => {
   it("refuses an address that is not configured", async () => {
     env.ADMIN_NOTIFY_EMAIL = "admin@example.org";
     const res = await post({ to: "someone-else@example.com" });
+    expect(res.status).toBe(400);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("ignores the retired NEXT_PUBLIC_ADMIN_EMAIL", async () => {
+    env.NEXT_PUBLIC_ADMIN_EMAIL = "old@example.org";
+    const res = await post({});
     expect(res.status).toBe(400);
     expect(sendEmail).not.toHaveBeenCalled();
   });

@@ -1,4 +1,3 @@
-import { alertEmailPolicy } from "@/lib/alert-env";
 import { auth } from "@/auth";
 import { validateFeedback, truncateUserAgent } from "@/lib/feedback/validate";
 import { insertBugReport } from "@/lib/db/bug-reports";
@@ -127,48 +126,29 @@ async function notifyAdmin(report: {
   osfUserId: string | null;
   userAgent: string | null;
 }): Promise<boolean> {
-  const to = process.env.ADMIN_NOTIFY_EMAIL?.trim();
-  if (!to) return false;
-  // Admin emails are for production (d-bf671b). A report filed against a local server is
-  // still stored and visible on /admin/feedback; it is emailed only with the opt-in, and
-  // then labelled so it can never be mistaken for a live user's report.
-  const policy = alertEmailPolicy();
-  if (!policy.send) return false;
-
-  const { renderEmail } = await import("@/lib/email/render");
-  const { sendEmail } = await import("@/lib/email/send");
-  const { BugReportEmail } = await import("@/lib/email/templates/bug-report");
-
-  const appUrl = process.env.NEXT_PUBLIC_BASE_URL?.trim() || "https://betterosf.vercel.app";
-  const { html, text } = await renderEmail(
-    BugReportEmail({
-      appName: "BetterOSF",
-      appUrl,
-      report: {
-        id: report.id,
-        kind: report.kind,
-        message: report.message,
-        contactEmail: report.contactEmail,
-        pageUrl: report.pageUrl,
-        appVersion: APP_VERSION,
-        osfUserId: report.osfUserId,
-        userAgent: report.userAgent,
-        createdAt: new Date().toISOString(),
-      },
-    }),
-  );
-
-  const subjectKind = report.kind === "idea" ? "idea" : report.kind === "question" ? "question" : "bug";
-  const result = await sendEmail({
-    to,
-    subject: policy.subject(`[BetterOSF] New ${subjectKind}: ${report.message.slice(0, 60).replace(/\s+/g, " ")}`),
-    html: policy.banner ? `<p><strong>${policy.banner}</strong></p>${html}` : html,
-    text: policy.banner ? `${policy.banner}
-
-${text}` : text,
-    // One email per report — a retry of the same report never double-sends.
-    idempotencyKey: `bug-report:${report.id}`,
+  // A user report is an issue alert (admin email standard: `source: user report`, P3). The
+  // report is already stored; the alert carries the facts, never the reporter's address
+  // (that stays on /admin/feedback). Production only: a report filed against a local server
+  // is stored and visible there, emailed only with the opt-in, labelled by the shared policy.
+  const { maybeAlert } = await import("@/lib/notifications/admin-alert");
+  const appUrl = (process.env.NEXT_PUBLIC_BASE_URL?.trim() || "https://betterosf.vercel.app").replace(/\/$/, "");
+  const kindLabel = report.kind === "idea" ? "idea" : report.kind === "question" ? "question" : "bug report";
+  const oneLine = report.message.slice(0, 60).replace(/\s+/g, " ");
+  const result = await maybeAlert({
+    level: "error",
+    event: `user-report:${report.kind}`,
+    message: report.message.slice(0, 1000),
+    priority: "P3",
+    source: "user report",
+    summary: `New ${kindLabel}: ${oneLine}`,
+    explanation:
+      `A BetterOSF user sent a ${kindLabel} from ${report.pageUrl ?? "an unknown page"} ` +
+      `(report ${report.id}, app version ${APP_VERSION}, ${report.osfUserId ? "signed in" : "anonymous"}). ` +
+      `The full text is below and on the admin feedback page; whether it is a real defect is not yet established.`,
+    importance: { usersAffected: "1 (the reporter)", scienceAffected: "unknown", moneyAffected: "no", dataAtRisk: "unknown" },
+    suggestedStep: "Open the report on the admin feedback page, then try to reproduce it locally before changing anything.",
+    adminLogUrl: `${appUrl}/admin/feedback`,
+    context: { route: report.pageUrl ?? undefined, reportId: report.id, userAgent: report.userAgent ?? undefined, appVersion: APP_VERSION },
   });
-
-  return result.sent === true;
+  return result === "sent" || result === "console";
 }

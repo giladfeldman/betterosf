@@ -138,7 +138,7 @@ Full write-up: `docs/licence-check-and-destinations.md`. Code: `src/lib/licence/
 
 - **Publish claim.** `claimPublish` marks a job as publishing before the Zenodo call. A definite refusal (4xx) or a consent-recording failure calls `releasePublishClaim`, so the user can retry. An unknown outcome (network error, 5xx, timeout) KEEPS the claim: sending again could mint a second permanent DOI. `recordPublishedDoi` stores the DOI on success; a stored claim without a DOI reads "could not confirm whether this record was published". Records published before v1.14.0 have no DOI stored and therefore take that path on retry. The claim SQL is tested on real Postgres (PGlite, `tests/db/pglite.ts`).
 - **Wiki file names** go through `safeNameSegment` with collision suffixes, like every other name crossing the boundary.
-- **Alert environment.** `src/lib/alert-env.ts` is the single definition of where an event happened; the digest filters on it in SQL before its row cap.
+- **Alert environment.** `environmentLabel()` in `src/lib/notifications/admin-email.ts` is the single definition of where an event happened (log rows carry it as `_env`); the digest filters on it in SQL before counting.
 
 ### 🚨 Names crossing a boundary are sanitised in ONE place, both directions
 

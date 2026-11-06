@@ -43,6 +43,13 @@
       "when": 1786630544304,
       "tag": "0005_transition_published_records",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793979127617,
+      "tag": "0006_admin_alerts",
+      "breakpoints": true
     }
   ]
 }

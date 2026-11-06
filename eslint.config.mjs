@@ -20,6 +20,7 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      "src/lib/notifications/admin-email.ts", // vendored from _shared/admin-email, kept byte-identical
       "coverage/**", // vitest coverage output
       "test-results/**", // Playwright run artifacts
       "post-deploy-report.json", // Playwright post-deploy report

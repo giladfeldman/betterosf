@@ -102,7 +102,7 @@ production Zenodo and never publishes.
 ## Deploying
 
 The app is built for Vercel (Next.js 15, Auth.js v5, Neon Postgres). Pushes to `main` deploy
-through the Vercel GitHub integration; a daily cron hits `/api/cron/admin-error-digest`
+through the Vercel GitHub integration; a fortnight cron (1st and 15th) hits `/api/cron/admin-digest`
 (see [`vercel.json`](vercel.json)). The SES setup scripts are in [`scripts/aws/`](scripts/aws/RUNBOOK.md).
 
 ## Documentation

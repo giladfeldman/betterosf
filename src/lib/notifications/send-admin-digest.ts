@@ -1,94 +1,50 @@
-import { sendEmail, renderEmail } from "@/lib/email";
-import { collectAdminDigest } from "./admin-digest";
-import { AdminDigestEmail } from "@/lib/email/templates/admin-digest";
-import { alertEmailPolicy, deploymentEnvironment } from "@/lib/alert-env";
+import { SendEmailCommand } from "@aws-sdk/client-ses";
+import { getSesClient, FROM_ADDRESS, FROM_NAME, EMAIL_MODE } from "@/lib/email/client";
+import { collectFortnightDigest } from "./admin-digest";
+import { emailPolicy, environmentLabel, renderDigest } from "./admin-email";
 
+/**
+ * Fortnight digest sender (admin email standard §1, §7). Runs on the 1st and
+ * 15th. Sends even when quiet: the quiet digest is the proof that alerting is
+ * alive. There is no daily digest and no all-clear mail anywhere else.
+ *
+ * Talks to SES directly (bypasses sendEmail()'s suppression gate) so the
+ * operator never silently misses it; honours EMAIL_MODE=console for dev.
+ */
 export type SendDigestResult =
-  | { status: "sent" }
-  | { status: "console" }
-  | { status: "skipped_empty" }
-  | { status: "missing_recipient" }
-  /** The digest was asked for on a non-production server without the opt-in (d-bf671b). */
+  | { status: "sent"; subject: string }
+  | { status: "console"; subject: string }
   | { status: "not_production" }
-  | { status: "suppressed" }
-  | { status: "duplicate" }
+  | { status: "missing_recipient" }
   | { status: "ses_error"; error: string };
 
-export async function sendAdminErrorDigest(opts?: {
-  windowHours?: number;
-  skipIfEmpty?: boolean;
-  appUrl?: string;
-}): Promise<SendDigestResult> {
-  const windowHours = opts?.windowHours ?? 24;
-  const skipIfEmpty = opts?.skipIfEmpty ?? true;
-
-  const to =
-    process.env.ADMIN_NOTIFY_EMAIL?.trim() ||
-    process.env.NEXT_PUBLIC_ADMIN_EMAIL?.trim();
-  if (!to) return { status: "missing_recipient" };
-
-  // The SENDER's environment: a digest triggered on a laptop is a local test, whatever the
-  // events in it, and is emailed only with the opt-in — labelled.
-  const sender = alertEmailPolicy();
-  if (!sender.send) return { status: "not_production" };
-
-  // Production events only. Non-production events get their own, labelled email, and only
-  // with the opt-in — never mixed into the production count.
-  const digest = await collectAdminDigest(windowHours);
-  if (deploymentEnvironment() === "production" && alertEmailPolicy("local").send) {
-    await sendNonProductionDigest(to, windowHours).catch(() => {});
+export async function sendFortnightDigest(): Promise<SendDigestResult> {
+  const to = process.env.ADMIN_NOTIFY_EMAIL?.trim();
+  if (!to) {
+    console.warn("[admin-digest] ADMIN_NOTIFY_EMAIL is not set: fortnight digest NOT sent");
+    return { status: "missing_recipient" };
   }
-  if (skipIfEmpty && digest.errorCount === 0 && digest.warnCount === 0) {
-    return { status: "skipped_empty" };
+  const environment = environmentLabel();
+  const policy = emailPolicy(environment);
+  if (!policy.send) return { status: "not_production" };
+
+  const appUrl = (process.env.NEXT_PUBLIC_BASE_URL ?? "").trim().replace(/\/$/, "");
+  const digest = await collectFortnightDigest("BetterOSF", environment, appUrl ? `${appUrl}/admin` : undefined);
+  const { subject, html, text } = renderDigest(digest, { prefix: policy.prefix });
+
+  if (EMAIL_MODE() === "console") {
+    console.log(`[admin-digest] (console) to=${to} subject="${subject}"\n${text}`);
+    return { status: "console", subject };
   }
-
-  const appName = "BetterOSF";
-  const appUrl =
-    opts?.appUrl ??
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ??
-    process.env.NEXT_PUBLIC_BASE_URL?.trim() ??
-    "https://betterosf.vercel.app";
-  const subject = sender.subject(
-    `[${appName}] ${digest.errorCount} error${digest.errorCount === 1 ? "" : "s"}, ` +
-    `${digest.warnCount} warning${digest.warnCount === 1 ? "" : "s"} in last ${windowHours}h`,
-  );
-
-  const { html, text } = await renderEmail(
-    AdminDigestEmail({ appName, appUrl, digest, banner: sender.banner }),
-  );
-
-  const dayKey = new Date().toISOString().slice(0, 10);
-  const result = await sendEmail({
-    to,
-    subject,
-    html,
-    text,
-    idempotencyKey: `admin-digest-${dayKey}`,
-  });
-
-  if (result.sent) {
-    return { status: result.mode === "console" ? "console" : "sent" };
+  try {
+    await getSesClient().send(new SendEmailCommand({
+      Source: `${FROM_NAME()} <${FROM_ADDRESS()}>`,
+      Destination: { ToAddresses: to.split(",").map((a) => a.trim()).filter(Boolean) },
+      Message: { Subject: { Data: subject }, Body: { Html: { Data: html }, Text: { Data: text } } },
+    }));
+    return { status: "sent", subject };
+  } catch (e) {
+    console.error("[admin-digest] SES send failed:", e);
+    return { status: "ses_error", error: e instanceof Error ? e.message : String(e) };
   }
-  if (result.reason === "suppressed") return { status: "suppressed" };
-  if (result.reason === "duplicate") return { status: "duplicate" };
-  return { status: "ses_error", error: result.error ?? result.reason };
-}
-
-/** Opt-in only: the local/preview events, in an email that cannot be mistaken for production. */
-async function sendNonProductionDigest(to: string, windowHours: number): Promise<void> {
-  const digest = await collectAdminDigest(windowHours, { scope: "non-production" });
-  if (digest.errorCount === 0 && digest.warnCount === 0) return;
-  const policy = alertEmailPolicy("local");
-  const subject = policy.subject(
-    `[BetterOSF] ${digest.errorCount} error(s), ${digest.warnCount} warning(s) from local/preview servers in last ${windowHours}h`,
-  );
-  const appUrl = process.env.NEXT_PUBLIC_BASE_URL?.trim() || "https://betterosf.vercel.app";
-  const { html, text } = await renderEmail(AdminDigestEmail({ appName: "BetterOSF", appUrl, digest, banner: policy.banner }));
-  await sendEmail({
-    to,
-    subject,
-    html,
-    text,
-    idempotencyKey: `admin-digest-nonprod-${new Date().toISOString().slice(0, 10)}`,
-  });
 }

@@ -268,3 +268,19 @@ export const transitionItems = pgTable(
 );
 
 // <website-upgrade:schema-end>
+
+// One row per issue fingerprint (admin email standard §5). Drives the 24 h mute,
+// the daily cap, and the fortnight digest's open/resolved lists.
+export const adminAlerts = pgTable("admin_alerts", {
+  fingerprint: text("fingerprint").primaryKey(),
+  priority: text("priority").notNull(),
+  event: text("event").notNull(),
+  summary: text("summary").notNull(),
+  sample: jsonb("sample").notNull().default({}),
+  count: integer("count").notNull().default(1),
+  countSinceAlert: integer("count_since_alert").notNull().default(0),
+  firstSeen: timestamp("first_seen", { withTimezone: true }).notNull().defaultNow(),
+  lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
+  lastAlertedAt: timestamp("last_alerted_at", { withTimezone: true }),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+});

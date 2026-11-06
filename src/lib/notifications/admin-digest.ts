@@ -1,108 +1,90 @@
-import { and, count, desc, gte, inArray, sql } from "drizzle-orm";
+import { and, gte, lt, isNull, isNotNull, inArray, eq, count, desc, sql } from "drizzle-orm";
 import { requireDb } from "@/lib/db";
-import { systemLogs } from "@/lib/db/schema";
+import { adminAlerts, bugReports, systemLogs } from "@/lib/db/schema";
+import type { AdminIssue, DigestInput, Priority } from "./admin-email";
 
-export interface DigestGroup {
-  event: string;
-  count: number;
-  lastSeen: string;
-  sampleMeta: Record<string, unknown> | null;
+/**
+ * Collect the fortnight digest (admin email standard §7). Pure read.
+ * Window: from the latest 1st/15th 06:00 UTC boundary that is at least 12 h old, to now.
+ * Run by the cron `0 6 1,15 * *` that is the previous boundary, so consecutive digests
+ * tile the calendar; a manual run mid-fortnight covers the fortnight so far.
+ * Also auto-resolves issues not seen for 14 days (resolved_at), so "still open"
+ * means "seen recently".
+ */
+export function previousDigestBoundary(now = new Date()): Date {
+  const t = new Date(now.getTime() - 12 * 3600 * 1000);
+  const y = t.getUTCFullYear(), m = t.getUTCMonth();
+  for (const b of [Date.UTC(y, m, 15, 6), Date.UTC(y, m, 1, 6), Date.UTC(y, m - 1, 15, 6)]) {
+    if (b <= t.getTime()) return new Date(b);
+  }
+  return new Date(Date.UTC(y, m - 1, 15, 6)); // unreachable
 }
 
-export interface DigestRow {
-  level: string;
-  event: string;
-  createdAt: string;
-  meta: Record<string, unknown> | null;
-}
-
-export interface AdminDigest {
-  windowHours: number;
-  errorCount: number;
-  warnCount: number;
-  groups: DigestGroup[];
-  recent: DigestRow[];
-  /**
-   * Error/warn events from local, preview or development servers that this digest left out
-   * (d-bf671b). Local dev shares this log table; its failures are not production news.
-   */
-  nonProductionExcluded: number;
-}
-
-/** A row with no `_env` predates the label; it is kept, so an upgrade cannot hide an error. */
-function isProductionRow(context: unknown): boolean {
-  const env = (context as { _env?: unknown } | null)?._env;
-  return env === undefined || env === null || env === "production";
-}
-
-const MAX_ROWS = 1000;
-const MAX_RECENT = 20;
-
-function iso(d: unknown): string {
-  if (d instanceof Date) return d.toISOString();
-  return String(d ?? "");
-}
-
-function eventKey(type: string, message: string): string {
-  return `${type}|${message.slice(0, 120)}`;
-}
-
-export async function collectAdminDigest(
-  windowHours = 24,
-  opts: { scope?: "production" | "non-production" } = {},
-): Promise<AdminDigest> {
-  const scope = opts.scope ?? "production";
+export async function collectFortnightDigest(app: string, environment: string, adminUrl?: string,
+                                             now = new Date()): Promise<DigestInput> {
   const db = requireDb();
-  const since = new Date(Date.now() - windowHours * 3_600_000);
+  const start = previousDigestBoundary(now);
+  const staleCut = new Date(now.getTime() - 14 * 24 * 3600 * 1000);
 
-  // The environment filter is in SQL, BEFORE the row cap: filtering after the cap let a
-  // noisy local session push real production errors out of the window. A row with no
-  // `_env` predates the label and counts as production (see isProductionRow).
-  const isProduction = sql`coalesce(${systemLogs.context}->>'_env', 'production') = 'production'`;
-  const inScope = scope === "production" ? isProduction : sql`not (${isProduction})`;
-  const base = and(gte(systemLogs.createdAt, since), inArray(systemLogs.level, ["error", "warn"]));
+  const resolvedRows = await db.update(adminAlerts)
+    .set({ resolvedAt: sql`now()` })
+    .where(and(isNull(adminAlerts.resolvedAt), lt(adminAlerts.lastSeen, staleCut)))
+    .returning();
 
-  const fetched = await db
-    .select()
-    .from(systemLogs)
-    .where(and(base, inScope))
-    .orderBy(desc(systemLogs.createdAt))
-    .limit(MAX_ROWS);
-  // Belt and braces: the same rule in code, so a driver quirk cannot widen the scope.
-  const rows = fetched.filter((r) => isProductionRow(r.context) === (scope === "production"));
+  const openRows = await db.select().from(adminAlerts)
+    .where(and(isNull(adminAlerts.resolvedAt), inArray(adminAlerts.priority, ["P1", "P2", "P3"])))
+    .orderBy(desc(adminAlerts.lastSeen)).limit(50);
 
-  let nonProductionExcluded = 0;
-  if (scope === "production") {
-    const [excluded] = await db.select({ n: count() }).from(systemLogs).where(and(base, sql`not (${isProduction})`));
-    nonProductionExcluded = Number(excluded?.n ?? 0);
-  }
+  const earlierResolved = await db.select().from(adminAlerts)
+    .where(and(isNotNull(adminAlerts.resolvedAt), gte(adminAlerts.resolvedAt, start)))
+    .limit(50);
 
-  const errorCount = rows.filter((r) => r.level === "error").length;
-  const warnCount = rows.filter((r) => r.level === "warn").length;
+  // Local dev shares this log table: count production-origin rows only. A row without the
+  // `_env` label predates it and counts as production, so an upgrade cannot hide an error.
+  const prodRow = sql`(${systemLogs.context}->>'_env' IS NULL OR ${systemLogs.context}->>'_env' = 'production')`;
+  const noise = await db.select({ event: systemLogs.type, n: count() }).from(systemLogs)
+    .where(and(eq(systemLogs.level, "warn"), gte(systemLogs.createdAt, start), prodRow))
+    .groupBy(systemLogs.type).orderBy(desc(count())).limit(15);
 
-  const byEvent = new Map<string, DigestGroup>();
-  for (const r of rows) {
-    const key = eventKey(r.type, r.message);
-    const g = byEvent.get(key);
-    if (g) {
-      g.count += 1;
-    } else {
-      byEvent.set(key, {
-        event: key,
-        count: 1,
-        lastSeen: iso(r.createdAt),
-        sampleMeta: (r.context as Record<string, unknown> | null) ?? null,
-      });
-    }
-  }
-  const groups = [...byEvent.values()].sort((a, b) => b.count - a.count);
+  const byLevel = await db.select({ level: systemLogs.level, n: count() }).from(systemLogs)
+    .where(and(gte(systemLogs.createdAt, start), prodRow)).groupBy(systemLogs.level);
+  const lvl = (l: string) => Number(byLevel.find((r) => r.level === l)?.n ?? 0);
 
-  const recent: DigestRow[] = rows.slice(0, MAX_RECENT).map((r) => ({
-    level: r.level,
-    event: eventKey(r.type, r.message),
-    createdAt: iso(r.createdAt),
-    meta: (r.context as Record<string, unknown> | null) ?? null,
-  }));
+  const [sentRow] = await db.select({ alertsSent: count() }).from(adminAlerts)
+    .where(gte(adminAlerts.lastAlertedAt, start));
+  const [lastRow] = await db.select({ lastAlert: sql<Date | null>`max(${adminAlerts.lastAlertedAt})` }).from(adminAlerts);
 
-  return { windowHours, errorCount, warnCount, groups, recent, nonProductionExcluded };
+  const reportKinds = await db.select({ kind: bugReports.kind, n: count() }).from(bugReports)
+    .where(gte(bugReports.createdAt, start)).groupBy(bugReports.kind);
+  const reports = reportKinds.reduce((a, r) => a + Number(r.n), 0);
+
+  const toIssue = (r: typeof openRows[number]): AdminIssue => ({
+    app, environment, priority: r.priority as Priority, summary: r.summary,
+    explanation: r.summary, event: r.event, fingerprint: r.fingerprint, count: r.count,
+    firstSeen: r.firstSeen.toISOString(), lastSeen: r.lastSeen.toISOString(),
+    message: String((r.sample as { message?: unknown })?.message ?? ""),
+    adminLogUrl: adminUrl ? `${adminUrl}/logs?q=${encodeURIComponent(r.event)}` : undefined,
+  });
+  const seen = new Set<string>();
+  const resolved = [...resolvedRows, ...earlierResolved].filter((r) => !seen.has(r.fingerprint) && seen.add(r.fingerprint))
+    .map((r) => ({ summary: r.summary, fingerprint: r.fingerprint, resolvedAt: (r.resolvedAt ?? now).toISOString().slice(0, 10) }));
+
+  return {
+    app, environment, periodStart: start.toISOString(), periodEnd: now.toISOString(),
+    open: openRows.map(toIssue), resolved,
+    noise: noise.map((n) => ({ event: n.event, count: Number(n.n) })),
+    // Hosts: append their own usage numbers here (sign-ups, jobs run...) — from the DB only.
+    numbers: [
+      { label: "Errors logged", value: lvl("error") },
+      { label: "Warnings logged", value: lvl("warn") },
+      { label: "Open issues", value: openRows.length },
+      { label: "Alerts sent", value: Number(sentRow?.alertsSent ?? 0) },
+      { label: "User reports (bugs, ideas, questions)", value: reports },
+    ],
+    alertingHealth: [
+      { label: "Last issue alert sent", value: lastRow?.lastAlert ? new Date(lastRow.lastAlert).toISOString() : "none ever" },
+      { label: "Digest window", value: `${start.toISOString()} → ${now.toISOString()}` },
+    ],
+    adminUrl,
+  };
 }

@@ -3,15 +3,15 @@ import { requireAdmin } from "@/lib/admin";
 import { sendEmail, renderEmail } from "@/lib/email";
 import { EmailLayout } from "@/lib/email/templates/layout";
 import * as React from "react";
-import { alertEmailPolicy, deploymentEnvironment } from "@/lib/alert-env";
+import { emailPolicy, environmentLabel } from "@/lib/notifications/admin-email";
 
-/** The operator's own configured addresses; nobody else can be targeted from this route. */
-const allowedRecipients = () =>
-  new Set(
-    [process.env.ADMIN_NOTIFY_EMAIL, process.env.NEXT_PUBLIC_ADMIN_EMAIL]
-      .map((e) => (e ?? "").trim().toLowerCase())
-      .filter(Boolean),
-  );
+/** The operator's own configured addresses (ADMIN_NOTIFY_EMAIL, one or a comma list); nobody else can be targeted. */
+const configured = () =>
+  (process.env.ADMIN_NOTIFY_EMAIL ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+const allowedRecipients = () => new Set(configured());
 
 /** Admin-only test send — allowlisted recipients only. */
 export async function POST(req: NextRequest) {
@@ -21,13 +21,9 @@ export async function POST(req: NextRequest) {
   let to = "";
   try {
     const body = (await req.json()) as { to?: string };
-    to = (body.to ?? process.env.ADMIN_NOTIFY_EMAIL ?? process.env.NEXT_PUBLIC_ADMIN_EMAIL ?? "")
-      .trim()
-      .toLowerCase();
+    to = (body.to ?? configured()[0] ?? "").trim().toLowerCase();
   } catch {
-    to = (process.env.ADMIN_NOTIFY_EMAIL ?? process.env.NEXT_PUBLIC_ADMIN_EMAIL ?? "")
-      .trim()
-      .toLowerCase();
+    to = (configured()[0] ?? "").trim().toLowerCase();
   }
 
   if (!to || (!allowedRecipients().has(to) && !to.endsWith("@simulator.amazonses.com"))) {
@@ -47,7 +43,7 @@ export async function POST(req: NextRequest) {
     to,
     // An explicit admin test, so it is always sent — but from a non-production server the
     // subject says so (d-bf671b): it must never read as a live-site message.
-    subject: alertEmailPolicy(deploymentEnvironment(), { optIn: true }).subject("[BetterOSF] SES test"),
+    subject: `${emailPolicy(environmentLabel(), { ALERT_EMAILS_NON_PRODUCTION: "1" }).prefix}[BetterOSF] SES test`,
     html,
     text,
     idempotencyKey: `ses-test-${to}-${new Date().toISOString().slice(0, 13)}`,

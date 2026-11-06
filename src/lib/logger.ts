@@ -3,7 +3,7 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { systemLogs } from "@/lib/db/schema";
-import { deploymentEnvironment } from "@/lib/alert-env";
+import { environmentLabel } from "@/lib/notifications/admin-email";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogType =
@@ -93,15 +93,28 @@ async function writeLog(
   const db = getDb();
   if (!db) return;
   try {
-    await db.insert(systemLogs).values({
+    const row = {
       level,
       type,
       message: truncateMessage(message),
       // `_env` records where the event HAPPENED (d-bf671b). Local dev shares this table, and
       // the admin digest emails only production events — it can tell them apart only by this.
-      context: { ...truncateContext(redactContext(context)), _env: deploymentEnvironment() },
+      context: { ...truncateContext(redactContext(context)), _env: environmentLabel() },
       userId: userId ?? null,
-    });
+    };
+    await db.insert(systemLogs).values(row);
+    // Admin email standard: an error row may raise an issue alert (deduped, production only).
+    // Dynamic import avoids a cycle and keeps the SES client out of non-error paths.
+    if (level === "error") {
+      void import("./notifications/admin-alert").then((m) =>
+        m.maybeAlert({
+          level,
+          event: type,
+          message,
+          context: { ...row.context, stack: (context ?? {}).errorStack, route: (context ?? {}).route ?? (context ?? {}).path },
+        }),
+      );
+    }
     void maybeCleanup();
   } catch (err) {
     console.error("[logger]", err);

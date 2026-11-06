@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Admin email now follows the maintainer's admin-email standard.** Two kinds only: an *issue alert* the moment
+  an error is logged (priority P1-P4, plain summary, importance line, every error field, stack top,
+  a "Start a Claude Code session on this issue" button, one email per issue per 24 h, at most 10 a
+  day, production only) and a *fortnight digest* on the 1st and 15th (cron `0 6 1,15 * *`). The daily
+  `/api/cron/admin-error-digest` is gone. A bug report from a user is now a P3 issue alert
+  (`source: user report`) instead of its own template; the reporter's address stays on /admin/feedback.
+- `ADMIN_NOTIFY_EMAIL` is the only recipient variable (`NEXT_PUBLIC_ADMIN_EMAIL`, which also leaked
+  the address into the browser bundle, is no longer read). New `ADMIN_EMAIL_SESSION_FOLDER`.
+- New table `admin_alerts` (migration `0006_admin_alerts.sql`); `src/lib/alert-env.ts` replaced by the
+  shared renderer's `environmentLabel` / `emailPolicy`. Local events are no longer recorded as alerts
+  unless `ALERT_EMAILS_NON_PRODUCTION=1`, since local dev shares the production database.
+
 ## 1.14.3 — 2026-11-04
 
 ### Fixed
