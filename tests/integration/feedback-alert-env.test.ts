@@ -21,7 +21,10 @@ function post(): Request {
   });
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  process.env.ADMIN_NOTIFY_EMAIL = "admin@example.test";
+});
 
 describe("bug report raises a user-report issue alert", () => {
   it("stores the report and raises one P3 alert without the reporter's address", async () => {

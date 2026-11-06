@@ -130,6 +130,10 @@ async function notifyAdmin(report: {
   // report is already stored; the alert carries the facts, never the reporter's address
   // (that stays on /admin/feedback). Production only: a report filed against a local server
   // is stored and visible there, emailed only with the opt-in, labelled by the shared policy.
+  if (!process.env.ADMIN_NOTIFY_EMAIL?.trim()) {
+    console.warn("[feedback] ADMIN_NOTIFY_EMAIL is not set: the report is stored but no alert is sent");
+    return false;
+  }
   const { maybeAlert } = await import("@/lib/notifications/admin-alert");
   const appUrl = (process.env.NEXT_PUBLIC_BASE_URL?.trim() || "https://betterosf.vercel.app").replace(/\/$/, "");
   const kindLabel = report.kind === "idea" ? "idea" : report.kind === "question" ? "question" : "bug report";
