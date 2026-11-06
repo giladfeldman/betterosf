@@ -113,7 +113,7 @@ async function writeLog(
           message,
           context: { ...row.context, stack: (context ?? {}).errorStack, route: (context ?? {}).route ?? (context ?? {}).path },
         }),
-      );
+      ).catch((err) => console.error("[logger] admin alert failed", err));
     }
     void maybeCleanup();
   } catch (err) {
