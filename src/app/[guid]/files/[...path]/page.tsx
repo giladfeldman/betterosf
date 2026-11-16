@@ -161,6 +161,7 @@ export default async function DeepFilesPage({
             parentTree={fullTree.parentTree}
             readOnly={kind === "registration"}
             degraded={fullTree.degraded}
+            componentsFailed={fullTree.componentsFailed}
           />
         }
         right={

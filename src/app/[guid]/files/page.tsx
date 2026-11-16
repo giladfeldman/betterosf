@@ -57,6 +57,7 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
             parentTree={fullTree.parentTree}
             readOnly={isRegistration}
             degraded={fullTree.degraded}
+            componentsFailed={fullTree.componentsFailed}
           />
         }
         right={

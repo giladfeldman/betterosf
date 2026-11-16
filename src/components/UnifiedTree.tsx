@@ -17,6 +17,7 @@ import type { DroppedNode } from "@/lib/upload/types";
 import { getPref, setPref } from "@/lib/prefs";
 import { listPins, type FavoriteRef } from "@/lib/favorites";
 import { readErrorResponse } from "@/lib/http/read-error";
+import { selectHydrationTasks, mayHaveComponents, componentListsToFetch } from "@/lib/tree/nested-components";
 
 type FlatRow = {
   id: string;
@@ -25,7 +26,15 @@ type FlatRow = {
   hasChildren: boolean;
   expanded: boolean;
   onToggle: () => void;
+  /** Retry for a row whose failure is not a folder listing (e.g. a component list). */
+  retryAction?: () => void;
 };
+
+/** One node's component list, fetched when the user opens that node. */
+type ChildList =
+  | { status: "loading" }
+  | { status: "ok"; items: ComponentTree[] }
+  | { status: "error"; message: string };
 
 type LoadedEntries = Record<string, FileEntry[]>; // keyed by `${nodeGuid}|${provider}:${materializedPath}`
 
@@ -46,6 +55,15 @@ const MAX_LEVEL = 5;
 // initial render — and OSF folder-listing calls — to a single level until the
 // user asks for more via the Levels stepper / "Expand all".
 const DEFAULT_MAX_DEPTH = 1;
+// Above this many components, component rows start collapsed and their folders
+// load only when opened. A 100-component project (df9tj) would otherwise fire a
+// folder walk per component on every visit and trip OSF's rate limit.
+const AUTO_EXPAND_COMPONENTS_MAX = 10;
+// Above this many un-indexed sections (components + linked + registrations +
+// parent), background indexing stops and each section loads when opened.
+const AUTO_HYDRATE_MAX = 10;
+/** Component-list requests (`/api/osf/children/…`) allowed in flight at once. */
+const MAX_CHILD_LIST_FETCHES = 3;
 
 type HydrationKind = "component" | "linked" | "registration" | "parent";
 
@@ -162,6 +180,7 @@ export function UnifiedTree({
   parentTree,
   readOnly = false,
   degraded = false,
+  componentsFailed = false,
 }: {
   guid: string;
   rootTitle: string;
@@ -186,6 +205,8 @@ export function UnifiedTree({
   /** The server-rendered tree was degraded (OSF backpressure during the skeleton
    *  walk) and may be missing folders — show a "partially loaded, refresh" notice. */
   degraded?: boolean;
+  /** OSF's component list could not be fetched: the component count is unknown, not 0. */
+  componentsFailed?: boolean;
 }) {
   const [pinned, setPinned] = useState<FavoriteRef[]>([]);
   useEffect(() => {
@@ -204,12 +225,18 @@ export function UnifiedTree({
   const [rateLimitedUntil, setRateLimitedUntil] = useState(0);
   const [hydrationNow, setHydrationNow] = useState(Date.now());
   const hydrationInFlightRef = useRef<string | null>(null);
+  // Components of components (and of linked projects), keyed by the parent's guid.
+  // Fetched only when that parent is opened.
+  const [childLists, setChildLists] = useState<Record<string, ChildList>>({});
+  const childListInFlightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setComponentTreeState(componentTrees ?? []);
     setRegistrationTreeState(registrationTrees ?? []);
     setLinkedTreeState(linkedTrees ?? []);
     setParentTreeState(parentTree ?? null);
+    setChildLists({});
+    childListInFlightRef.current = new Set();
     setHydratedIds({});
     setHydrationFailures({});
     setPriorityHydrationIds([]);
@@ -248,8 +275,10 @@ export function UnifiedTree({
       walkSkeleton(p.children, `root/provider:${p.provider}`);
     }
 
-    // Each component: auto-expand the component node + its providers + folders
-    if (componentTreeState) {
+    // Each component: auto-expand the component node + its providers + folders —
+    // only for a handful of components. A long list starts collapsed so the user
+    // sees every component title at once and opens the one they want.
+    if (componentTreeState && componentTreeState.length <= AUTO_EXPAND_COMPONENTS_MAX) {
       for (const c of componentTreeState) {
         e[`component/${c.guid}`] = true;
         for (const p of c.skeleton) {
@@ -425,19 +454,29 @@ export function UnifiedTree({
     []
   );
 
+  // Top-level components plus every nested component loaded so far.
+  const nestedComponentTrees = useMemo<ComponentTree[]>(
+    () => Object.values(childLists).flatMap((l) => (l.status === "ok" ? l.items : [])),
+    [childLists]
+  );
+  const allComponentTrees = useMemo<ComponentTree[]>(
+    () => [...componentTreeState, ...nestedComponentTrees],
+    [componentTreeState, nestedComponentTrees]
+  );
+
   const hydrationTasks = useMemo<HydrationTask[]>(() => {
-    const tasks: HydrationTask[] = [];
+    const top: HydrationTask[] = [];
     for (const c of componentTreeState) {
-      if (c.skipped) tasks.push({ id: hydrationTaskId("component", c.guid), kind: "component", guid: c.guid, title: c.title, apiKind: "node" });
+      if (c.skipped) top.push({ id: hydrationTaskId("component", c.guid), kind: "component", guid: c.guid, title: c.title, apiKind: "node" });
     }
     for (const l of linkedTreeState) {
-      if (l.skipped) tasks.push({ id: hydrationTaskId("linked", l.guid), kind: "linked", guid: l.guid, title: l.title, apiKind: "node" });
+      if (l.skipped) top.push({ id: hydrationTaskId("linked", l.guid), kind: "linked", guid: l.guid, title: l.title, apiKind: "node" });
     }
     for (const r of registrationTreeState) {
-      if (r.skipped) tasks.push({ id: hydrationTaskId("registration", r.guid), kind: "registration", guid: r.guid, title: r.title, apiKind: "registration" });
+      if (r.skipped) top.push({ id: hydrationTaskId("registration", r.guid), kind: "registration", guid: r.guid, title: r.title, apiKind: "registration" });
     }
     if (parentTreeState?.skipped) {
-      tasks.push({
+      top.push({
         id: hydrationTaskId("parent", parentTreeState.guid),
         kind: "parent",
         guid: parentTreeState.guid,
@@ -445,13 +484,21 @@ export function UnifiedTree({
         apiKind: "node",
       });
     }
-    return tasks;
-  }, [componentTreeState, linkedTreeState, registrationTreeState, parentTreeState]);
+    return selectHydrationTasks(
+      top,
+      nestedComponentTrees
+        .filter((c) => c.skipped)
+        .map((c) => ({ id: hydrationTaskId("component", c.guid), kind: "component" as const, guid: c.guid, title: c.title, apiKind: "node" as const })),
+      expanded,
+      AUTO_HYDRATE_MAX
+    );
+  }, [componentTreeState, nestedComponentTrees, linkedTreeState, registrationTreeState, parentTreeState, expanded]);
 
   const hydrationTaskById = useMemo(() => new Map(hydrationTasks.map((task) => [task.id, task])), [hydrationTasks]);
   const failedHydrationCount = Object.values(hydrationFailures).filter((failure) => failure.attempts >= HYDRATION_MAX_ATTEMPTS).length;
   const successfulHydrationCount = Object.keys(hydratedIds).length;
   const hydrationTotal = successfulHydrationCount + hydrationTasks.length;
+  const scheduledIds = useMemo(() => new Set(hydrationTasks.map((t) => t.id)), [hydrationTasks]);
 
   useEffect(() => {
     if (hydrationTasks.length === 0 && rateLimitedUntil <= Date.now()) return;
@@ -463,6 +510,23 @@ export function UnifiedTree({
     (task: HydrationTask, nextSkeleton: SkeletonNode[]) => {
       if (task.kind === "component") {
         setComponentTreeState((prev) => prev.map((item) => item.guid === task.guid ? { ...item, skeleton: nextSkeleton, skipped: false } : item));
+        // The same component may be a nested one: update it where it lives.
+        setChildLists((prev) => {
+          let changed = false;
+          const next: Record<string, ChildList> = {};
+          for (const [parent, list] of Object.entries(prev)) {
+            if (list.status === "ok" && list.items.some((item) => item.guid === task.guid)) {
+              changed = true;
+              next[parent] = {
+                status: "ok",
+                items: list.items.map((item) => item.guid === task.guid ? { ...item, skeleton: nextSkeleton, skipped: false } : item),
+              };
+            } else {
+              next[parent] = list;
+            }
+          }
+          return changed ? next : prev;
+        });
       } else if (task.kind === "linked") {
         setLinkedTreeState((prev) => prev.map((item) => item.guid === task.guid ? { ...item, skeleton: nextSkeleton, skipped: false } : item));
       } else if (task.kind === "parent") {
@@ -570,6 +634,44 @@ export function UnifiedTree({
     void hydrate();
   }, [applyHydratedSkeleton, nextHydrationTask]);
 
+  // Load a node's own components (nested components) the first time it is opened.
+  const fetchChildList = useCallback(async (parentGuid: string) => {
+    if (childListInFlightRef.current.has(parentGuid)) return;
+    childListInFlightRef.current.add(parentGuid);
+    setChildLists((prev) => ({ ...prev, [parentGuid]: { status: "loading" } }));
+    try {
+      const res = await fetch(`/api/osf/children/${parentGuid}`, { cache: "no-store" });
+      if (!res.ok) {
+        const { message } = await readErrorResponse(res);
+        throw new Error(message || `OSF returned ${res.status}`);
+      }
+      const data = (await res.json()) as { children?: unknown };
+      // A malformed answer is a failure, not an empty list.
+      if (!Array.isArray(data.children)) throw new Error("Unexpected answer while loading components");
+      const items = data.children as ComponentTree[];
+      setChildLists((prev) => ({ ...prev, [parentGuid]: { status: "ok", items } }));
+    } catch (e) {
+      setChildLists((prev) => ({
+        ...prev,
+        [parentGuid]: { status: "error", message: e instanceof Error ? e.message.slice(0, 200) : "Couldn't load components" },
+      }));
+    } finally {
+      childListInFlightRef.current.delete(parentGuid);
+    }
+  }, []);
+
+  useEffect(() => {
+    const nodes = [
+      ...allComponentTrees.map((c) => ({ rowId: `component/${c.guid}`, guid: c.guid, childCount: c.childCount })),
+      ...linkedTreeState.map((l) => ({ rowId: `linked/${l.guid}`, guid: l.guid, childCount: l.childCount })),
+    ];
+    // At most 3 component-list requests in flight: "Expand all" / "Collapse all" mark every
+    // component open at once, and each list is a paginated OSF call. The effect re-runs
+    // when a list lands (childLists changes), so the rest drain three at a time.
+    const slots = Math.max(0, MAX_CHILD_LIST_FETCHES - childListInFlightRef.current.size);
+    for (const g of componentListsToFetch(nodes, expanded, childLists).slice(0, slots)) void fetchChildList(g);
+  }, [allComponentTrees, linkedTreeState, expanded, childLists, fetchChildList]);
+
   // Progressive auto-load: fill the navigator with ALL folders/files without
   // the user clicking through each level. We walk the known folder tree —
   // static skeleton folders AND dynamically-loaded subfolders — auto-expanding
@@ -632,7 +734,7 @@ export function UnifiedTree({
     };
 
     if (expanded["providers-root"]) visitProviderSet(guid, skeleton, "root");
-    for (const c of componentTreeState ?? []) {
+    for (const c of allComponentTrees) {
       if (!c.skipped && expanded[`component/${c.guid}`]) visitProviderSet(c.guid, c.skeleton, `component/${c.guid}`);
     }
     for (const r of registrationTreeState ?? []) {
@@ -662,7 +764,7 @@ export function UnifiedTree({
         void fetchFiles(t.nodeGuid, t.provider, t.materializedPath, t.listingUrl);
       }
     }
-  }, [expanded, loadedEntries, loadingKeys, skeleton, componentTreeState, registrationTreeState, linkedTreeState, parentTreeState, guid, fetchFiles, setExpanded, retryNonce, maxDepth, forcedOpen]);
+  }, [expanded, loadedEntries, loadingKeys, skeleton, allComponentTrees, registrationTreeState, linkedTreeState, parentTreeState, guid, fetchFiles, setExpanded, retryNonce, maxDepth, forcedOpen]);
 
   const toggleSelected = useCallback((payload: TreeSelectionPayload, checked: boolean) => {
     const key = selectionKey(payload);
@@ -1191,7 +1293,7 @@ export function UnifiedTree({
           label: `Parent: ${parentTreeState.title}`,
           kind: "parent",
           href: `/${parentTreeState.guid}`,
-          badge: parentTreeState.skipped ? (failed ? "retry" : "indexing") : parentTreeState.isPublic ? undefined : "private",
+          badge: parentTreeState.skipped ? (failed ? "retry" : scheduledIds.has(task.id) ? "indexing" : undefined) : parentTreeState.isPublic ? undefined : "private",
           loading: parentTreeState.skipped && runningHydrationId === task.id,
           guid: parentTreeState.guid,
         },
@@ -1215,7 +1317,69 @@ export function UnifiedTree({
       emitNodeSubtree(guid, skeleton, "root", 1, !readOnly, "project", rootTitle);
     }
 
+    /**
+     * One component row, then (when open) its storage and its own components,
+     * recursively. `ancestors` guards against a cycle in what OSF returns.
+     */
+    function emitComponent(c: ComponentTree, depth: number, ancestors: ReadonlySet<string>) {
+      const compId = `component/${c.guid}`;
+      const task: HydrationTask = { id: hydrationTaskId("component", c.guid), kind: "component", guid: c.guid, title: c.title, apiKind: "node" };
+      const failure = hydrationFailures[task.id];
+      const failed = failure && failure.attempts >= HYDRATION_MAX_ATTEMPTS;
+      const list = childLists[c.guid];
+      rows.push({
+        id: compId,
+        depth,
+        expanded: !!expanded[compId],
+        hasChildren: c.skeleton.length > 0 || c.skipped || mayHaveComponents(c.childCount),
+        onToggle: () => {
+          const nextOpen = !expanded[compId];
+          setExpanded({ ...expanded, [compId]: nextOpen });
+          if (nextOpen && c.skipped) queueHydrationTask(task);
+        },
+        node: {
+          id: c.guid,
+          label: c.title,
+          kind: "component",
+          href: `/${c.guid}`,
+          // "indexing" only while it is queued to load; a closed component in a
+          // long list is simply not loaded yet.
+          badge: c.skipped ? (failed ? "retry" : scheduledIds.has(task.id) ? "indexing" : undefined) : c.isPublic ? undefined : "private",
+          componentCount: c.childCount,
+          loading: (c.skipped && runningHydrationId === task.id) || list?.status === "loading",
+          failed: list?.status === "error",
+          failedMessage: list?.status === "error" ? list.message : undefined,
+        },
+        retryAction: list?.status === "error" ? () => void fetchChildList(c.guid) : undefined,
+      });
+      if (!expanded[compId]) return;
+      if (!c.skipped) emitNodeSubtree(c.guid, c.skeleton, compId, depth + 1, true, "component", c.title);
+      emitChildComponents(c.guid, depth + 1, ancestors);
+    }
+
+    /** The loaded components of `parentGuid`, as rows at `depth`. */
+    function emitChildComponents(parentGuid: string, depth: number, ancestors: ReadonlySet<string>) {
+      const list = childLists[parentGuid];
+      if (list?.status !== "ok") return;
+      const nextAncestors = new Set(ancestors).add(parentGuid);
+      for (const k of list.items) {
+        if (nextAncestors.has(k.guid)) continue;
+        emitComponent(k, depth, nextAncestors);
+      }
+    }
+
     // Components root
+    if (components.length === 0 && componentsFailed) {
+      // Unknown is not zero: say the list could not be loaded instead of hiding it.
+      rows.push({
+        id: "components-root",
+        depth: 0,
+        expanded: false,
+        hasChildren: false,
+        onToggle: () => {},
+        node: { id: "components-root", label: "Components (couldn't load from OSF; refresh to try again)", kind: "components-root" },
+      });
+    }
     if (components.length > 0) {
       rows.push({
         id: "components-root",
@@ -1228,35 +1392,8 @@ export function UnifiedTree({
 
       if (expanded["components-root"]) {
         if (componentTreeState.length > 0) {
-          for (const c of componentTreeState) {
-            const compId = `component/${c.guid}`;
-            const task: HydrationTask = { id: hydrationTaskId("component", c.guid), kind: "component", guid: c.guid, title: c.title, apiKind: "node" };
-            const failure = hydrationFailures[task.id];
-            const failed = failure && failure.attempts >= HYDRATION_MAX_ATTEMPTS;
-            const compHasContent = c.skeleton.length > 0;
-            rows.push({
-              id: compId,
-              depth: 1,
-              expanded: !!expanded[compId],
-              hasChildren: compHasContent || c.skipped,
-              onToggle: () => {
-                const nextOpen = !expanded[compId];
-                setExpanded({ ...expanded, [compId]: nextOpen });
-                if (nextOpen && c.skipped) queueHydrationTask(task);
-              },
-              node: {
-                id: c.guid,
-                label: c.title,
-                kind: "component",
-                href: `/${c.guid}`,
-                badge: c.skipped ? (failed ? "retry" : "indexing") : c.isPublic ? undefined : "private",
-                loading: c.skipped && runningHydrationId === task.id,
-              },
-            });
-            if (expanded[compId] && !c.skipped) {
-              emitNodeSubtree(c.guid, c.skeleton, compId, 2, true, "component", c.title);
-            }
-          }
+          const rootAncestors = new Set([guid]);
+          for (const c of componentTreeState) emitComponent(c, 1, rootAncestors);
         } else {
           // Fallback: flat list (used when caller didn't provide componentTrees)
           for (const c of components) {
@@ -1291,7 +1428,8 @@ export function UnifiedTree({
             const task: HydrationTask = { id: hydrationTaskId("linked", l.guid), kind: "linked", guid: l.guid, title: l.title, apiKind: "node" };
             const failure = hydrationFailures[task.id];
             const failed = failure && failure.attempts >= HYDRATION_MAX_ATTEMPTS;
-            const linkedHasContent = l.skeleton.length > 0;
+            const linkedHasContent = l.skeleton.length > 0 || mayHaveComponents(l.childCount);
+            const linkedList = childLists[l.guid];
             rows.push({
               id: linkedId,
               depth: 1,
@@ -1310,13 +1448,19 @@ export function UnifiedTree({
                 // Keep same-tab so clicking expands; if the user wants the
                 // linked project in a new tab, right-click → open-in-new-tab.
                 newTab: false,
-                badge: l.skipped ? (failed ? "retry" : "indexing") : l.isPublic ? undefined : "private",
-                loading: l.skipped && runningHydrationId === task.id,
+                badge: l.skipped ? (failed ? "retry" : scheduledIds.has(task.id) ? "indexing" : undefined) : l.isPublic ? undefined : "private",
+                componentCount: l.childCount,
+                loading: (l.skipped && runningHydrationId === task.id) || linkedList?.status === "loading",
+                failed: linkedList?.status === "error",
+                failedMessage: linkedList?.status === "error" ? linkedList.message : undefined,
               },
+              retryAction: linkedList?.status === "error" ? () => void fetchChildList(l.guid) : undefined,
             });
             if (expanded[linkedId] && !l.skipped) {
               emitNodeSubtree(l.guid, l.skeleton, linkedId, 2, true, "linked", l.title);
             }
+            // A linked project's own components sit under it, like a project's.
+            if (expanded[linkedId]) emitChildComponents(l.guid, 2, new Set([guid]));
           }
         } else {
           // Fallback: leaf links (used when caller didn't provide linkedTrees)
@@ -1372,7 +1516,7 @@ export function UnifiedTree({
                 label: r.title || r.guid,
                 kind: "registration",
                 href: `/registrations/${r.guid}`,
-                badge: r.skipped ? (failed ? "retry" : "indexing") : r.isPublic ? undefined : "private",
+                badge: r.skipped ? (failed ? "retry" : scheduledIds.has(task.id) ? "indexing" : undefined) : r.isPublic ? undefined : "private",
                 loading: r.skipped && runningHydrationId === task.id,
               },
             });
@@ -1397,7 +1541,7 @@ export function UnifiedTree({
     }
 
     return rows;
-  }, [expanded, filesHidden, maxDepth, forcedOpen, setForcedOpen, loadedEntries, loadingKeys, folderFailures, readOnly, canWrite, skeleton, components, componentTreeState, linkedNodes, linkedTreeState, registrations, registrationTreeState, parentTreeState, pinned, rootTitle, guid, fetchFiles, setExpanded, queueHydrationTask, hydrationFailures, runningHydrationId]);
+  }, [expanded, filesHidden, maxDepth, forcedOpen, setForcedOpen, loadedEntries, loadingKeys, folderFailures, readOnly, canWrite, skeleton, components, componentsFailed, componentTreeState, childLists, fetchChildList, scheduledIds, linkedNodes, linkedTreeState, registrations, registrationTreeState, parentTreeState, pinned, rootTitle, guid, fetchFiles, setExpanded, queueHydrationTask, hydrationFailures, runningHydrationId]);
 
   const uploadTargets = useMemo(() => {
     const seen = new Set<string>();
@@ -1868,7 +2012,9 @@ export function UnifiedTree({
                   onCreateFolder={refreshUploadTarget}
                   onDropUpload={handleDropUpload}
                   onRetry={
-                    row.node.retry
+                    row.retryAction
+                      ? row.retryAction
+                      : row.node.retry
                       ? () => {
                           const r = row.node.retry!;
                           // Clear cached failure + entries so fetchFiles re-runs.

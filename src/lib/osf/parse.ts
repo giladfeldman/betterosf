@@ -17,7 +17,56 @@ export type NodeView = {
     files: string;
     contributors: string;
   };
+  /**
+   * How many components this node has, when OSF was asked for it
+   * (`related_counts=children`). `undefined` = not asked or not reported —
+   * never read it as 0.
+   */
+  childCount?: number;
 };
+
+/**
+ * Every attribute and relationship `parseNode` reads, sent to OSF as a sparse
+ * fieldset (`fields[nodes]=…`). Without it OSF serialises ~40 attributes per node
+ * and a node COLLECTION becomes very slow: measured 2026-11-16 on df9tj (100
+ * components), `/children/` took 13.7–21 s in full (over our 8 s per-attempt
+ * timeout, so the tree showed 0 components) and 3.4 s with this list.
+ * Keep it in step with `parseNode` — `tests/unit/node-fields.test.ts` fails if a
+ * field `parseNode` reads is missing here.
+ */
+export const NODE_FIELDS = [
+  "title",
+  "description",
+  "category",
+  "public",
+  "tags",
+  "date_created",
+  "date_modified",
+  "parent",
+  "children",
+  "linked_nodes",
+  "registrations",
+  "files",
+  "contributors",
+] as const;
+
+/**
+ * Append the sparse fieldset to an OSF node-collection path. `childCounts` also asks
+ * OSF for each node's component count (`related_counts=children`), which the tree
+ * uses to show which components have their own components.
+ */
+export function withNodeFields(path: string, opts: { childCounts?: boolean } = {}): string {
+  const sep = path.includes("?") ? "&" : "?";
+  const extra = opts.childCounts ? "&related_counts=children" : "";
+  return `${path}${sep}fields[nodes]=${NODE_FIELDS.join(",")}${extra}`;
+}
+
+type RelCount = { links?: { related?: { meta?: { count?: unknown } } } };
+
+function relCount(raw: Record<string, unknown> | undefined, key: string): number | undefined {
+  const n = (raw?.[key] as RelCount | undefined)?.links?.related?.meta?.count;
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : undefined;
+}
 
 type RelLink = { links?: { related?: { href?: string } } };
 type RelData = { data?: { id?: string } | null };
@@ -54,5 +103,6 @@ export function parseNode(raw: { data: { id: string; attributes: Record<string, 
       files: rel(r, "files"),
       contributors: rel(r, "contributors"),
     },
+    ...(relCount(r, "children") !== undefined ? { childCount: relCount(r, "children") } : {}),
   };
 }

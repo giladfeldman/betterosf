@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.15.0 — 2026-11-16
+
+### Added
+- **Components, and their own components, in the file navigator.** A project's components now
+  appear in the tree under "Components", and opening one shows its storage and any components
+  inside it, at any depth (a cycle guard stops a component that links back to an ancestor). Each
+  component row shows how many components it holds (🧩N). Nested lists load only when the
+  component is opened, through the new `/api/osf/children/[guid]` route, at most 3 at a time.
+  A project with more than 10 components starts with them closed and indexes only the ones
+  you open.
+
+### Fixed
+- **Projects with many components showed none.** OSF took 14-21 s to list the 100 components of
+  a large project, longer than BetterOSF's 8 s per-request limit, and the failure was shown as
+  "0 components". Node lists (components, linked projects, user projects, project search) now
+  ask OSF only for the fields BetterOSF reads (`fields[nodes]=…`), which brought that listing to
+  about 3-4 s. If the listing still fails, the tree says "couldn't load from OSF" and the
+  at-a-glance count shows "?" instead of 0.
+
 ## 1.14.4 — 2026-11-06
 
 ### Changed

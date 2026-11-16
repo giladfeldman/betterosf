@@ -12,6 +12,8 @@ export type ComponentTree = {
   skeleton: SkeletonNode[];
   /** True when we hit the recursion cap and skipped fetching this component's skeleton. */
   skipped: boolean;
+  /** This component's own component count from OSF; undefined = OSF did not say (unknown, not 0). */
+  childCount?: number;
 };
 
 export type RegistrationTree = {
@@ -30,6 +32,8 @@ export type LinkedTree = {
   isPublic: boolean;
   skeleton: SkeletonNode[];
   skipped: boolean;
+  /** The linked project's own component count; undefined = unknown. */
+  childCount?: number;
 };
 
 export type FullProjectTree = {
@@ -37,6 +41,8 @@ export type FullProjectTree = {
   components: ComponentTree[];
   /** Total component count from OSF (may exceed components.length when capped). */
   totalComponents: number;
+  /** True when OSF's component list could not be fetched — the count is UNKNOWN, not 0. */
+  componentsFailed?: boolean;
   /** Folder skeletons for each registration of this project. */
   registrationTrees: RegistrationTree[];
   totalRegistrations: number;
@@ -117,18 +123,22 @@ export async function collectFullTree(
   // succeeded with no folders" — only the former is a degraded (incomplete) tree.
   const SKELETON_FAILED = Symbol("skeleton-failed");
   // Parallel: root skeleton + direct children list + registrations + linked + parent.
-  const [rootSkeletonResult, children, registrations, linkedNodes, parentNode] = await Promise.all([
+  const [rootSkeletonResult, childrenResult, registrations, linkedNodes, parentNode] = await Promise.all([
     raceTimeout<SkeletonNode[] | typeof SKELETON_FAILED>(
       collectFolderSkeleton(rootGuid),
       rootTimeoutMs,
       SKELETON_FAILED
     ).catch((): typeof SKELETON_FAILED => SKELETON_FAILED),
-    getAllChildren(rootGuid).catch((): NodeView[] => []),
+    // null, not [], on failure: "this project has no components" and "we could not
+    // ask" must not render the same (df9tj showed "Components 0" for 100 components).
+    getAllChildren(rootGuid).catch((): NodeView[] | null => null),
     getNodeRegistrations(rootGuid).catch((): RegistrationView[] => []),
     getAllLinkedNodes(rootGuid).catch((): NodeView[] => []),
     getParentNode(opts.parentId),
   ]);
   const degraded = rootSkeletonResult === SKELETON_FAILED;
+  const componentsFailed = childrenResult === null;
+  const children = childrenResult ?? [];
   const rootSkeleton = degraded ? [] : rootSkeletonResult;
 
   // Parent is metadata-only on first paint; expand-in-tree hydrates the skeleton.
@@ -161,6 +171,7 @@ export async function collectFullTree(
         [] as SkeletonNode[]
       ).catch((): SkeletonNode[] => []),
       skipped: false,
+      ...(c.childCount !== undefined ? { childCount: c.childCount } : {}),
     }))
   );
 
@@ -171,6 +182,7 @@ export async function collectFullTree(
     isPublic: c.public,
     skeleton: [],
     skipped: true,
+    ...(c.childCount !== undefined ? { childCount: c.childCount } : {}),
   }));
 
   // Same pattern for registrations — capped + timeout + fail-soft. Registrations
@@ -220,6 +232,7 @@ export async function collectFullTree(
         [] as SkeletonNode[]
       ).catch((): SkeletonNode[] => []),
       skipped: false,
+      ...(l.childCount !== undefined ? { childCount: l.childCount } : {}),
     }))
   );
 
@@ -230,12 +243,14 @@ export async function collectFullTree(
     isPublic: l.public,
     skeleton: [],
     skipped: true,
+    ...(l.childCount !== undefined ? { childCount: l.childCount } : {}),
   }));
 
   return {
     rootSkeleton,
     components: [...recursedTrees, ...skippedTrees],
     totalComponents: children.length,
+    componentsFailed,
     registrationTrees: [...recursedRegs, ...skippedRegs],
     totalRegistrations: registrations.length,
     linkedTrees: [...recursedLinked, ...skippedLinked],

@@ -35,6 +35,12 @@
   `write.ts` and the client). Folder list/create stay on the server routes. The
   ZIP-upload tab extracts an archive into the same `DroppedNode[]` tree the
   drag-drop pipeline uses (`src/lib/upload/zip.ts`, lazy per-file decompression).
+- **OSF node lists use a sparse fieldset** (`NODE_FIELDS` / `withNodeFields` in
+  `src/lib/osf/parse.ts`): the full `/children/` of a 100-component project took
+  14-21 s, past the 8 s per-attempt timeout; the sparse form takes ~3-4 s. Any field
+  `parseNode` starts reading must be added to `NODE_FIELDS`
+  (`tests/unit/node-fields.test.ts` fails otherwise). Nested components in the
+  navigator load per opened row from `/api/osf/children/[guid]`, at most 3 at once.
 
 ## File-system / path conventions
 

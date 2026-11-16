@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "../msw/server";
 import { collectFullTree } from "@/lib/osf/full-tree";
@@ -20,6 +20,16 @@ function noFilesHandlers(guid: string) {
 }
 
 describe("collectFullTree", () => {
+  // Every test's root also asks OSF for its linked projects and registrations. Answer them
+  // with an empty list so no request falls through to the unhandled-request path; a test that
+  // cares about linked projects registers its own handler, which takes precedence.
+  beforeEach(() => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/:guid/linked_nodes/", () => HttpResponse.json({ data: [], links: { next: null } })),
+      http.get("https://api.osf.io/v2/nodes/:guid/registrations/", () => HttpResponse.json({ data: [], links: { next: null } }))
+    );
+  });
+
   it("recurses up to maxComponentsToRecurse components, marks rest as skipped with empty skeleton", async () => {
     const childGuids = Array.from({ length: 5 }).map((_, i) => `cmp${i}`);
     server.use(
@@ -147,6 +157,53 @@ describe("collectFullTree", () => {
     expect(bad.skeleton).toEqual([]);
     expect(bad.skipped).toBe(false);
     expect(tree.parentTree).toBeNull();
+  });
+
+  it("asks OSF for the sparse fieldset + child counts, and carries each component's count (df9tj: 100 components took 14-21 s in full, over the 8 s timeout)", async () => {
+    let seenUrl = "";
+    const withCount = (id: string, count: number) => {
+      const row = childNodeRow(id, `T-${id}`);
+      (row.relationships.children.links.related as Record<string, unknown>).meta = { count };
+      return row;
+    };
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/cnt/files/", () => HttpResponse.json({ data: [], links: { next: null } })),
+      http.get("https://api.osf.io/v2/nodes/cnt/children/", ({ request }) => {
+        seenUrl = request.url;
+        return HttpResponse.json({ data: [withCount("k1", 2), withCount("k2", 0), childNodeRow("k3", "T-k3")], links: { next: null } });
+      }),
+      ...["k1", "k2", "k3"].flatMap((g) => noFilesHandlers(g)),
+    );
+    const tree = await collectFullTree("cnt");
+    const params = new URL(seenUrl).searchParams;
+    expect(params.get("fields[nodes]")).toContain("title");
+    expect(params.get("related_counts")).toBe("children");
+    const byGuid = Object.fromEntries(tree.components.map((c) => [c.guid, c]));
+    expect(byGuid.k1!.childCount).toBe(2);
+    expect(byGuid.k2!.childCount).toBe(0);
+    // OSF gave no count: unknown, not 0.
+    expect(byGuid.k3!.childCount).toBeUndefined();
+    expect(tree.componentsFailed).toBe(false);
+  });
+
+  it("a failed component list is reported as componentsFailed, never as 'no components'", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/flk/files/", () => HttpResponse.json({ data: [], links: { next: null } })),
+      http.get("https://api.osf.io/v2/nodes/flk/children/", () => HttpResponse.json({ errors: [{ detail: "boom" }] }, { status: 503 })),
+    );
+    const tree = await collectFullTree("flk");
+    expect(tree.componentsFailed).toBe(true);
+    expect(tree.components).toEqual([]);
+  });
+
+  it("a project that truly has no components is NOT flagged as failed (control)", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/none/files/", () => HttpResponse.json({ data: [], links: { next: null } })),
+      http.get("https://api.osf.io/v2/nodes/none/children/", () => HttpResponse.json({ data: [], links: { next: null } })),
+    );
+    const tree = await collectFullTree("none");
+    expect(tree.componentsFailed).toBe(false);
+    expect(tree.totalComponents).toBe(0);
   });
 
   it("resolves parentTree as skipped metadata when parentId is set (hydrate on expand)", async () => {

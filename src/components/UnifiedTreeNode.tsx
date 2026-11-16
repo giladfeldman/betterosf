@@ -140,6 +140,15 @@ export function UnifiedTreeNode({
           ({node.fileCount})
         </span>
       )}
+      {node.componentCount != null && node.componentCount > 0 && (
+        <span
+          className="ml-1 text-xs text-neutral-500 shrink-0"
+          title={`${node.componentCount} component${node.componentCount === 1 ? "" : "s"} inside`}
+          aria-label={`${node.componentCount} component${node.componentCount === 1 ? "" : "s"} inside`}
+        >
+          🧩{node.componentCount}
+        </span>
+      )}
       {node.size != null && <span className="ml-2 text-xs text-neutral-500 shrink-0">{formatSize(node.size)}</span>}
       {node.badge && <span className="ml-2 text-[10px] uppercase text-neutral-500 border rounded px-1 shrink-0">{node.badge}</span>}
       {node.loading && !node.failed && (

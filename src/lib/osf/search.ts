@@ -1,6 +1,6 @@
 import "server-only";
 import { osfGet } from "./client";
-import { parseNode, type NodeView } from "./parse";
+import { parseNode, NODE_FIELDS, type NodeView } from "./parse";
 import { parseQuery } from "@/lib/search/parser";
 import { compileQuery, MAX_QUERY_BRANCHES, type FilterPair } from "@/lib/search/compile";
 import { sanitizeSort } from "./sort";
@@ -71,6 +71,9 @@ async function executeMulti<T>(
     qs.set("page", String(page));
     qs.set("page[size]", String(size));
     if (sort) qs.set("sort", sort);
+    // Node results: ask only for the fields parseNode reads (halves OSF's response
+    // time — 7.8 s -> 4.0 s measured 2026-11-16 on a 50-result title filter).
+    if (resource === "nodes") qs.set("fields[nodes]", NODE_FIELDS.join(","));
     const path = mode === "search" ? `/search/${resource}/` : `/${resource}/`;
     return osfGet<RawCollection<unknown>>(
       `${path}?${qs.toString()}`,

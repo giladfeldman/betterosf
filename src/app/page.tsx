@@ -40,7 +40,7 @@ const CAPABILITIES = [
   },
   {
     title: "One tree, every provider",
-    body: "OSF splits files across osfstorage, GitHub, Dropbox, Google Drive and more, each behind its own tab. BetterOSF merges them into a single navigator you can expand, filter, and depth-limit.",
+    body: "OSF splits files across osfstorage, GitHub, Dropbox, Google Drive and more, each behind its own tab. BetterOSF merges them into a single navigator you can expand, filter, and depth-limit, with every component (and the components inside it) nested under its project.",
   },
   {
     title: "Previews that open in place",

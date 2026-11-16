@@ -256,7 +256,7 @@ export default async function ProjectPage({
 
   const cappedNote =
     fullTree.totalComponents > fullTree.components.filter((c) => !c.skipped).length
-      ? `Showing ${fullTree.components.filter((c) => !c.skipped).length} of ${fullTree.totalComponents} components with full sub-trees; the rest appear as collapsed links — click to drill in.`
+      ? `Showing ${fullTree.components.filter((c) => !c.skipped).length} of ${fullTree.totalComponents} components with full sub-trees; the rest load when you open them in the tree.`
       : null;
 
   const basePath = `/${guid}`;
@@ -321,7 +321,10 @@ export default async function ProjectPage({
                   </div>
                   <div className="border-b border-neutral-200 pb-2 dark:border-neutral-800">
                     <dt className="text-xs text-neutral-500">Components</dt>
-                    <dd className="text-xl font-semibold">{components.length}</dd>
+                    {/* Unknown is not zero: a failed component lookup shows "?", not 0. */}
+                    <dd className="text-xl font-semibold" title={fullTree.componentsFailed ? "OSF did not return the component list; refresh to try again" : undefined}>
+                      {fullTree.componentsFailed ? "?" : components.length}
+                    </dd>
                   </div>
                   <div className="border-b border-neutral-200 pb-2 dark:border-neutral-800">
                     <dt className="text-xs text-neutral-500">Registrations</dt>
@@ -525,6 +528,7 @@ export default async function ProjectPage({
             linkedTrees={fullTree.linkedTrees}
             parentTree={fullTree.parentTree}
             degraded={fullTree.degraded}
+            componentsFailed={fullTree.componentsFailed}
           />
         }
         right={overviewRight}

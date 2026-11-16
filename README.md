@@ -17,7 +17,7 @@ Open Science.
 
 **Browse** (no account needed for public projects)
 - Project overview with complete component, linked-project and registration lists.
-- A tree navigator across all storage providers, deep-linkable folders, and in-browser viewers
+- A tree navigator across all storage providers and nested components, deep-linkable folders, and in-browser viewers
   for PDF, DOCX, XLSX, CSV, Markdown, code, JSON, images, HTML, video, audio and notebooks.
 - Search across projects, files, registrations and users, with `AND` / `OR` / `"phrases"` / `-exclusions`.
 - Whole-project ZIP download, side-by-side registration comparison, citation export
@@ -132,6 +132,6 @@ This software is licensed under the [GNU Affero General Public License v3.0](LIC
 
 **How to cite.** If you use this software in research, please cite it. GitHub's *Cite this repository* button (from [CITATION.cff](CITATION.cff)) gives APA and BibTeX. In APA style:
 
-> Feldman, G. (2026). *betterosf: A faster, friendlier interface for the Open Science Framework (OSF): browse, search, export and migrate your projects.* (Version 1.14.4) [Computer software]. https://betterosf.vercel.app
+> Feldman, G. (2026). *betterosf: A faster, friendlier interface for the Open Science Framework (OSF): browse, search, export and migrate your projects.* (Version 1.15.0) [Computer software]. https://betterosf.vercel.app
 
 <!-- license-citation:end -->

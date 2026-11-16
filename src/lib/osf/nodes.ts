@@ -1,6 +1,6 @@
 import "server-only";
 import { osfGet, osfGetUrl } from "./client";
-import { parseNode, type NodeView } from "./parse";
+import { parseNode, withNodeFields, type NodeView } from "./parse";
 import { collectAll } from "./paginate";
 
 type SingleResponse = Parameters<typeof parseNode>[0];
@@ -33,12 +33,12 @@ async function fetchNodeCollectionPage(url: string, defaultPath: string, guid: s
 
 export async function getAllChildren(guid: string): Promise<NodeView[]> {
   return collectAll<NodeView>((nextUrl) =>
-    fetchNodeCollectionPage(nextUrl ?? "", `/nodes/${guid}/children/?page[size]=100`, guid)
+    fetchNodeCollectionPage(nextUrl ?? "", withNodeFields(`/nodes/${guid}/children/?page[size]=100`, { childCounts: true }), guid)
   );
 }
 
 export async function getAllLinkedNodes(guid: string): Promise<NodeView[]> {
   return collectAll<NodeView>((nextUrl) =>
-    fetchNodeCollectionPage(nextUrl ?? "", `/nodes/${guid}/linked_nodes/?page[size]=100`, guid)
+    fetchNodeCollectionPage(nextUrl ?? "", withNodeFields(`/nodes/${guid}/linked_nodes/?page[size]=100`, { childCounts: true }), guid)
   );
 }

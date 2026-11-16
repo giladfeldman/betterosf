@@ -1,6 +1,6 @@
 import "server-only";
 import { osfGet, osfGetUrl } from "./client";
-import { parseNode, type NodeView } from "./parse";
+import { parseNode, withNodeFields, type NodeView } from "./parse";
 import { collectAll } from "./paginate";
 import { parseQuery } from "@/lib/search/parser";
 import { compileQuery, MAX_QUERY_BRANCHES } from "@/lib/search/compile";
@@ -100,7 +100,7 @@ export async function searchUserNodes(
     qs.set("page[size]", String(size));
     if (sort) qs.set("sort", sort);
     return osfGet<NodeCollectionResponse & { meta?: { total?: number } }>(
-      `/${userPath}/nodes/?${qs.toString()}`,
+      withNodeFields(`/${userPath}/nodes/?${qs.toString()}`),
       { tags: ["users:me"], revalidate: 60 },
     );
   }));
@@ -128,7 +128,7 @@ export async function searchUserNodes(
 /** First page (up to 100) of a user's PUBLIC projects, with the total count.
  *  Bounded to one request so a prolific user's profile doesn't fan out. */
 export async function getUserNodes(userId: string): Promise<{ results: NodeView[]; total: number }> {
-  const raw = await osfGet<NodeCollectionResponse>(`/users/${userId}/nodes/?page[size]=100`, {
+  const raw = await osfGet<NodeCollectionResponse>(withNodeFields(`/users/${userId}/nodes/?page[size]=100`), {
     tags: [`user:${userId}`],
     revalidate: 300,
   });
@@ -160,7 +160,7 @@ export type MyProjectsPage = {
 export async function getMyProjectsPage(cursor?: string): Promise<MyProjectsPage> {
   const raw = cursor
     ? await osfGetUrl<NodeCollectionResponse>(cursor, { tags: ["users:me"], revalidate: 60 })
-    : await osfGet<NodeCollectionResponse>("/users/me/nodes/?page[size]=100", {
+    : await osfGet<NodeCollectionResponse>(withNodeFields("/users/me/nodes/?page[size]=100"), {
         tags: ["users:me"],
         revalidate: 60,
       });
@@ -176,7 +176,7 @@ export async function getMyProjects(): Promise<NodeView[]> {
   return collectAll<NodeView>(async (nextUrl) => {
     const raw = nextUrl
       ? await osfGetUrl<NodeCollectionResponse>(nextUrl, { tags: ["users:me"], revalidate: 60 })
-      : await osfGet<NodeCollectionResponse>("/users/me/nodes/?page[size]=100", {
+      : await osfGet<NodeCollectionResponse>(withNodeFields("/users/me/nodes/?page[size]=100"), {
           tags: ["users:me"],
           revalidate: 60,
         });

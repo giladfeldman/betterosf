@@ -265,6 +265,7 @@ export default async function FileViewerPage({
             parentTree={fullTree.parentTree}
             readOnly={resourceKind === "registration"}
             degraded={fullTree.degraded}
+            componentsFailed={fullTree.componentsFailed}
           />
         }
         right={
