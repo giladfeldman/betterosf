@@ -8,16 +8,15 @@
  * `files.osf.io` blocked the HTML viewer's `<iframe src>` from rendering.
  *
  * This route fetches the OSF download URL server-side (no CORS) and streams
- * the response back to the client from our own origin. The selectToken()
- * helper picks the user's OAuth token when signed in, otherwise the
- * app token — same auth model as the rest of the OSF client. Bandwidth and
- * abuse are bounded by OSF's own per-token limits.
+ * the response back to the client from our own origin. A signed-in user's
+ * own OAuth token is used when present; an anonymous visitor is fetched
+ * anonymously, never with the app token (d-ff4462: that account could read
+ * private projects, so borrowing it served private files to signed-out visitors).
  *
  * Security: SSRF guard rejects any downloadUrl that's not on osf.io /
  * files.osf.io / files.de-1.osf.io.
  */
 import { isValidGuid } from "@/lib/osf/guid";
-import { selectToken } from "@/lib/osf/tokens";
 import { auth } from "@/auth";
 import { contentDisposition } from "@/lib/http/content-disposition";
 
@@ -86,79 +85,86 @@ export async function GET(
     return h;
   };
 
-  // A signed-in user's OWN token. Their private files need it on every hop, and fetch
-  // drops Authorization on the cross-host redirect osf.io/download -> files.osf.io, so
-  // OSF then answered with its sign-in HTML page and the viewer showed that page as the
-  // file (found by the local signed-in probe, 2026-10-29). Redirects are therefore
-  // followed by hand: the token is sent to OSF hosts ONLY. The last hop, measured the
-  // same day, is files.osf.io -> a signed object-storage URL on a non-OSF host; that link
-  // carries its own signature, rejects a request with Authorization (400), and is fetched
-  // without the token.
+  // Anonymous fetch: exactly what OSF gives a signed-out request, i.e. public files only.
+  // Never the app token (d-ff4462). Measured 2026-11-18: for a PRIVATE file the
+  // osf.io/download/<id>/ link redirects to accounts.osf.io/login, which answers 200 with
+  // a 26 KB HTML sign-in page; followed blindly, that page was served (and edge-cached for
+  // a day) as the file. A public file's link redirects to files.<region>.osf.io instead,
+  // and the Waterbutler address answers a private file with a clean 403. So the first hop
+  // from osf.io is taken by hand, and a redirect anywhere but an OSF file host reads as
+  // "not public" (403).
+  const anonymousFetch = async (): Promise<Response> => {
+    let url = target;
+    if (!url.host.startsWith("files.")) {
+      const first = await fetch(url.toString(), { headers: buildFetchHeaders(""), redirect: "manual", cache: "no-store" });
+      const location = first.status >= 300 && first.status < 400 ? first.headers.get("location") : null;
+      if (!location) return first;
+      void first.body?.cancel().catch(() => {});
+      let next: URL;
+      try { next = new URL(location, url); } catch { return new Response("OSF sent an unreadable redirect", { status: 502 }); }
+      if (next.protocol !== "https:" || !ALLOWED_HOSTS.has(next.host) || !next.host.startsWith("files.")) {
+        return new Response("This file is not public on OSF.", { status: 403 });
+      }
+      url = next;
+    }
+    const res = await fetch(url.toString(), {
+      headers: buildFetchHeaders(""),
+      redirect: "follow",
+      // Cache files for a day at the edge — OSF storage URLs are content-addressed,
+      // so the response is immutable for a given OSF file revision.
+      next: { revalidate: 86400, tags: [`download:${guid}`] },
+    });
+    // Defence in depth: a redirect that ended on an OSF page (a sign-in page) is not the file.
+    const finalHost = res.url ? new URL(res.url).host : "";
+    if (res.redirected && (finalHost === "osf.io" || finalHost === "accounts.osf.io")) {
+      void res.body?.cancel().catch(() => {});
+      return new Response("This file is not public on OSF.", { status: 403 });
+    }
+    return res;
+  };
+
   let userToken: string | null = null;
   try {
     const session = await auth();
     userToken = session?.osfAuthError ? null : session?.accessToken ?? null;
   } catch { /* anonymous */ }
 
-  // Set when the user's own token was refused: the retry below is then strictly
-  // anonymous, so bytes fetched with that token can never land in the public cache.
-  let anonymousOnly = false;
-  if (userToken) {
-    let hop = target;
-    let res: Response | null = null;
-    for (let i = 0; i < 5; i++) {
-      const onOsf = ALLOWED_HOSTS.has(hop.host);
-      res = await fetch(hop.toString(), { headers: buildFetchHeaders(onOsf ? userToken : ""), redirect: "manual", cache: "no-store" });
-      const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
-      if (!location) break;
-      void res.body?.cancel().catch(() => {});
-      let next: URL;
-      try { next = new URL(location, hop); } catch { return new Response("OSF sent an unreadable redirect", { status: 502 }); }
-      // Only OSF itself may send us off the allowlist, and never over plain http.
-      if (next.protocol !== "https:" || !onOsf) {
-        return new Response("Unexpected redirect while fetching from OSF", { status: 502 });
-      }
-      hop = next;
-      res = null;
-    }
-    if (res && res.ok && res.body) return relay(res, { filename, forceDownload, privateData: true });
-    // A stale or rate-limited token must not break a PUBLIC file: retry anonymously,
-    // exactly as the anonymous path below already does for the app token.
-    if (!res || !(res.status === 401 || res.status === 403 || res.status === 429)) {
-      return new Response(`OSF upstream returned ${res?.status ?? "no response"}`, { status: res?.status && res.status >= 400 ? res.status : 502 });
-    }
+  // Everyone tries the anonymous, edge-cached fetch first (d-00f6c0): a public file then
+  // costs a signed-in viewer no OSF call on a cache hit, and those bytes are public.
+  const anonymous = await anonymousFetch();
+  if (anonymous.ok && anonymous.body) return relay(anonymous, { filename, forceDownload, privateData: false });
+  void anonymous.body?.cancel().catch(() => {});
+  if (!userToken) {
+    return new Response(`OSF upstream returned ${anonymous.status}`, { status: anonymous.status >= 400 ? anonymous.status : 502 });
+  }
+
+  // Not public: the signed-in user's OWN token. Their private files need it on every hop,
+  // and fetch drops Authorization on the cross-host redirect osf.io/download ->
+  // files.osf.io, so OSF then answered with its sign-in page (local signed-in probe,
+  // 2026-10-29). Redirects are therefore followed by hand: the token is sent to OSF hosts
+  // ONLY. The last hop is files.osf.io -> a signed object-storage URL on a non-OSF host;
+  // that link carries its own signature, rejects a request with Authorization (400), and
+  // is fetched without the token.
+  let hop = target;
+  let res: Response | null = null;
+  for (let i = 0; i < 5; i++) {
+    const onOsf = ALLOWED_HOSTS.has(hop.host);
+    res = await fetch(hop.toString(), { headers: buildFetchHeaders(onOsf ? userToken : ""), redirect: "manual", cache: "no-store" });
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+    if (!location) break;
     void res.body?.cancel().catch(() => {});
-    anonymousOnly = true;
+    let next: URL;
+    try { next = new URL(location, hop); } catch { return new Response("OSF sent an unreadable redirect", { status: 502 }); }
+    // Only OSF itself may send us off the allowlist, and never over plain http.
+    if (next.protocol !== "https:" || !onOsf) {
+      return new Response("Unexpected redirect while fetching from OSF", { status: 502 });
+    }
+    hop = next;
+    res = null;
   }
-
-  let token = "";
-  if (!anonymousOnly) {
-    try { token = await selectToken(); } catch { /* anonymous */ }
-  }
-  let upstream = await fetch(target.toString(), {
-    headers: buildFetchHeaders(token),
-    redirect: "follow",
-    // Cache files for a day at the edge — OSF storage URLs are content-addressed,
-    // so the response is immutable for a given OSF file revision.
-    next: { revalidate: 86400, tags: [`download:${guid}`] },
-  });
-
-  // Public OSF files can be fetched without a bearer token. If the app-owned
-  // token is expired/revoked, retry anonymously so public viewers do not render
-  // as blank iframes or failed downloads.
-  if (token && (upstream.status === 401 || upstream.status === 403 || upstream.status === 429)) {
-    upstream = await fetch(target.toString(), {
-      headers: buildFetchHeaders(""),
-      redirect: "follow",
-      next: { revalidate: 86400, tags: [`download:${guid}`] },
-    });
-  }
-
-  if (!upstream.ok || !upstream.body) {
-    return new Response(`OSF upstream returned ${upstream.status}`, { status: upstream.status });
-  }
-
-  return relay(upstream, { filename, forceDownload, privateData: false });
+  if (res && res.ok && res.body) return relay(res, { filename, forceDownload, privateData: true });
+  void res?.body?.cancel().catch(() => {});
+  return new Response(`OSF upstream returned ${res?.status ?? "no response"}`, { status: res?.status && res.status >= 400 ? res.status : 502 });
 }
 
 function relay(

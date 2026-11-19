@@ -177,25 +177,29 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   } else if (isProjectScope && (type === "projects" || type === "registrations")) {
     const guid = scope.slice("project:".length);
     const out = await searchInProjectScope(guid, q);
+    const notSearched = (what: string) => (
+      <p className="text-amber-700 dark:text-amber-300">OSF did not return the {what} list, so it was not searched. Try again in a moment.</p>
+    );
     body = (
       <>
         <p className="text-sm text-neutral-600 mb-3">
-          {out.components.length + out.linked.length} project{out.components.length + out.linked.length === 1 ? "" : "s"} · {out.registrations.length} registration{out.registrations.length === 1 ? "" : "s"} in this scope.
+          {out.components.length + out.linked.length} project{out.components.length + out.linked.length === 1 ? "" : "s"} · {out.registrations.length} registration{out.registrations.length === 1 ? "" : "s"} in this scope
+          {out.failed.components || out.failed.linked || out.failed.registrations ? " (at least; some lists could not be loaded from OSF)." : "."}
         </p>
         {type === "projects" && (
           <>
             <h2 className="text-lg font-semibold mt-4 mb-2">Components</h2>
             <ul>{out.components.map((n) => <ProjectResult key={n.id} node={n} terms={terms} />)}</ul>
-            {out.components.length === 0 && <p className="text-neutral-500">No components match.</p>}
+            {out.failed.components ? notSearched("component") : out.components.length === 0 && <p className="text-neutral-500">No components match.</p>}
             <h2 className="text-lg font-semibold mt-4 mb-2">Linked projects</h2>
             <ul>{out.linked.map((n) => <ProjectResult key={n.id} node={n} terms={terms} />)}</ul>
-            {out.linked.length === 0 && <p className="text-neutral-500">No linked projects match.</p>}
+            {out.failed.linked ? notSearched("linked-project") : out.linked.length === 0 && <p className="text-neutral-500">No linked projects match.</p>}
           </>
         )}
         {type === "registrations" && (
           <>
             <ul>{out.registrations.map((r) => <RegistrationResult key={r.id} reg={r} terms={terms} />)}</ul>
-            {out.registrations.length === 0 && <p className="text-neutral-500">No registrations match.</p>}
+            {out.failed.registrations ? notSearched("registration") : out.registrations.length === 0 && <p className="text-neutral-500">No registrations match.</p>}
           </>
         )}
       </>

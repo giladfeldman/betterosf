@@ -16,8 +16,11 @@
 
 /** A node title made safe as a single ZIP folder segment. */
 export function safeFolderName(title: string): string {
-  // Path separators would invent folder levels the project never had.
-  return title.replace(/[\\/]/g, "_").slice(0, 80).trim() || "untitled";
+  // Path separators would invent folder levels the project never had. The characters Windows
+  // refuses in a name (and control characters) became reachable once OSF titles were decoded
+  // (`&lt;b&gt;` is now `<b>`), so they are replaced too: the archive must unpack everywhere.
+  // eslint-disable-next-line no-control-regex
+  return title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").slice(0, 80).trim() || "untitled";
 }
 
 /**

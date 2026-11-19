@@ -25,7 +25,7 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
     if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="these files" />;
     throw e;
   }
-  const { kind, title, fullTree, linked, registrations, components } = resource;
+  const { kind, title, fullTree, linked, registrations, components, linkedFailed, registrationsFailed } = resource;
   const node = { title };
   const isRegistration = kind === "registration";
   const parent = fullTree.parentTree;
@@ -58,6 +58,8 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
             readOnly={isRegistration}
             degraded={fullTree.degraded}
             componentsFailed={fullTree.componentsFailed}
+            linkedFailed={linkedFailed}
+            registrationsFailed={registrationsFailed}
           />
         }
         right={

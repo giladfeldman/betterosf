@@ -96,26 +96,16 @@ describe("5xx storm opens the breaker", () => {
 });
 
 describe("anonymous-bucket 429 is remembered", () => {
-  it("once anonymous is throttled, later anonymous requests go straight to the app token", async () => {
+  it("once anonymous is throttled, later anonymous requests fail fast without asking OSF, and never with a token (d-ff4462)", async () => {
     const hits = countingHandler("/nodes/:id/", (req) =>
       req.headers.get("authorization")
         ? HttpResponse.json({ data: { id: "x", type: "nodes", attributes: {} } })
         : new HttpResponse(null, { status: 429, headers: { "Retry-After": "60" } }),
     );
-    await osfGet("/nodes/a1/");
-    await osfGet("/nodes/a2/");
-    await osfGet("/nodes/a3/");
+    for (const id of ["a1", "a2", "a3"]) {
+      await expect(osfGet(`/nodes/${id}/`)).rejects.toMatchObject({ code: "rate_limited" });
+    }
     expect(hits.anon).toBe(1); // only the first request learned it the hard way
-    expect(hits.authed).toBe(3);
-  });
-
-  it("when both the anonymous bucket and the app token are throttled, calls fail fast as rate_limited", async () => {
-    const hits = countingHandler("/nodes/:id/", () =>
-      new HttpResponse(null, { status: 429, headers: { "Retry-After": "60" } }),
-    );
-    await expect(osfGet("/nodes/b1/")).rejects.toMatchObject({ code: "rate_limited" });
-    const before = hits.anon + hits.authed;
-    await expect(osfGet("/nodes/b2/")).rejects.toMatchObject({ code: "rate_limited" });
-    expect(hits.anon + hits.authed).toBe(before);
+    expect(hits.authed).toBe(0);
   });
 });

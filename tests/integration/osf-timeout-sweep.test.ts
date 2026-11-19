@@ -11,7 +11,10 @@ vi.mock("@/lib/transition/guard", () => ({
   requireTransitionActor: async () => ({ ok: true, actor: { userId: "u1", osfUserId: "osf1" } }),
   guardResponse: () => new Response(null, { status: 401 }),
 }));
-vi.mock("@/lib/osf/tokens", () => ({ selectToken: async () => "tok" }));
+vi.mock("@/lib/osf/tokens", () => ({
+  userTokenOrAnonymous: async () => "tok",
+  bearerOrNone: (t: string | undefined) => (t ? { Authorization: `Bearer ${t}` } : {}),
+}));
 
 beforeEach(() => {
   vi.clearAllMocks();

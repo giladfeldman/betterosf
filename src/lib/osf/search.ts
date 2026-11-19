@@ -4,6 +4,7 @@ import { parseNode, NODE_FIELDS, type NodeView } from "./parse";
 import { parseQuery } from "@/lib/search/parser";
 import { compileQuery, MAX_QUERY_BRANCHES, type FilterPair } from "@/lib/search/compile";
 import { sanitizeSort } from "./sort";
+import { decodeOsfText } from "@/lib/osf/decode-text";
 
 export type SearchPage<T> = {
   results: T[];
@@ -204,7 +205,7 @@ export async function searchRegistrations(query: string, opts?: { page?: number;
     opts,
     (raw) => (raw.data as RawReg[]).map((r) => ({
       id: r.id,
-      title: String(r.attributes.title ?? ""),
+      title: decodeOsfText(r.attributes.title),
       dateRegistered: String(r.attributes.date_registered ?? ""),
       osfUrl: r.links?.html ?? `https://osf.io/${r.id}/`,
     })),
@@ -268,16 +269,22 @@ export async function searchInProjectScope(rootGuid: string, query: string): Pro
   components: NodeView[];
   linked: NodeView[];
   registrations: { id: string; title: string; dateRegistered: string; osfUrl: string }[];
+  /** Lists OSF did not return: their "no matches" would be unknown, not none (d-99070d). */
+  failed: { components: boolean; linked: boolean; registrations: boolean };
 }> {
   const include = buildIncludeFn(query, "title");
 
-  const [children, linked, registrations] = await Promise.all([
-    getAllChildren(rootGuid).catch((): NodeView[] => []),
-    getAllLinkedNodes(rootGuid).catch((): NodeView[] => []),
-    getNodeRegistrations(rootGuid).catch((): { id: string; title: string; dateRegistered: string; public: boolean; osfUrl: string }[] => []),
+  const [childrenResult, linkedResult, registrationsResult] = await Promise.all([
+    getAllChildren(rootGuid).catch((): NodeView[] | null => null),
+    getAllLinkedNodes(rootGuid).catch((): NodeView[] | null => null),
+    getNodeRegistrations(rootGuid).catch((): { id: string; title: string; dateRegistered: string; public: boolean; osfUrl: string }[] | null => null),
   ]);
+  const children = childrenResult ?? [];
+  const linked = linkedResult ?? [];
+  const registrations = registrationsResult ?? [];
 
   return {
+    failed: { components: childrenResult === null, linked: linkedResult === null, registrations: registrationsResult === null },
     components: children.filter((c) => include(c.title || c.id)),
     linked: linked.filter((l) => include(l.title || l.id)),
     registrations: registrations.filter((r) => include(r.title || r.id)).map((r) => ({

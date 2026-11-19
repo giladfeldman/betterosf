@@ -137,9 +137,9 @@ export async function middleware(req: NextRequest) {
   // The per-IP limits are NOT tiered by sign-in state. The old code granted a 5×
   // multiplier whenever an `authjs.session-token` cookie was merely PRESENT, which
   // an anonymous client could forge to claim the higher tier and burn the shared
-  // OSF app-token quota. Verifying the JWT in Edge middleware is brittle, so we
+  // OSF anonymous quota. Verifying the JWT in Edge middleware is brittle, so we
   // apply one flat per-IP budget to everyone — the base limits below are generous
-  // for a single human, and OSF's own per-token quota is the real backstop.
+  // for a single human, and OSF's own quota is the real backstop.
   const ip = requestIp(req);
   if (pathname.startsWith("/api/")) {
     const expensive =

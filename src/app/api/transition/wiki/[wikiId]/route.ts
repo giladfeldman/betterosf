@@ -1,5 +1,5 @@
 import { requireTransitionActor, guardResponse } from "@/lib/transition/guard";
-import { selectToken } from "@/lib/osf/tokens";
+import { userTokenOrAnonymous, bearerOrNone } from "@/lib/osf/tokens";
 import { isOsfTimeout } from "@/lib/osf/error-response";
 
 export const runtime = "nodejs";
@@ -36,7 +36,8 @@ export async function GET(
   let upstream: Response;
   try {
     upstream = await fetch(`https://api.osf.io/v2/wikis/${wikiId}/content/`, {
-      headers: { Authorization: `Bearer ${await selectToken()}` },
+      // The guard above guarantees a signed-in user; their own token, never the app's.
+      headers: bearerOrNone(await userTokenOrAnonymous()),
       redirect: "follow",
       signal: AbortSignal.timeout(20_000),
     });

@@ -22,6 +22,9 @@ export type ResourceTree = {
   fullTree: FullProjectTree;
   linked: NodeView[];
   registrations: RegistrationView[];
+  /** The linked/registration lookup failed: the list is unknown, not empty (d-99070d). */
+  linkedFailed: boolean;
+  registrationsFailed: boolean;
   /** NodeView-shaped components for the UnifiedTree + component lists. */
   components: NodeView[];
 };
@@ -63,21 +66,23 @@ function componentsFromTree(fullTree: FullProjectTree): NodeView[] {
 export async function collectResourceTree(guid: string): Promise<ResourceTree> {
   try {
     const node = await getNode(guid);
-    const [fullTree, linked, registrations]: [FullProjectTree, NodeView[], RegistrationView[]] =
+    const [fullTree, linked, registrations]: [FullProjectTree, NodeView[] | null, RegistrationView[] | null] =
       await Promise.all([
         // A total failure here (not just per-provider) is itself a degraded tree.
         collectFullTree(guid, { ...TREE_OPTS, parentId: node.parentId }).catch(
           (): FullProjectTree => ({ ...EMPTY_TREE, degraded: true })
         ),
-        getAllLinkedNodes(guid).catch((): NodeView[] => []),
-        getNodeRegistrations(guid).catch((): RegistrationView[] => []),
+        getAllLinkedNodes(guid).catch((): NodeView[] | null => null),
+        getNodeRegistrations(guid).catch((): RegistrationView[] | null => null),
       ]);
     return {
       kind: "node",
       title: node.title || guid,
       fullTree,
-      linked,
-      registrations,
+      linked: linked ?? [],
+      registrations: registrations ?? [],
+      linkedFailed: linked === null,
+      registrationsFailed: registrations === null,
       components: componentsFromTree(fullTree),
     };
   } catch (e) {
@@ -96,6 +101,9 @@ export async function collectResourceTree(guid: string): Promise<ResourceTree> {
       fullTree: { ...EMPTY_TREE, rootSkeleton, degraded },
       linked: [],
       registrations: [],
+      // A registration has no linked projects or sub-registrations: genuinely empty.
+      linkedFailed: false,
+      registrationsFailed: false,
       components: [],
     };
   }

@@ -135,7 +135,12 @@ export function UnifiedTreeNode({
     <span className="inline-flex items-center gap-1 truncate min-w-0" title={tooltip}>
       {kindIcon(node.kind, node.provider)}
       <span className="truncate">{displayLabel}</span>
-      {node.fileCount != null && node.fileCount > 0 && (
+      {node.countUnknown && (
+        <span className="ml-1 text-xs text-amber-700 dark:text-amber-300 shrink-0" title="OSF did not list this folder just now; open it to try again" aria-label="file count unknown">
+          (?)
+        </span>
+      )}
+      {!node.countUnknown && node.fileCount != null && node.fileCount > 0 && (
         <span className="ml-1 text-xs text-neutral-500 shrink-0" aria-label={`${node.fileCount} file${node.fileCount === 1 ? "" : "s"}`}>
           ({node.fileCount})
         </span>

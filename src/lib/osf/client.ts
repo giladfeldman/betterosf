@@ -1,9 +1,6 @@
 import "server-only";
-import { selectToken } from "./tokens";
 import { OsfError } from "./types";
-import { incrementDaily } from "@/lib/limits";
 import { auth } from "@/auth";
-import { env } from "@/lib/env";
 
 const OSF_API_BASE = "https://api.osf.io/v2";
 
@@ -25,7 +22,6 @@ type CacheEntry = {
 
 const responseCache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<unknown>>();
-let appTokenCooldownUntil = 0;
 
 /**
  * Circuit breaker (d-24c4e3): during an OSF outage or throttle, back off instead of hammering.
@@ -35,10 +31,10 @@ let appTokenCooldownUntil = 0;
  *    touching OSF. When the cooldown ends, calls go through again; one more failure re-opens
  *    the breaker at once, one success closes it.
  *  - **Anonymous 429.** OSF's anonymous bucket is shared by this server's IP. Once it says
- *    429, anonymous calls skip straight to the app-token fallback until its Retry-After
- *    passes, instead of spending one throttled call per request to re-learn it.
- *  - **Both throttled.** With the anonymous bucket and the app token both cooling down, a
- *    call fails fast as `rate_limited` and OSF is not asked at all.
+ *    429, anonymous calls fail fast as `rate_limited` until its Retry-After passes, instead
+ *    of spending one throttled call per request to re-learn it. There is no app-token
+ *    fallback (d-ff4462, 2026-11-18): the app account could read private projects, so a
+ *    throttled anonymous request for a private GUID was answered with private data.
  *
  * 4xx answers prove OSF is up and reset the count. The state is per server instance; a
  * fleet-wide breaker needs a shared store (Vercel KV), which is not provisioned (cost
@@ -132,10 +128,9 @@ export async function osfGetUrl<T = unknown>(
   const revalidate = init?.revalidate ?? 300;
   const next = { revalidate, tags: init?.tags };
 
-  // Public/anonymous browsing should not spend the app token's shared
-  // authenticated quota unless OSF's much smaller anonymous bucket is already
-  // rate-limited. OSF documents 100/hour unauthenticated vs 10,000/day
-  // authenticated; caching before either path is the real quota saver.
+  // Anonymous visitors are fetched anonymously (public content only); there is no shared
+  // credential (d-ff4462). Signed-in visitors use their own token. Caching before either
+  // path is the real quota saver.
   let userToken: string | null = null;
   try {
     const session = await auth();
@@ -163,7 +158,7 @@ export async function osfGetUrl<T = unknown>(
     // node-probe → guid-resolve → typed fetch) is statistically likely to hit
     // one of these and 500 the whole page. Retry transient failures a couple
     // of times with short backoff so a single upstream hiccup is absorbed.
-    // We do NOT retry 429 (handled by the app-token fallback) or any 4xx.
+    // We do NOT retry 429 (the cooldown handles it) or any 4xx.
     // 500 is included: OSF intermittently returns transient 500s on idempotent
     // GET reads, and retrying a read is safe.
     const TRANSIENT = new Set([500, 502, 503, 504]);
@@ -238,37 +233,18 @@ export async function osfGetUrl<T = unknown>(
       return result.value;
     }
 
-    if (Date.now() >= anonCooldownUntil) {
-      const anonymous = await attempt(ANON_HEADERS, { sharedCache: true });
-      if (anonymous.ok) {
-        writeCache(key, anonymous.value, revalidate);
-        return anonymous.value;
-      }
-
-      if (anonymous.res.status !== 429) {
-        throw mapError(anonymous.res.status, anonymous.body);
-      }
+    if (Date.now() < anonCooldownUntil) {
+      throw new OsfError(429, "rate_limited", "OSF rate limit exceeded (anonymous requests cooling down)");
+    }
+    const anonymous = await attempt(ANON_HEADERS, { sharedCache: true });
+    if (anonymous.ok) {
+      writeCache(key, anonymous.value, revalidate);
+      return anonymous.value;
+    }
+    if (anonymous.res.status === 429) {
       anonCooldownUntil = Date.now() + retryAfterMs(anonymous.res);
     }
-
-    if (Date.now() < appTokenCooldownUntil) {
-      throw new OsfError(429, "rate_limited", "OSF rate limit exceeded (anonymous and app token both cooling down)");
-    }
-
-    const token = await selectToken().catch(() => env().OSF_APP_TOKEN);
-    const appToken = await attempt(bearerHeaders(token), { sharedCache: true });
-    const today = new Date().toISOString().slice(0, 10);
-    void incrementDaily(`app:osf:calls:${today}`);
-
-    if (appToken.ok) {
-      writeCache(key, appToken.value, revalidate);
-      return appToken.value;
-    }
-
-    if (appToken.res.status === 429) {
-      appTokenCooldownUntil = Date.now() + retryAfterMs(appToken.res);
-    }
-    throw mapError(appToken.res.status, appToken.body);
+    throw mapError(anonymous.res.status, anonymous.body);
   })();
 
   if (!userToken) {
@@ -282,7 +258,6 @@ export async function osfGetUrl<T = unknown>(
 export function _resetOsfClientForTests(): void {
   responseCache.clear();
   inFlight.clear();
-  appTokenCooldownUntil = 0;
   consecutiveUpstreamFailures = 0;
   breakerOpenUntil = 0;
   anonCooldownUntil = 0;

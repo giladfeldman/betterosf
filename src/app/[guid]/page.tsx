@@ -190,10 +190,10 @@ export default async function ProjectPage({
     if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="this project" />;
     throw e;
   }
-  const [fullTree, linked, regs]: [
+  const [fullTree, linkedResult, regsResult]: [
     Awaited<ReturnType<typeof collectFullTree>>,
-    NodeView[],
-    RegistrationView[]
+    NodeView[] | null,
+    RegistrationView[] | null
   ] = await Promise.all([
     collectFullTree(guid, {
       maxComponentsToRecurse: 3,
@@ -206,9 +206,16 @@ export default async function ProjectPage({
       ...EMPTY_TREE,
       degraded: true,
     })),
-    getAllLinkedNodes(guid).catch((): NodeView[] => []),
-    getNodeRegistrations(guid).catch((): RegistrationView[] => []),
+    // null, not [], on failure (d-99070d): "no linked projects" and "OSF did not answer"
+    // must not render the same.
+    getAllLinkedNodes(guid).catch((): NodeView[] | null => null),
+    getNodeRegistrations(guid).catch((): RegistrationView[] | null => null),
   ]);
+  const linkedFailed = linkedResult === null;
+  const regsFailed = regsResult === null;
+  const linked = linkedResult ?? [];
+  const regs = regsResult ?? [];
+  const lookupFailedText = (what: string) => `OSF did not return the ${what} list just now, so it is unknown (not zero). Refresh to try again.`;
 
   // Build NodeView-shaped components for the tree + the components list section
   const components: NodeView[] = fullTree.components.map((c) => ({
@@ -328,7 +335,9 @@ export default async function ProjectPage({
                   </div>
                   <div className="border-b border-neutral-200 pb-2 dark:border-neutral-800">
                     <dt className="text-xs text-neutral-500">Registrations</dt>
-                    <dd className="text-xl font-semibold">{regs.length}</dd>
+                    <dd className="text-xl font-semibold" title={regsFailed ? "OSF did not return the registration list; refresh to try again" : undefined}>
+                      {regsFailed ? "?" : regs.length}
+                    </dd>
                   </div>
                 </dl>
               </section>
@@ -406,6 +415,12 @@ export default async function ProjectPage({
             />
           )}
 
+          {activeView === "linked" && linkedFailed && (
+            <p className="text-sm text-amber-700 dark:text-amber-300">{lookupFailedText("linked-project")}</p>
+          )}
+          {activeView === "linked" && !linkedFailed && linked.length === 0 && (
+            <p className="text-sm text-neutral-500">This project has no linked projects.</p>
+          )}
           {activeView === "linked" && linked.length > 0 && (
             <PaginatedSection<NodeView>
               title="Linked projects"
@@ -432,6 +447,12 @@ export default async function ProjectPage({
             />
           )}
 
+          {activeView === "registrations" && regsFailed && (
+            <p className="text-sm text-amber-700 dark:text-amber-300">{lookupFailedText("registration")}</p>
+          )}
+          {activeView === "registrations" && !regsFailed && regs.length === 0 && (
+            <p className="text-sm text-neutral-500">This project has no registrations.</p>
+          )}
           {activeView === "registrations" && regs.length > 0 && (
             <PaginatedSection<RegistrationView>
               title="Registrations"
@@ -529,6 +550,8 @@ export default async function ProjectPage({
             parentTree={fullTree.parentTree}
             degraded={fullTree.degraded}
             componentsFailed={fullTree.componentsFailed}
+            linkedFailed={linkedFailed}
+            registrationsFailed={regsFailed}
           />
         }
         right={overviewRight}

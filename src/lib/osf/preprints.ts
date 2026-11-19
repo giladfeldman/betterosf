@@ -1,5 +1,6 @@
 import "server-only";
 import { osfGet, osfGetUrl } from "./client";
+import { decodeOsfText } from "@/lib/osf/decode-text";
 
 export type PreprintView = {
   id: string;
@@ -54,8 +55,8 @@ function parse(raw: RawPreprint): PreprintView {
   const a = raw.data.attributes;
   return {
     id: raw.data.id,
-    title: String(a.title ?? ""),
-    description: String(a.description ?? ""),
+    title: decodeOsfText(a.title),
+    description: decodeOsfText(a.description),
     datePublished: String(a.date_published ?? ""),
     doi: a.doi ?? null,
     osfUrl: raw.data.links?.html ?? `https://osf.io/${raw.data.id}/`,
@@ -88,7 +89,7 @@ export async function getUserPreprints(userId: string): Promise<{ results: Prepr
   return {
     results: raw.data.map((p) => ({
       id: p.id,
-      title: String(p.attributes.title ?? ""),
+      title: decodeOsfText(p.attributes.title),
       datePublished: String(p.attributes.date_published ?? ""),
       osfUrl: p.links?.html ?? `https://osf.io/${p.id}/`,
     })),

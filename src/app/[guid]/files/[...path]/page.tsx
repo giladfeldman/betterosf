@@ -70,7 +70,7 @@ export default async function DeepFilesPage({
     }
     throw e;
   }
-  const { kind, title, fullTree, linked, registrations, components } = resource;
+  const { kind, title, fullTree, linked, registrations, components, linkedFailed, registrationsFailed } = resource;
   const node = { title };
   const parent = fullTree.parentTree;
   const providers = fullTree.rootSkeleton.map((p) => ({
@@ -162,6 +162,8 @@ export default async function DeepFilesPage({
             readOnly={kind === "registration"}
             degraded={fullTree.degraded}
             componentsFailed={fullTree.componentsFailed}
+            linkedFailed={linkedFailed}
+            registrationsFailed={registrationsFailed}
           />
         }
         right={

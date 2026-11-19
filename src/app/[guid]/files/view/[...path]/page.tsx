@@ -94,7 +94,7 @@ export default async function FileViewerPage({
   // Side-pane data: tree, linked projects, registrations. These power the
   // navigation pane but the page is still useful without them. For a
   // registration resource these endpoints don't apply — we skip them.
-  const [nodeMeta, fullTree, linked, registrations]: [{ title: string; parentId: string | null }, FullProjectTree, NodeView[], RegistrationView[]] = await Promise.all([
+  const [nodeMeta, fullTree, linkedResult, registrationsResult]: [{ title: string; parentId: string | null }, FullProjectTree, NodeView[] | null, RegistrationView[] | null] = await Promise.all([
     nodeMetaPromise,
     resourceKind === "registration"
       ? collectFolderSkeleton(guid, { kind: "registration" })
@@ -112,11 +112,14 @@ export default async function FileViewerPage({
         ),
     resourceKind === "registration"
       ? Promise.resolve<NodeView[]>([])
-      : getAllLinkedNodes(guid).catch((): NodeView[] => []),
+      : getAllLinkedNodes(guid).catch((): NodeView[] | null => null),
     resourceKind === "registration"
       ? Promise.resolve<RegistrationView[]>([])
-      : getNodeRegistrations(guid).catch((): RegistrationView[] => []),
+      : getNodeRegistrations(guid).catch((): RegistrationView[] | null => null),
   ]);
+  // null = the lookup failed: unknown, not "none" (d-99070d).
+  const linked = linkedResult ?? [];
+  const registrations = registrationsResult ?? [];
   const node = { title: nodeMeta.title };
   const parent = fullTree.parentTree;
 
@@ -266,6 +269,8 @@ export default async function FileViewerPage({
             readOnly={resourceKind === "registration"}
             degraded={fullTree.degraded}
             componentsFailed={fullTree.componentsFailed}
+            linkedFailed={linkedResult === null}
+            registrationsFailed={registrationsResult === null}
           />
         }
         right={

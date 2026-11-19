@@ -2,7 +2,7 @@ import { auth } from "@/auth";
 import { applyLicence, listOsfLicences } from "@/lib/osf/licences";
 import { APPLY_BATCH_SIZE, validateApply, type ApplyResult } from "@/lib/licence/check";
 import { OsfWriteError } from "@/lib/osf/write";
-import { appErrorResponse } from "@/lib/osf/error-response";
+import { appErrorResponse, osfErrorResponse } from "@/lib/osf/error-response";
 import { isValidGuid } from "@/lib/osf/guid";
 import { daysUntil } from "@/lib/transition/deadlines";
 
@@ -53,13 +53,21 @@ export async function POST(req: Request): Promise<Response> {
     year: typeof body.year === "string" ? body.year : "",
   };
 
-  const options = await listOsfLicences().catch(() => null);
-  if (!options) {
+  // d-24370c: nine licence_list_failed 502s on 2026-10-31 could not be explained because this
+  // branch threw the error away. OSF's own status (429, 503 ...) now reaches the user and the log
+  // row keeps the cause.
+  let options: Awaited<ReturnType<typeof listOsfLicences>>;
+  try {
+    options = await listOsfLicences();
+  } catch (e) {
+    const mapped = osfErrorResponse(e, { endpoint: "/v2/licenses/" });
+    if (mapped) return mapped;
     return appErrorResponse({
       status: 502,
       code: "licence_list_failed",
       error: "Could not read OSF's licence list, so nothing was changed.",
       action: "Retry in a minute.",
+      cause: e,
       logType: "osf",
     });
   }

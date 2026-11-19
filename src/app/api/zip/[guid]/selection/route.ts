@@ -2,7 +2,7 @@ import archiver from "archiver";
 import { Readable } from "node:stream";
 import { z } from "zod";
 import { isValidGuid } from "@/lib/osf/guid";
-import { selectToken } from "@/lib/osf/tokens";
+import { userTokenOrAnonymous } from "@/lib/osf/tokens";
 import { fetchProviderZip } from "@/lib/waterbutler/zip";
 
 export const runtime = "nodejs";
@@ -101,7 +101,7 @@ export async function POST(
 
   (async () => {
     let token = "";
-    try { token = await selectToken(); } catch { /* anonymous */ }
+    try { token = await userTokenOrAnonymous(); } catch { /* anonymous */ }
 
     try {
       for (const item of parsed.data.items) {

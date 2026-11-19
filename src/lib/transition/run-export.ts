@@ -80,6 +80,12 @@ export type ExportPlan = {
   /** Non-file content already fetched as text, keyed by path within the bag. */
   extras: { path: string; text: string; wikiName?: string }[];
   /**
+   * Non-file content that should have been in `extras` but could not be fetched (a wiki
+   * page OSF did not return). Each line is a `reconcile()` blocker: the run cannot read as
+   * complete while it lacks one (d-927519).
+   */
+  missingExtras?: string[];
+  /**
    * Every OSF node this plan covers, root first.
    *
    * Rendered into the report so the SCOPE of an export is stated rather than inferred from
@@ -443,6 +449,7 @@ export async function runExport(opts: RunExportOptions): Promise<ExportResult> {
   const verdict = reconcile({
     expected: plan.files.map((f) => ({ osfFileId: f.osfFileId, path: f.path, size: f.size })),
     results: verifications,
+    blockers: plan.missingExtras ?? [],
   });
 
   const bagInfo: BagInfo = {

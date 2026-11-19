@@ -4,7 +4,7 @@ import { server } from "../msw/server";
 import { GET } from "@/app/api/files/[guid]/download/route";
 
 describe("/api/files/[guid]/download", () => {
-  it("retries anonymously when OSF rejects the bearer token for a public file", async () => {
+  it("fetches a public file for an anonymous visitor with no token at all (d-ff4462)", async () => {
     const seenAuthHeaders: (string | null)[] = [];
     server.use(
       http.get("https://files.osf.io/v1/resources/m3p49/providers/osfstorage/html", ({ request }) => {
@@ -24,6 +24,6 @@ describe("/api/files/[guid]/download", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     expect(await res.text()).toContain("Loaded");
-    expect(seenAuthHeaders).toEqual(["Bearer test-token", null]);
+    expect(seenAuthHeaders).toEqual([null]);
   });
 });

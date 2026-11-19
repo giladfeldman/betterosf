@@ -1,6 +1,7 @@
 import "server-only";
 import { osfGet, osfGetUrl } from "./client";
 import { collectAll } from "./paginate";
+import { decodeOsfText } from "@/lib/osf/decode-text";
 
 export type RegistrationView = {
   id: string;
@@ -22,7 +23,7 @@ type CollectionResponse = { data: RawReg[]; links: { next: string | null } };
 function parse(raw: RawReg): RegistrationView {
   return {
     id: raw.id,
-    title: String(raw.attributes.title ?? ""),
+    title: decodeOsfText(raw.attributes.title),
     dateRegistered: String(raw.attributes.date_registered ?? ""),
     public: Boolean(raw.attributes.public),
     osfUrl: raw.links?.html ?? `https://osf.io/${raw.id}/`,
@@ -81,8 +82,8 @@ export async function getRegistration(guid: string): Promise<RegistrationDetailV
   const a = raw.data.attributes;
   return {
     id: raw.data.id,
-    title: String(a.title ?? ""),
-    description: String(a.description ?? ""),
+    title: decodeOsfText(a.title),
+    description: decodeOsfText(a.description),
     dateRegistered: String(a.date_registered ?? ""),
     public: Boolean(a.public),
     osfUrl: raw.data.links?.html ?? `https://osf.io/${raw.data.id}/`,

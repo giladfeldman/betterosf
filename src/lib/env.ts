@@ -1,7 +1,8 @@
 import { z } from "zod";
 
+// OSF_APP_TOKEN is gone (d-ff4462, 2026-11-18): no request path uses an app-owned OSF
+// token any more, because the account behind it could read private projects.
 const schema = z.object({
-  OSF_APP_TOKEN: z.string().min(1, "OSF_APP_TOKEN required"),
   NEXT_PUBLIC_BASE_URL: z.string().url(),
 });
 
@@ -21,9 +22,9 @@ export function env(): Env {
 /**
  * Auth/OAuth secrets needed by the OSF sign-in + token-refresh flow.
  *
- * Kept SEPARATE from `env()` on purpose: anonymous request paths only need
- * `OSF_APP_TOKEN` (via `selectToken()`), so they must not fail just because the
- * OAuth credentials are absent. These are validated lazily — the first time an
+ * Kept SEPARATE from `env()` on purpose: anonymous request paths need no OSF
+ * credential at all, so they must not fail just because the OAuth credentials are
+ * absent. These are validated lazily — the first time an
  * actual OSF sign-in or token refresh runs — so a missing var produces ONE clear,
  * actionable error instead of a cryptic upstream OAuth failure, without breaking
  * `next build` (which never exercises the OAuth flow).

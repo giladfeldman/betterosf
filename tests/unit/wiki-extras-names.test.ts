@@ -32,7 +32,7 @@ function stubWikiFetch() {
 describe("wiki pages in an export never collapse into one entry", () => {
   it("three non-Latin wiki names produce three distinct entries", async () => {
     stubWikiFetch();
-    const extras = await fetchExtras(
+    const { extras } = await fetchExtras(
       planWith([
         { id: "w1", name: "研究" },
         { id: "w2", name: "数据" },
@@ -48,7 +48,7 @@ describe("wiki pages in an export never collapse into one entry", () => {
 
   it("names that differ only by case, or sanitise to the same thing, stay distinct", async () => {
     stubWikiFetch();
-    const extras = await fetchExtras(
+    const { extras } = await fetchExtras(
       planWith([
         { id: "w1", name: "Home" },
         { id: "w2", name: "home" },
@@ -62,7 +62,7 @@ describe("wiki pages in an export never collapse into one entry", () => {
 
   it("uses the shared sanitiser: a Windows-reserved or illegal name is rewritten, not dropped", async () => {
     stubWikiFetch();
-    const extras = await fetchExtras(planWith([{ id: "w1", name: "CON" }, { id: "w2", name: 'q"uote?' }]));
+    const { extras } = await fetchExtras(planWith([{ id: "w1", name: "CON" }, { id: "w2", name: 'q"uote?' }]));
     const paths = extras.filter((e) => e.path.startsWith("wikis/")).map((e) => e.path);
     expect(paths).toContain("wikis/_CON.md");
     expect(paths).toContain("wikis/q-uote-.md");
@@ -70,9 +70,56 @@ describe("wiki pages in an export never collapse into one entry", () => {
 
   it("the RO-Crate names each wiki by its real OSF name", async () => {
     stubWikiFetch();
-    const extras = await fetchExtras(planWith([{ id: "w1", name: "研究" }, { id: "w2", name: "数据" }]));
+    const { extras } = await fetchExtras(planWith([{ id: "w1", name: "研究" }, { id: "w2", name: "数据" }]));
     const pages = wikiPagesFromExtras(extras, "data/");
     expect(pages.map((p) => p.name).sort()).toEqual(["数据", "研究"].sort());
     expect(pages.every((p) => p.path.startsWith("data/wikis/"))).toBe(true);
+  });
+});
+
+describe("a wiki page that fails to fetch is named, never silently dropped (d-927519)", () => {
+  it("an OSF error and a network failure each produce a 'missing' line naming the page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).endsWith("/w2")) return new Response("bad gateway", { status: 502 });
+        if (String(url).endsWith("/w3")) throw new TypeError("Failed to fetch");
+        return new Response("ok");
+      }),
+    );
+    const { extras, missing } = await fetchExtras(
+      planWith([{ id: "w1", name: "Home" }, { id: "w2", name: "Methods" }, { id: "w3", name: "Data" }]),
+    );
+    expect(extras.filter((e) => e.path.startsWith("wikis/"))).toHaveLength(1);
+    expect(missing).toHaveLength(2);
+    expect(missing[0]).toContain('"Methods"');
+    expect(missing[0]).toContain("502");
+    expect(missing[1]).toContain('"Data"');
+  });
+
+  it("nothing is missing when every page arrives", async () => {
+    stubWikiFetch();
+    const { missing } = await fetchExtras(planWith([{ id: "w1", name: "Home" }]));
+    expect(missing).toEqual([]);
+  });
+});
+
+describe("a failed lookup is missing content, not 'none' (review 2026-11-18)", () => {
+  it("wikis: null (the wiki list could not be read) produces a missing line", async () => {
+    stubWikiFetch();
+    const { missing } = await fetchExtras({ guid: "abcde", wikis: null } as unknown as PlanResponse);
+    expect(missing.some((m) => m.includes("wiki pages could not be read"))).toBe(true);
+  });
+
+  it("contributors: null produces a missing line", async () => {
+    stubWikiFetch();
+    const { missing } = await fetchExtras({ guid: "abcde", wikis: [], contributors: null } as unknown as PlanResponse);
+    expect(missing.some((m) => m.includes("contributor list could not be read"))).toBe(true);
+  });
+
+  it("control: an empty wiki list and a known contributor list are not missing", async () => {
+    stubWikiFetch();
+    const { missing } = await fetchExtras({ guid: "abcde", wikis: [], contributors: [] } as unknown as PlanResponse);
+    expect(missing).toEqual([]);
   });
 });

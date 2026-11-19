@@ -31,7 +31,7 @@ export default function PrivacyPage() {
         </li>
         <li>
           <strong>Short-lived counters</strong> for rate-limiting and quota tracking, such as per-IP navigation
-          counts and daily app-token usage. These expire automatically.
+          counts and per-IP request budgets. These expire automatically.
         </li>
         <li>
           <strong>A record of your agreement to the transition terms</strong>, if you use the export and
@@ -91,8 +91,8 @@ export default function PrivacyPage() {
 
       <h2>What we send to OSF</h2>
       <p>
-        Every project or file page makes one or more calls to OSF. Anonymous viewers use a BetterOSF app token
-        when needed, with anonymous fallback for public endpoints. Signed-in users use their own OSF OAuth token.
+        Every project or file page makes one or more calls to OSF. Anonymous viewers are fetched anonymously, so
+        they see public content only; BetterOSF holds no shared OSF credential. Signed-in users use their own OSF OAuth token.
       </p>
 
       <h2>Scirenity platform links</h2>

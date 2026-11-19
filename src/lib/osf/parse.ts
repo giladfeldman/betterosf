@@ -1,3 +1,4 @@
+import { decodeOsfText } from "@/lib/osf/decode-text";
 export type NodeView = {
   id: string;
   title: string;
@@ -87,8 +88,8 @@ export function parseNode(raw: { data: { id: string; attributes: Record<string, 
   const r = raw.data.relationships;
   return {
     id: raw.data.id,
-    title: String(a.title ?? ""),
-    description: String(a.description ?? ""),
+    title: decodeOsfText(a.title),
+    description: decodeOsfText(a.description),
     category: String(a.category ?? ""),
     public: Boolean(a.public),
     tags: Array.isArray(a.tags) ? (a.tags as string[]) : [],

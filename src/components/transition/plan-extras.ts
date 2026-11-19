@@ -17,18 +17,35 @@ export type PlanExtra = {
   wikiName?: string;
 };
 
-export async function fetchExtras(plan: PlanResponse): Promise<PlanExtra[]> {
+/**
+ * `missing` names every wiki page that could not be fetched (d-927519). It used to be
+ * dropped in silence ("recorded by its absence"), so an export or deposit that lacked a
+ * wiki page still reconciled as COMPLETE. The runners pass each line to `reconcile()` as
+ * a blocker, so the run reports what it lacks.
+ */
+export async function fetchExtras(plan: PlanResponse): Promise<{ extras: PlanExtra[]; missing: string[] }> {
   const extras: PlanExtra[] = [];
+  const missing: string[] = [];
   const wikiFile = wikiFileNamer();
 
+  // `null` means the lookup failed, not "there are none" (review 2026-11-18): reading it as an
+  // empty list let a run reconcile complete with every wiki page silently absent.
+  if (plan.wikis === null) {
+    missing.push("OSF's list of wiki pages could not be read, so no wiki page is in this copy. Run it again, or copy the wiki from OSF by hand.");
+  }
+  if (plan.contributors === null) {
+    missing.push("OSF's contributor list could not be read, so the metadata in this copy names no contributors. Run it again before relying on it.");
+  }
   for (const wiki of plan.wikis ?? []) {
     try {
       const res = await fetch(`/api/transition/wiki/${wiki.id}`, { cache: "no-store" });
       if (res.ok) {
         extras.push({ path: `wikis/${wikiFile(wiki.name, wiki.id)}.md`, text: await res.text(), wikiName: wiki.name });
+      } else {
+        missing.push(`The wiki page "${wiki.name}" could not be fetched from OSF (HTTP ${res.status}), so it is not in this copy. Run it again, or copy that page from OSF by hand.`);
       }
-    } catch {
-      /* a missing wiki is recorded by its absence from the manifest, not faked */
+    } catch (e) {
+      missing.push(`The wiki page "${wiki.name}" could not be fetched from OSF (${e instanceof Error ? e.message : String(e)}), so it is not in this copy. Run it again, or copy that page from OSF by hand.`);
     }
   }
 
@@ -54,7 +71,7 @@ export async function fetchExtras(plan: PlanResponse): Promise<PlanExtra[]> {
     ),
   });
 
-  return extras;
+  return { extras, missing };
 }
 
 /**

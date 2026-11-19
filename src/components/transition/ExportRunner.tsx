@@ -155,13 +155,15 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
       }
       const { token } = await tokenRes.json();
 
+      const fetched = await fetchExtras(plan);
       const exportPlan: ExportPlan = {
         guid: plan.guid,
         projectTitle: plan.title,
         osfUrl: plan.osfUrl,
         doi: plan.doi,
         files: plan.files,
-        extras: await fetchExtras(plan),
+        extras: fetched.extras,
+        missingExtras: fetched.missing,
         coveredNodes: coveredNodesFrom(plan),
         contributors: plan.contributors ?? [],
         // undefined = the lookup failed (not "no licence"); run-export says so in the ZIP.

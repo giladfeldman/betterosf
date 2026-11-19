@@ -86,6 +86,7 @@ if (typeof TextEncoder !== "undefined" && !(new TextEncoder().encode("x") instan
 
 // Set env vars BEFORE any test imports env.ts (which caches the parsed env on first call).
 // Setting them in a per-test beforeEach is too late — the first test wins forever.
+// Canary (d-ff4462): no code reads this any more; a request carrying it is a regression.
 process.env.OSF_APP_TOKEN = "test-token";
 process.env.NEXT_PUBLIC_BASE_URL = "http://localhost:4747";
 

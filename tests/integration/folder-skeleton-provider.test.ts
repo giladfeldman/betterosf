@@ -132,6 +132,28 @@ describe("collectFolderSkeleton — provider propagation", () => {
     const broken = skeleton[0]!.children.find((c) => c.name === "broken");
     expect(broken).toBeDefined();
     expect(broken!.children).toEqual([]);
+    // d-db0b03: the failed listing is flagged as unknown, never shown as an empty folder.
+    expect(broken!.listingFailed).toBe(true);
+    expect(skeleton[0]!.listingFailed).toBeUndefined(); // control: the root listed fine
+  });
+
+  it("a failed OSF Storage root listing is kept and flagged, never dropped as if the project had no files (d-db0b03)", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/rootfail/files/", () =>
+        HttpResponse.json({
+          data: [
+            { id: "osfstorage", type: "files", attributes: { name: "osfstorage", provider: "osfstorage", kind: "folder", path: "/" }, relationships: { files: { links: { related: { href: "https://api.osf.io/v2/nodes/rootfail/files/osfstorage/" } } } } },
+            { id: "github", type: "files", attributes: { name: "github", provider: "github", kind: "folder", path: "/" }, relationships: { files: { links: { related: { href: "https://api.osf.io/v2/nodes/rootfail/files/github/" } } } } },
+          ],
+          links: { next: null },
+        })
+      ),
+      http.get("https://api.osf.io/v2/nodes/rootfail/files/osfstorage/", () => HttpResponse.json({ errors: [{ detail: "boom" }] }, { status: 503 })),
+      http.get("https://api.osf.io/v2/nodes/rootfail/files/github/", () => HttpResponse.json({ errors: [{ detail: "Not found." }] }, { status: 404 })),
+    );
+    const skeleton = await collectFolderSkeleton("rootfail");
+    expect(skeleton.map((s) => s.provider)).toEqual(["osfstorage"]); // the broken addon is still dropped
+    expect(skeleton[0]!.listingFailed).toBe(true);
   });
 
   it("each provider's subtree carries its own provider name (no leakage between providers)", async () => {

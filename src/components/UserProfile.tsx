@@ -37,11 +37,14 @@ export async function UserProfile({
     throw e;
   }
 
+  // A failed lookup is marked, never shown as "No public projects" (unknown is not zero).
+  const failed = { nodes: false, regs: false, preprints: false };
   const [nodes, regs, preprints] = await Promise.all([
-    getUserNodes(guid).catch(() => ({ results: [] as NodeView[], total: 0 })),
-    getUserRegistrations(guid).catch(() => ({ results: [] as RegistrationView[], total: 0 })),
-    getUserPreprints(guid).catch(() => ({ results: [] as PreprintListItem[], total: 0 })),
+    getUserNodes(guid).catch(() => { failed.nodes = true; return { results: [] as NodeView[], total: 0 }; }),
+    getUserRegistrations(guid).catch(() => { failed.regs = true; return { results: [] as RegistrationView[], total: 0 }; }),
+    getUserPreprints(guid).catch(() => { failed.preprints = true; return { results: [] as PreprintListItem[], total: 0 }; }),
   ]);
+  const couldNotLoad = (what: string) => `Could not load ${what} from OSF just now, so this is not a count of zero. Reload the page to try again.`;
 
   const projPag = parsePagination(searchParams, "projSize", "projPage");
   const regPag = parsePagination(searchParams, "regSize", "regPage");
@@ -87,7 +90,7 @@ export async function UserProfile({
             <a href={`/${n.id}`} className="text-blue-600 hover:underline">{n.title || n.id}</a>
           </li>
         )}
-        emptyText="No public projects."
+        emptyText={failed.nodes ? couldNotLoad("public projects") : "No public projects."}
         basePath={basePath}
         searchParams={searchParams}
       />
@@ -112,7 +115,7 @@ export async function UserProfile({
             <span className="ml-2 text-xs text-neutral-500">{r.dateRegistered.slice(0, 10)}</span>
           </li>
         )}
-        emptyText="No registrations."
+        emptyText={failed.regs ? couldNotLoad("registrations") : "No registrations."}
         basePath={basePath}
         searchParams={searchParams}
       />
@@ -137,7 +140,7 @@ export async function UserProfile({
             {p.datePublished && <span className="ml-2 text-xs text-neutral-500">{p.datePublished.slice(0, 10)}</span>}
           </li>
         )}
-        emptyText="No preprints."
+        emptyText={failed.preprints ? couldNotLoad("preprints") : "No preprints."}
         basePath={basePath}
         searchParams={searchParams}
       />

@@ -1,3 +1,4 @@
+import { decodeOsfText } from "@/lib/osf/decode-text";
 /**
  * Licence check — pure logic shared by the API routes and the page.
  *
@@ -111,7 +112,7 @@ export function toLicenceRow(n: RawNode): LicenceRow {
   const holders = (a.node_license?.copyright_holders ?? []).filter((h) => h.trim().length > 0);
   return {
     guid: n.id,
-    title: String(a.title ?? ""),
+    title: decodeOsfText(a.title),
     public: Boolean(a.public),
     parentId: n.relationships?.parent?.data?.id ?? null,
     osfUrl: n.links?.html ?? `https://osf.io/${n.id}/`,

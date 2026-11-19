@@ -105,3 +105,13 @@ describe("both producers use the shared module, rather than their own copy", () 
     expect(src).not.toMatch(/BetterOSF whole-tree ZIP — partial failures/);
   });
 });
+
+describe("safeFolderName: a decoded title is safe as a folder on every system", () => {
+  it("replaces the characters Windows refuses and control characters", () => {
+    expect(safeFolderName('a <b> "c": d|e?*')).toBe("a _b_ _c__ d_e__");
+    expect(safeFolderName("x\u0001y")).toBe("x_y");
+  });
+  it("control: an ordinary title with & and accents is unchanged", () => {
+    expect(safeFolderName("Peer Community In & Journal (é)")).toBe("Peer Community In & Journal (é)");
+  });
+});

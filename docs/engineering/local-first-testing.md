@@ -70,7 +70,7 @@ suite if `3000` reappears** in any of them. Historical records under
 sessions actually ran, and rewriting them would be dishonest.
 
 When starting a local server, always confirm it is really *this* project before
-trusting any result — `curl -s localhost:4747 | grep -o "<title>[^<]*</title>"`.
+trusting any result — `curl -s -A "Mozilla/5.0" localhost:4747 | grep -o "<title>[^<]*</title>"`. (`-A` matters: the middleware answers a bare `curl/` User-Agent with 403.)
 
 ### Local-server gotchas (already-solved, listed so they're never re-debugged)
 
@@ -117,3 +117,10 @@ Only when the change literally cannot run locally:
 
 For everything else — code under `src/`, tests, components, API routes —
 local probes are mandatory.
+
+### Worktrees: never run `vercel link` inside one
+
+Observed 2026-10-29 with Vercel CLI 58.0.0: `vercel link` run inside a git worktree nested in
+this checkout wrote `.vercel/`, `.env.local` and a `.gitignore` change to the PARENT checkout,
+not the worktree. In a worktree, copy `.vercel/project.json` from the main checkout by hand
+(it holds only the project and org ids) and pull env vars from the main checkout.

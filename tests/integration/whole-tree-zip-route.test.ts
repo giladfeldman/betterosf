@@ -29,6 +29,17 @@ describe("whole-tree ZIP route", () => {
     expect(res.status).toBe(400);
   });
 
+  it("says a deleted project (OSF 410) was deleted, not 'not found' (d-f2d4f3)", async () => {
+    server.use(
+      http.get("https://api.osf.io/v2/nodes/gone1/", () =>
+        HttpResponse.json({ errors: [{ detail: "The requested node is no longer available." }] }, { status: 410 }),
+      ),
+    );
+    const res = await GET(new Request("http://localhost:4747/api/zip/gone1"), { params: Promise.resolve({ guid: "gone1" }) });
+    expect(res.status).toBe(410);
+    expect(await res.text()).toMatch(/deleted on OSF/);
+  });
+
   it("streams a ZIP for a single-node project with one provider", async () => {
     server.use(
       http.get("https://api.osf.io/v2/nodes/solo/", () => HttpResponse.json(nodeRow("solo", "Solo"))),

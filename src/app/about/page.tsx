@@ -24,6 +24,7 @@ export default function AboutPage() {
         <li>Full component, linked-project, and registration lists without hidden pagination traps</li>
         <li>Unified file tree across storage providers such as OSF Storage, Google Drive, Dropbox, GitHub, S3, and Box</li>
         <li>Whole-project, folder, and selected-item ZIP downloads</li>
+        <li>Signed in with write access: upload, rename, move (within a project&apos;s OSF Storage) and delete, with a verified backup required before any deletion</li>
         <li>In-browser previews for common research formats including PDF, DOCX, XLSX, PPTX, CSV, code, notebooks, media, and images</li>
         <li>Real anchor links everywhere, so right-click open-in-new-tab still works</li>
         <li>Global search across projects, files, registrations, and users</li>

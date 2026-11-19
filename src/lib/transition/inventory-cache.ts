@@ -29,7 +29,8 @@
  */
 
 /** Bump when the cached shape changes — an old entry is then ignored, never misread. */
-const CACHE_VERSION = 1;
+// 2 (2026-11-18): titles are now HTML-decoded at parse time; a v1 entry holds them escaped.
+const CACHE_VERSION = 2;
 const KEY_PREFIX = "betterosf.inventory";
 
 /** Exactly the fields the table renders. Descriptions and tags are deliberately not kept. */

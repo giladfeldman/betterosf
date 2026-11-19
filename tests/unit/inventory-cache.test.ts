@@ -27,7 +27,7 @@ const project = (guid: string) => ({
 });
 
 const cacheFor = (osfUserId: string, overrides: Partial<InventoryCache> = {}): InventoryCache => ({
-  version: 1,
+  version: 2,
   osfUserId,
   fetchedAt: "2026-08-13T12:00:00.000Z",
   projects: [project("aaa11"), project("bbb22")],
@@ -71,7 +71,7 @@ describe("it is never shown to the wrong account", () => {
     // Defence against a hand-edited or migrated entry: the id inside is checked too, not
     // just the key it was filed under.
     localStorage.setItem(
-      "betterosf.inventory.v1.osf-1",
+      "betterosf.inventory.v2.osf-1",
       JSON.stringify(cacheFor("someone-else")),
     );
     expect(readInventoryCache("osf-1")).toBeNull();
@@ -84,23 +84,23 @@ describe("it is never shown to the wrong account", () => {
 
 describe("it refuses to misread anything", () => {
   it("ignores an entry written by an older version rather than reinterpreting it", () => {
-    localStorage.setItem("betterosf.inventory.v1.osf-1", JSON.stringify(cacheFor("osf-1", { version: 0 })));
+    localStorage.setItem("betterosf.inventory.v2.osf-1", JSON.stringify(cacheFor("osf-1", { version: 0 })));
     expect(readInventoryCache("osf-1")).toBeNull();
   });
 
   it("ignores corrupt JSON", () => {
-    localStorage.setItem("betterosf.inventory.v1.osf-1", "{not json");
+    localStorage.setItem("betterosf.inventory.v2.osf-1", "{not json");
     expect(readInventoryCache("osf-1")).toBeNull();
   });
 
   it("ignores an entry with no projects, which would render as 'you have none'", () => {
-    localStorage.setItem("betterosf.inventory.v1.osf-1", JSON.stringify(cacheFor("osf-1", { projects: [] })));
+    localStorage.setItem("betterosf.inventory.v2.osf-1", JSON.stringify(cacheFor("osf-1", { projects: [] })));
     expect(readInventoryCache("osf-1")).toBeNull();
   });
 
   it("ignores an unparseable timestamp instead of showing an unknown age", () => {
     localStorage.setItem(
-      "betterosf.inventory.v1.osf-1",
+      "betterosf.inventory.v2.osf-1",
       JSON.stringify(cacheFor("osf-1", { fetchedAt: "whenever" })),
     );
     expect(readInventoryCache("osf-1")).toBeNull();
@@ -108,7 +108,7 @@ describe("it refuses to misread anything", () => {
 
   it("tolerates a missing enrichment map rather than throwing", () => {
     localStorage.setItem(
-      "betterosf.inventory.v1.osf-1",
+      "betterosf.inventory.v2.osf-1",
       JSON.stringify({ ...cacheFor("osf-1"), enriched: undefined }),
     );
     expect(readInventoryCache("osf-1")?.enriched).toEqual({});
@@ -188,7 +188,7 @@ describe("dropFromInventoryCache — a project OSF says was deleted (410)", () =
   it("removes a list it empties, so the next visit fetches afresh", () => {
     writeInventoryCache(cacheFor("osf-1", { projects: [project("aaa11")], total: 1 }));
     expect(dropFromInventoryCache("aaa11")).toBe(1);
-    expect(localStorage.getItem("betterosf.inventory.v1.osf-1")).toBeNull();
+    expect(localStorage.getItem("betterosf.inventory.v2.osf-1")).toBeNull();
   });
 
   it("leaves unrelated localStorage keys alone", () => {
@@ -196,5 +196,13 @@ describe("dropFromInventoryCache — a project OSF says was deleted (410)", () =
     writeInventoryCache(cacheFor("osf-1"));
     dropFromInventoryCache("aaa11");
     expect(JSON.parse(localStorage.getItem("other.app")!).projects).toHaveLength(1);
+  });
+});
+
+describe("cache version 2 (titles decoded at parse time, 2026-11-18)", () => {
+  it("an entry written by version 1 (escaped titles) is not read", async () => {
+    const { readInventoryCache } = await import("@/lib/transition/inventory-cache");
+    localStorage.setItem("betterosf.inventory.v1.osf-9", JSON.stringify({ version: 1, osfUserId: "osf-9", projects: [] }));
+    expect(readInventoryCache("osf-9")).toBeNull();
   });
 });

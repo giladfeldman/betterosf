@@ -28,8 +28,8 @@ export async function GET(
   // Anonymous whole-tree ZIPs: cap at 5 per IP per hour to protect against abuse.
   // Signed-in users have OSF's own 10k/day per-token limit, which is self-throttling.
   // "Signed in" is verified via a real session (auth()), NOT cookie-name presence —
-  // a forged `authjs.session-token` cookie must not buy a higher tier on the shared app token.
-  // Dynamic import mirrors selectToken(): keeps NextAuth out of non-request contexts.
+  // a forged `authjs.session-token` cookie must not buy a higher tier.
+  // Dynamic import mirrors userTokenOrAnonymous(): keeps NextAuth out of non-request contexts.
   const isSignedIn = await (async () => {
     try {
       const { auth } = await import("@/auth");
@@ -59,6 +59,10 @@ export async function GET(
     tree = await collectNodeTree(guid);
   } catch (e) {
     if (e instanceof OsfError && e.code === "not_found") {
+      // A deleted node answers 410 (measured 2026-10-30): say so, as the transition routes do (d-f2d4f3).
+      if (e.status === 410) {
+        return new Response("This project was deleted on OSF, so there is nothing left to download.", { status: 410 });
+      }
       return new Response("Project not found", { status: 404 });
     }
     // An OSF timeout, rate limit or expired token is OSF's condition, not a BetterOSF bug

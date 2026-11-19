@@ -43,6 +43,9 @@ export type FullProjectTree = {
   totalComponents: number;
   /** True when OSF's component list could not be fetched — the count is UNKNOWN, not 0. */
   componentsFailed?: boolean;
+  /** Same, for the registration and linked-project lists (d-99070d). */
+  registrationsFailed?: boolean;
+  linkedFailed?: boolean;
   /** Folder skeletons for each registration of this project. */
   registrationTrees: RegistrationTree[];
   totalRegistrations: number;
@@ -63,6 +66,24 @@ export type FullProjectTree = {
 };
 
 /** Canonical empty tree — the fail-soft fallback shared by every caller. */
+/**
+ * One component's / registration's / linked project's folder skeleton, raced against its
+ * timeout. A timeout or a failure is NOT an empty item (d-db0b03): it comes back as
+ * `skipped: true`, which the tree hydrates in the browser on its own, exactly like an item
+ * past the recursion cap. Before, it came back as `skeleton: []` + `skipped: false` and the
+ * tree showed the component as having no files.
+ */
+async function skeletonOrHydrateLater(
+  walk: Promise<SkeletonNode[]>,
+  timeoutMs: number,
+): Promise<{ skeleton: SkeletonNode[]; skipped: boolean }> {
+  const FAILED = Symbol("skeleton-failed");
+  const result = await raceTimeout<SkeletonNode[] | typeof FAILED>(walk, timeoutMs, FAILED).catch(
+    (): typeof FAILED => FAILED,
+  );
+  return result === FAILED ? { skeleton: [], skipped: true } : { skeleton: result, skipped: false };
+}
+
 export const EMPTY_TREE: FullProjectTree = {
   rootSkeleton: [],
   components: [],
@@ -123,7 +144,7 @@ export async function collectFullTree(
   // succeeded with no folders" — only the former is a degraded (incomplete) tree.
   const SKELETON_FAILED = Symbol("skeleton-failed");
   // Parallel: root skeleton + direct children list + registrations + linked + parent.
-  const [rootSkeletonResult, childrenResult, registrations, linkedNodes, parentNode] = await Promise.all([
+  const [rootSkeletonResult, childrenResult, registrationsResult, linkedResult, parentNode] = await Promise.all([
     raceTimeout<SkeletonNode[] | typeof SKELETON_FAILED>(
       collectFolderSkeleton(rootGuid),
       rootTimeoutMs,
@@ -132,10 +153,15 @@ export async function collectFullTree(
     // null, not [], on failure: "this project has no components" and "we could not
     // ask" must not render the same (df9tj showed "Components 0" for 100 components).
     getAllChildren(rootGuid).catch((): NodeView[] | null => null),
-    getNodeRegistrations(rootGuid).catch((): RegistrationView[] => []),
-    getAllLinkedNodes(rootGuid).catch((): NodeView[] => []),
+    // Same for registrations and linked projects (d-99070d).
+    getNodeRegistrations(rootGuid).catch((): RegistrationView[] | null => null),
+    getAllLinkedNodes(rootGuid).catch((): NodeView[] | null => null),
     getParentNode(opts.parentId),
   ]);
+  const registrationsFailed = registrationsResult === null;
+  const linkedFailed = linkedResult === null;
+  const registrations = registrationsResult ?? [];
+  const linkedNodes = linkedResult ?? [];
   const degraded = rootSkeletonResult === SKELETON_FAILED;
   const componentsFailed = childrenResult === null;
   const children = childrenResult ?? [];
@@ -165,12 +191,7 @@ export async function collectFullTree(
       title: c.title || c.id,
       category: c.category,
       isPublic: c.public,
-      skeleton: await raceTimeout(
-        collectFolderSkeleton(c.id),
-        componentTimeoutMs,
-        [] as SkeletonNode[]
-      ).catch((): SkeletonNode[] => []),
-      skipped: false,
+      ...(await skeletonOrHydrateLater(collectFolderSkeleton(c.id), componentTimeoutMs)),
       ...(c.childCount !== undefined ? { childCount: c.childCount } : {}),
     }))
   );
@@ -197,12 +218,7 @@ export async function collectFullTree(
       title: r.title || r.id,
       dateRegistered: r.dateRegistered,
       isPublic: r.public,
-      skeleton: await raceTimeout(
-        collectFolderSkeleton(r.id, { kind: "registration" }),
-        componentTimeoutMs,
-        [] as SkeletonNode[]
-      ).catch((): SkeletonNode[] => []),
-      skipped: false,
+      ...(await skeletonOrHydrateLater(collectFolderSkeleton(r.id, { kind: "registration" }), componentTimeoutMs)),
     }))
   );
 
@@ -226,12 +242,7 @@ export async function collectFullTree(
       title: l.title || l.id,
       category: l.category,
       isPublic: l.public,
-      skeleton: await raceTimeout(
-        collectFolderSkeleton(l.id),
-        componentTimeoutMs,
-        [] as SkeletonNode[]
-      ).catch((): SkeletonNode[] => []),
-      skipped: false,
+      ...(await skeletonOrHydrateLater(collectFolderSkeleton(l.id), componentTimeoutMs)),
       ...(l.childCount !== undefined ? { childCount: l.childCount } : {}),
     }))
   );
@@ -251,6 +262,8 @@ export async function collectFullTree(
     components: [...recursedTrees, ...skippedTrees],
     totalComponents: children.length,
     componentsFailed,
+    registrationsFailed,
+    linkedFailed,
     registrationTrees: [...recursedRegs, ...skippedRegs],
     totalRegistrations: registrations.length,
     linkedTrees: [...recursedLinked, ...skippedLinked],

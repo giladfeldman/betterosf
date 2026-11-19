@@ -163,7 +163,9 @@ async function main() {
       consoleErrors.push(text.slice(0, 200));
     });
     try {
-      const resp = await page.goto(full, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      // d-07fe37: 60 s, not 30 s: in-project file search (08c) walks the whole project tree on OSF
+      // and timed out at 30 s about one run in two on a loaded machine.
+      const resp = await page.goto(full, { waitUntil: "domcontentloaded", timeout: 60_000 });
       status = String(resp?.status() ?? "no-resp");
       await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
       await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: true });
@@ -563,6 +565,9 @@ async function main() {
       // box (see DocxViewer.renderProducedContent + docx-empty-render.test.ts).
       // PASS = rendered content OR the fallback heading; never a silent blank.
       success: '.docx-render, article, h2:has-text("preview this document")',
+      // d-07fe37: the malformed-file fallback took 11.5 s locally and 30.7 s on production
+      // (2026-11-16), so a 15 s deadline failed about one run in two on a busy machine.
+      deadlineMs: 45_000,
     },
     {
       kind: "pptx",
@@ -606,7 +611,7 @@ async function main() {
       await page.waitForTimeout(500);
     }
     const ok = success && !errText;
-    record(`viewer:${probe.kind} loads (no error banner, success el present)`, ok, errText ?? (success ? "" : "no success element rendered before 15s deadline"));
+    record(`viewer:${probe.kind} loads (no error banner, success el present)`, ok, errText ?? (success ? "" : `no success element rendered before ${(probe.deadlineMs ?? 15_000) / 1000}s deadline`));
     await page.screenshot({ path: `${OUT}/INT-viewer-${probe.kind.replace(/[^a-z0-9]/g, "_")}.png`, fullPage: true });
   }
 

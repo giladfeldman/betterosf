@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.15.1 — 2026-11-19
+
+### Security
+- **Signed-out visitors can no longer be served anything but public content.** BetterOSF used to
+  fall back to a shared server-side OSF credential when OSF throttled anonymous requests, which
+  could answer a request for a private project with its contents. That credential is gone
+  (`OSF_APP_TOKEN` is no longer read): signed-out visitors are fetched anonymously, and signed-in
+  visitors use their own OSF token. If you ran your own deployment, you can delete that variable
+  and revoke the token. Upgrading is recommended.
+
+### Fixed
+- **A rate limit is shown as OSF's own 429.** With no shared credential to fall back on, a
+  throttled anonymous read now says OSF is rate-limiting, instead of silently retrying under
+  another account. The quota banner that depended on the shared credential is removed.
+- **"Could not load" instead of an empty list.** When OSF fails to answer, lists of projects,
+  components, registrations, preprints and search results now say they could not be loaded,
+  rather than showing "none" or "0".
+- **OSF titles with `&amp;`, `&lt;` and similar now read correctly.** OSF returns titles and
+  descriptions HTML-escaped; they are decoded once, so pages, ZIP folder names and Zenodo titles
+  show "&" instead of "&amp;".
+- **ZIP folder names are safe on Windows.** Project and component titles containing
+  `: * ? " < > |` or control characters are made safe, so the archive unpacks on every system.
+- **The export tells you what it could not include.** If a wiki page or the contributor list
+  could not be fetched from OSF, the run is reported as incomplete and says which item was
+  missing, instead of reading as complete.
+- **Downloading a deleted project** from the whole-project ZIP route now says it was deleted on
+  OSF (HTTP 410) instead of "not found".
+- **Email bounce and complaint notices are retried when our side fails.** The webhook now answers
+  with a server error (so Amazon SES redelivers) for an internal fault or an unreachable signing
+  certificate, and refuses only a genuinely bad signature.
+
+### Changed
+- The Privacy page no longer mentions a shared app token, and states that signed-out visitors are
+  fetched anonymously (public content only).
+- The home page and About page now mention Rename and Move for signed-in users with write access.
+- Dependency security updates (`npm audit fix`).
+
 ## 1.15.0 — 2026-11-16
 
 ### Added

@@ -71,7 +71,7 @@ All variables are documented in [`.env.example`](.env.example). What you need de
 
 | To use | Set |
 |---|---|
-| Anonymous browsing | `OSF_APP_TOKEN` (an OSF personal access token) |
+| Anonymous browsing | Nothing. Visitors who are not signed in are fetched anonymously (public content only); BetterOSF holds no shared OSF credential |
 | Sign in with OSF | `AUTH_OSF_ID`, `AUTH_OSF_SECRET` (your own OSF OAuth app), `AUTH_SECRET`, `DATABASE_URL` (Postgres) |
 | Zenodo transfer | `ZENODO_ENV` plus that instance's OAuth client id and secret |
 | Admin digests and bug-report email | AWS SES variables and `CRON_SECRET` |
@@ -132,6 +132,6 @@ This software is licensed under the [GNU Affero General Public License v3.0](LIC
 
 **How to cite.** If you use this software in research, please cite it. GitHub's *Cite this repository* button (from [CITATION.cff](CITATION.cff)) gives APA and BibTeX. In APA style:
 
-> Feldman, G. (2026). *betterosf: A faster, friendlier interface for the Open Science Framework (OSF): browse, search, export and migrate your projects.* (Version 1.15.0) [Computer software]. https://betterosf.vercel.app
+> Feldman, G. (2026). *betterosf: A faster, friendlier interface for the Open Science Framework (OSF): browse, search, export and migrate your projects.* (Version 1.15.1) [Computer software]. https://betterosf.vercel.app
 
 <!-- license-citation:end -->

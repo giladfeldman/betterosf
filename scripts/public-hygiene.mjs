@@ -74,12 +74,20 @@ const CONTENT_RULES = [
   },
   {
     id: "secret",
+    // d-b5f5d8: the UNQUOTED lower/camelCase form (`token: abc...` in YAML, a .env-style line, a
+    // pasted header). Prose is spared because a value must be one unbroken run of 24+ key
+    // characters holding both a letter and a digit, and must not continue into code (`.`, `(`).
+    re: /\b[\w-]*(secret|token|api[_-]?key|apikey|password)[\w-]*\s*[=:]\s*(?=[A-Za-z0-9+\/_=-]*\d)(?=[A-Za-z0-9+\/_=-]*[A-Za-z])(?![A-Za-z0-9+\/_=-]*(test|placeholder|example|dummy|fake|no-credential|redacted))[A-Za-z0-9+\/_=-]{24,}(?![\w.(\[])/i,
+    why: "unquoted secret-shaped assignment",
+  },
+  {
+    id: "secret",
     re: /\bBearer\s+[A-Za-z0-9._-]{20,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/,
     why: "bearer token or JWT",
   },
   {
     id: "private-workflow",
-    re: /\b(CLAUDE|AGENTS)\.md\b|\btodo(-archive)?\.md\b|(^|[^\w.])\.(claude|agents)\/|\bgit add (-f|--force)\b|\/ship\b|\/wrapup\b|Claude Max|claude -p\b|~\/\.claude|~\/Vibe|\$VIBE_ROOT|Co-Authored-By/,
+    re: /\b(CLAUDE|AGENTS)\.md\b|\b(todo|TODO)(-archive)?\.md\b|\bdebt\.py\b|(^|[^\w.])\.(claude|agents)\/|\bgit add (-f|--force)\b|\/ship\b|\/wrapup\b|Claude Max|claude -p\b|~\/\.claude|~\/Vibe|\$VIBE_ROOT|Co-Authored-By/,
     why: "refers to the maintainer's private tooling",
   },
 ];
@@ -137,9 +145,6 @@ export function scan(root = ROOT) {
       }
       for (const rule of CONTENT_RULES) {
         if (rule.id === "private-workflow" && WORKFLOW_NAME_OK.has(file) && !WORKFLOW_TOOLING.test(line)) continue;
-        // The vendored admin-email renderer's prefilled "start a session" prompt ends with a fixed line
-        // naming the maintainer's ship step. It is email text for the maintainer, never run by this repo.
-        if (rule.id === "private-workflow" && file === "src/lib/notifications/admin-email.ts" && /then \/ship\. If it is not a real issue/.test(line)) continue;
         if (rule.re.test(line)) findings.push({ file, line: i + 1, rule: rule.id, detail: rule.why });
       }
     });

@@ -181,7 +181,7 @@ throwaway private project, uploading three bytes, and probing all three ways.
 undocumented, **every browser-direct download path falls back to the server route on any
 failure** — that fallback is what makes depending on the quirk safe, and it is why
 `/api/zip/[guid]` and `/api/zip/[guid]/selection` are still there rather than deleted.
-Private projects use the server route by design.
+Private projects use the server route by design. `/api/zip/[guid]` answers 410 (not 404) for a project deleted on OSF.
 
 ### The transfer leg (v1.9.0) — additional hard rules
 

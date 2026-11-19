@@ -6,7 +6,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const maybeAlert = vi.fn();
-vi.mock("@/lib/notifications/admin-alert", () => ({ maybeAlert: (...a: unknown[]) => maybeAlert(...a) }));
+vi.mock("@/lib/notifications/admin-alert", () => ({
+  maybeAlert: (...a: unknown[]) => maybeAlert(...a),
+  USER_REPORT_EVENT_PREFIX: "user-report:",
+}));
 vi.mock("@/lib/db/bug-reports", () => ({ insertBugReport: async () => "11111111-1111-4111-8111-111111111111" }));
 vi.mock("@/auth", () => ({ auth: async () => null }));
 vi.mock("@/lib/db/users", () => ({ findUserByOsfId: async () => null }));

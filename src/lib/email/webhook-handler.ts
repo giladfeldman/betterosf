@@ -95,11 +95,30 @@ function assertAllowedTopic(payload: SnsEnvelope): boolean {
   return Boolean(arn && allow.has(arn));
 }
 
+/**
+ * A refused signature: the one failure the webhook answers with a 4xx. Everything else is
+ * an internal fault and must be a 5xx, because SNS redelivers only on 5xx/429 and drops a
+ * bounce for good on any other answer (d-d3473f; shared card
+ * sns-webhook-must-answer-5xx-on-internal-failure).
+ */
+export class SnsSignatureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SnsSignatureError";
+  }
+}
+
 async function verifySignature(payload: SnsEnvelope): Promise<void> {
   const validator = new MessageValidator();
   await new Promise<void>((resolve, reject) => {
     validator.validate(payload as unknown as Record<string, unknown>, (err: unknown) => {
-      if (err) reject(err);
+      if (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        // sns-validator reports a failed FETCH of the signing certificate through the same
+        // callback as a bad signature. That is an AWS/network outage, not a refusal: it must
+        // stay a plain Error (answered 503, SNS retries) rather than a 403 that drops the bounce.
+        reject(/could not be retrieved/i.test(message) ? new Error(message) : new SnsSignatureError(message));
+      }
       else resolve();
     });
   });

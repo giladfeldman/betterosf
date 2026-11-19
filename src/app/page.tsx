@@ -60,7 +60,7 @@ const CAPABILITIES = [
   },
   {
     title: "Upload straight to OSF",
-    body: "Sign in with OSF to drag in files and folders, or extract a ZIP into a folder tree. Uploads go browser-to-OSF directly, so multi-gigabyte files aren't capped by our servers.",
+    body: "Sign in with OSF to drag in files and folders, or extract a ZIP into a folder tree. Uploads go browser-to-OSF directly, so multi-gigabyte files aren't capped by our servers. Where you can write, you can also rename files and folders and move them between folders of the same project's OSF Storage.",
   },
 ];
 

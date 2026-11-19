@@ -1,4 +1,4 @@
-import { selectToken } from "@/lib/osf/tokens";
+import { userTokenOrAnonymous, bearerOrNone } from "@/lib/osf/tokens";
 import { isValidGuid } from "@/lib/osf/guid";
 import { contentDisposition } from "@/lib/http/content-disposition";
 
@@ -33,9 +33,8 @@ export async function GET(
   const wbUrl = `https://files.osf.io/v1/resources/${guid}/providers/${provider}/${folderPath}?zip=`;
 
   const upstream = await fetch(wbUrl, {
-    headers: {
-      Authorization: `Bearer ${await selectToken()}`,
-    },
+    // The visitor's own token, or none: never the app token (d-ff4462).
+    headers: bearerOrNone(await userTokenOrAnonymous()),
   });
 
   if (!upstream.ok) {

@@ -49,3 +49,6 @@ communications/
 /tests/unit/agent-docs-single-source.test.ts
 /tests/unit/qa-skill-integrity.test.ts
 /tests/unit/skill-gates.test.ts
+
+# local scratch (logs, probes)
+/tmp/

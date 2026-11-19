@@ -14,6 +14,12 @@ export type SkeletonNode = {
   /** Number of files (NOT folders) directly under this folder. Used by the UI
    *  to show "(N)" badges so users see there's content before clicking. */
   fileCount: number;
+  /**
+   * This folder's own listing failed during the walk (d-db0b03): its `fileCount` and
+   * `children` are UNKNOWN, not zero. The tree shows "(?)" instead of an empty folder;
+   * opening it fetches the listing afresh.
+   */
+  listingFailed?: boolean;
 };
 
 export async function collectFolderSkeleton(
@@ -54,7 +60,7 @@ export async function collectFolderSkeleton(
       }
       folderCount += 1;
       if (f.kind !== "folder") continue;
-      const child = f.listingUrl ? await walk(f.listingUrl, depth + 1, providerName) : { subfolders: [], fileCount: 0 };
+      const child = f.listingUrl ? await walk(f.listingUrl, depth + 1, providerName) : { subfolders: [], fileCount: 0, ok: true };
       result.push({
         provider: providerName,
         name: f.name,
@@ -65,6 +71,7 @@ export async function collectFolderSkeleton(
         deleteUrl: f.deleteUrl,
         children: child.subfolders,
         fileCount: child.fileCount,
+        ...(child.ok ? {} : { listingFailed: true }),
       });
     }
     return { subfolders: result, fileCount, ok: true };
@@ -74,10 +81,12 @@ export async function collectFolderSkeleton(
   for (const p of providers) {
     if (!p.listingUrl) continue;
     const top = await walk(p.listingUrl, 1, p.provider);
-    // Drop a provider whose own root listing is unreachable (broken/empty addon).
+    // Drop an ADDON provider whose own root listing is unreachable (broken/empty addon).
     // Genuinely-empty providers (listing succeeds, no entries) are still kept so
-    // an empty osfstorage root remains visible/uploadable.
-    if (!top.ok) continue;
+    // an empty osfstorage root remains visible/uploadable. OSF Storage itself is never
+    // dropped: every project has it, so a failed listing there is "unknown", flagged below
+    // (d-db0b03), not a project without files.
+    if (!top.ok && p.provider !== "osfstorage") continue;
     out.push({
       provider: p.provider,
       name: p.name,
@@ -87,6 +96,7 @@ export async function collectFolderSkeleton(
       newFolderUrl: p.newFolderUrl,
       children: top.subfolders,
       fileCount: top.fileCount,
+      ...(top.ok ? {} : { listingFailed: true }),
     });
   }
 

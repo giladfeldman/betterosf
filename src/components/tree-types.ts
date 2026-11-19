@@ -85,6 +85,8 @@ export type TreeNodeData = {
   provider?: string;   // for color/icon
   guid?: string;       // for components / linked / registrations
   fileCount?: number;  // # files directly under this folder, shown as "(N)" badge
+  /** The count could not be read (the folder's listing failed): shown as "(?)", never as empty. */
+  countUnknown?: boolean;
   /** # components this component/project has (OSF's count); undefined = unknown, shows nothing. */
   componentCount?: number;
   downloadHref?: string;

@@ -3,20 +3,17 @@ import { parseEnv, parseAuthEnv } from "@/lib/env";
 
 describe("parseEnv", () => {
   it("parses a valid environment", () => {
-    const env = parseEnv({
-      OSF_APP_TOKEN: "abc123",
-      NEXT_PUBLIC_BASE_URL: "http://localhost:4747",
-    });
-    expect(env.OSF_APP_TOKEN).toBe("abc123");
+    const env = parseEnv({ NEXT_PUBLIC_BASE_URL: "http://localhost:4747" });
     expect(env.NEXT_PUBLIC_BASE_URL).toBe("http://localhost:4747");
   });
 
-  it("throws when OSF_APP_TOKEN missing", () => {
-    expect(() => parseEnv({ NEXT_PUBLIC_BASE_URL: "http://x" })).toThrow(/OSF_APP_TOKEN/);
+  it("no longer carries an app-owned OSF token (d-ff4462)", () => {
+    const env = parseEnv({ NEXT_PUBLIC_BASE_URL: "http://x", OSF_APP_TOKEN: "leftover" });
+    expect("OSF_APP_TOKEN" in env).toBe(false);
   });
 
   it("throws when NEXT_PUBLIC_BASE_URL is not a URL", () => {
-    expect(() => parseEnv({ OSF_APP_TOKEN: "x", NEXT_PUBLIC_BASE_URL: "not-a-url" })).toThrow();
+    expect(() => parseEnv({ NEXT_PUBLIC_BASE_URL: "not-a-url" })).toThrow();
   });
 });
 

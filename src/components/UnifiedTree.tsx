@@ -181,6 +181,8 @@ export function UnifiedTree({
   readOnly = false,
   degraded = false,
   componentsFailed = false,
+  linkedFailed = false,
+  registrationsFailed = false,
 }: {
   guid: string;
   rootTitle: string;
@@ -207,6 +209,9 @@ export function UnifiedTree({
   degraded?: boolean;
   /** OSF's component list could not be fetched: the component count is unknown, not 0. */
   componentsFailed?: boolean;
+  /** Same for the linked-project and registration lists (d-99070d). */
+  linkedFailed?: boolean;
+  registrationsFailed?: boolean;
 }) {
   const [pinned, setPinned] = useState<FavoriteRef[]>([]);
   useEffect(() => {
@@ -1019,6 +1024,7 @@ export function UnifiedTree({
             href: `/${nodeGuid}/files/${provider.provider}`,
             newTab: false,
             fileCount: provider.fileCount,
+            countUnknown: provider.listingFailed,
             downloadHref: zipHref(nodeGuid, provider.provider, "/"),
             selection: {
               kind: "folder",
@@ -1108,6 +1114,7 @@ export function UnifiedTree({
               kind: "folder",
               href: `/${nodeGuid}/files/${folder.provider}${folder.materializedPath}`,
               fileCount: folder.fileCount,
+              countUnknown: folder.listingFailed,
               downloadHref: zipHref(nodeGuid, folder.provider, folder.materializedPath),
               selection: {
                 kind: "folder",
@@ -1412,6 +1419,16 @@ export function UnifiedTree({
 
     // Linked projects (expandable sub-trees when linkedTrees provided —
     // symmetric to components/registrations).
+    if (linkedNodes.length === 0 && linkedFailed) {
+      rows.push({
+        id: "linked-root",
+        depth: 0,
+        expanded: false,
+        hasChildren: false,
+        onToggle: () => {},
+        node: { id: "linked-root", label: "Linked projects (couldn't load from OSF; refresh to try again)", kind: "linked-root" },
+      });
+    }
     if (linkedNodes.length > 0) {
       rows.push({
         id: "linked-root",
@@ -1479,6 +1496,16 @@ export function UnifiedTree({
     }
 
     // Registrations
+    if (registrations.length === 0 && registrationsFailed) {
+      rows.push({
+        id: "registrations-root",
+        depth: 0,
+        expanded: false,
+        hasChildren: false,
+        onToggle: () => {},
+        node: { id: "registrations-root", label: "Registrations (couldn't load from OSF; refresh to try again)", kind: "registrations-root" },
+      });
+    }
     if (registrations.length > 0) {
       rows.push({
         id: "registrations-root",
@@ -1541,7 +1568,7 @@ export function UnifiedTree({
     }
 
     return rows;
-  }, [expanded, filesHidden, maxDepth, forcedOpen, setForcedOpen, loadedEntries, loadingKeys, folderFailures, readOnly, canWrite, skeleton, components, componentsFailed, componentTreeState, childLists, fetchChildList, scheduledIds, linkedNodes, linkedTreeState, registrations, registrationTreeState, parentTreeState, pinned, rootTitle, guid, fetchFiles, setExpanded, queueHydrationTask, hydrationFailures, runningHydrationId]);
+  }, [expanded, filesHidden, maxDepth, forcedOpen, setForcedOpen, loadedEntries, loadingKeys, folderFailures, readOnly, canWrite, skeleton, components, componentsFailed, linkedFailed, registrationsFailed, componentTreeState, childLists, fetchChildList, scheduledIds, linkedNodes, linkedTreeState, registrations, registrationTreeState, parentTreeState, pinned, rootTitle, guid, fetchFiles, setExpanded, queueHydrationTask, hydrationFailures, runningHydrationId]);
 
   const uploadTargets = useMemo(() => {
     const seen = new Set<string>();

@@ -239,13 +239,15 @@ export function ZenodoTransferPanel({
       runId = id;
       setJobId(id);
 
+      const fetched = await fetchExtras(plan);
       const exportPlan: ExportPlan = {
         guid: plan.guid,
         projectTitle: plan.title,
         osfUrl: plan.osfUrl,
         doi: plan.doi,
         files: plan.files,
-        extras: await fetchExtras(plan),
+        extras: fetched.extras,
+        missingExtras: fetched.missing,
         coveredNodes: coveredNodesFrom(plan),
         contributors: plan.contributors ?? [],
         crateInput: {

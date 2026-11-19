@@ -18,6 +18,7 @@
   `AWS_SES_*`, `EMAIL_FROM_ADDRESS`, `EMAIL_CONFIG_SET`, `SNS_TOPIC_ARN`,
   `CRON_SECRET`, `ADMIN_NOTIFY_EMAIL`. Webhook `/api/email/webhook`; cron
   `/api/cron/admin-digest` (1st and 15th). Admin mail follows the maintainer's admin-email standard: issue alerts as they happen (P1-P4, session button, 24 h mute, production only) plus that fortnight digest; `ADMIN_NOTIFY_EMAIL` is the only recipient variable and `ADMIN_EMAIL_SESSION_FOLDER` sets where the session button opens. A dedicated BetterOSF sending domain is still to do.
+  **The webhook answers 4xx only for a refused signature; every internal fault, and a signing certificate that cannot be fetched, is a 5xx**, because SNS redelivers on 5xx/429 and drops the message on any other answer.
   **Feedback arrives ONLY as configuration-set events, which say `eventType`, not the
   identity-level `notificationType`** — dispatch on `msg.notificationType ?? msg.eventType`,
   and never let an unmatched SNS message return silently (v1.12.1; keys never values in the

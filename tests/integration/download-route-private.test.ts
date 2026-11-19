@@ -34,7 +34,7 @@ describe("download proxy, signed-in private file", () => {
       http.get(FILE, ({ request }) =>
         request.headers.get("authorization") === "Bearer user-tok"
           ? new HttpResponse("private bytes", { headers: { "content-type": "application/octet-stream" } })
-          : HttpResponse.redirect("https://osf.io/login/?next=x", 302),
+          : new HttpResponse('{"errors":[{"detail":"Forbidden"}]}', { status: 403 }), // measured 2026-11-18
       ),
       http.get("https://osf.io/login/", () => new HttpResponse("<html>OSF sign in</html>", { headers: { "content-type": "text/html" } })),
     );
@@ -56,7 +56,7 @@ describe("download proxy, signed-in private file", () => {
       http.get(FILE, ({ request }) =>
         request.headers.get("authorization") === "Bearer user-tok"
           ? HttpResponse.redirect("https://bucket.objectstorage.example.com/signed?sig=abc", 302)
-          : new HttpResponse("no", { status: 401 }),
+          : new HttpResponse("no", { status: 403 }),
       ),
       http.get("https://bucket.objectstorage.example.com/signed", ({ request }) => {
         leaked = request.headers.get("authorization") !== null;
@@ -70,7 +70,7 @@ describe("download proxy, signed-in private file", () => {
     expect(res.headers.get("cache-control")).toBe("private, no-store");
   });
 
-  it("a stale or rate-limited user token still gets a PUBLIC file, fetched anonymously (no user token on the retry)", async () => {
+  it("a PUBLIC file is fetched anonymously first, so a stale user token is never even sent (d-00f6c0)", async () => {
     authMock.mockResolvedValue({ accessToken: "stale-tok", osfUserId: "u1" });
     const seen: (string | null)[] = [];
     server.use(
@@ -83,6 +83,43 @@ describe("download proxy, signed-in private file", () => {
     const res = await call(FILE);
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("public bytes");
-    expect(seen).toEqual(["Bearer stale-tok", null]);
+    expect(seen).toEqual([null]);
+    expect(res.headers.get("cache-control")).toBe("public, max-age=86400");
+  });
+
+  it("an anonymous request for a PRIVATE file's osf.io/download link is refused, never served the sign-in page (measured 2026-11-18)", async () => {
+    // A private file's osf.io/download link sends a signed-out request to
+    // accounts.osf.io/login, which answers 200 with an HTML sign-in page.
+    let loginFetched = false;
+    server.use(
+      http.get("https://osf.io/download/6ae3557/", () => HttpResponse.redirect("https://accounts.osf.io/login?service=x", 302)),
+      http.get("https://accounts.osf.io/login", () => {
+        loginFetched = true;
+        return new HttpResponse("<html>OSF sign in</html>", { headers: { "content-type": "text/html" } });
+      }),
+    );
+    const res = await call("https://osf.io/download/6ae3557/");
+    expect(res.status).toBe(403);
+    expect(loginFetched).toBe(false);
+  });
+
+  it("a signed-in user's private file via osf.io/download: anonymous attempt refused, then the user's token gets the bytes", async () => {
+    authMock.mockResolvedValue({ accessToken: "user-tok", osfUserId: "u1" });
+    server.use(
+      http.get("https://osf.io/download/6ae3557/", ({ request }) =>
+        request.headers.get("authorization")
+          ? HttpResponse.redirect(`${FILE}?action=download`, 302)
+          : HttpResponse.redirect("https://accounts.osf.io/login?service=x", 302),
+      ),
+      http.get(FILE, ({ request }) =>
+        request.headers.get("authorization") === "Bearer user-tok"
+          ? new HttpResponse("private bytes")
+          : new HttpResponse("no", { status: 403 }),
+      ),
+    );
+    const res = await call("https://osf.io/download/6ae3557/");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("private bytes");
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
   });
 });

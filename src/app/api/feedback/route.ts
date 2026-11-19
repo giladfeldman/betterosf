@@ -134,13 +134,13 @@ async function notifyAdmin(report: {
     console.warn("[feedback] ADMIN_NOTIFY_EMAIL is not set: the report is stored but no alert is sent");
     return false;
   }
-  const { maybeAlert } = await import("@/lib/notifications/admin-alert");
+  const { maybeAlert, USER_REPORT_EVENT_PREFIX } = await import("@/lib/notifications/admin-alert");
   const appUrl = (process.env.NEXT_PUBLIC_BASE_URL?.trim() || "https://betterosf.vercel.app").replace(/\/$/, "");
   const kindLabel = report.kind === "idea" ? "idea" : report.kind === "question" ? "question" : "bug report";
   const oneLine = report.message.slice(0, 60).replace(/\s+/g, " ");
   const result = await maybeAlert({
     level: "error",
-    event: `user-report:${report.kind}`,
+    event: `${USER_REPORT_EVENT_PREFIX}${report.kind}`,
     message: report.message.slice(0, 1000),
     priority: "P3",
     source: "user report",

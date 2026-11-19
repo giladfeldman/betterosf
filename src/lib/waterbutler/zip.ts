@@ -1,5 +1,5 @@
 import "server-only";
-import { selectToken } from "@/lib/osf/tokens";
+import { userTokenOrAnonymous, bearerOrNone } from "@/lib/osf/tokens";
 
 export type ZipFetchResult =
   | { status: "ok"; body: ReadableStream<Uint8Array> }
@@ -9,9 +9,9 @@ export async function fetchProviderZip(guid: string, provider: string, folderPat
   const normalized = folderPath === "/" ? "" : folderPath.replace(/^\/+|\/+$/g, "").split("/").map(encodeURIComponent).join("/") + "/";
   const url = `https://files.osf.io/v1/resources/${guid}/providers/${provider}/${normalized}?zip=`;
   try {
-    const token = await selectToken();
+    // The visitor's own token, or none: never the app token (d-ff4462).
     const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: bearerOrNone(await userTokenOrAnonymous()),
     });
     if (!res.ok) {
       return { status: "error", code: res.status, message: `Provider ${provider} on node ${guid}: HTTP ${res.status}` };

@@ -110,8 +110,10 @@ describe("collectFullTree", () => {
 
       expect(tree.components).toHaveLength(1);
       const slow = tree.components[0]!;
-      expect(slow.skeleton).toEqual([]); // timed out → empty
-      expect(slow.skipped).toBe(false); // skipped=false; "timeout" is a different concept from cap-skip
+      expect(slow.skeleton).toEqual([]);
+      // d-db0b03: a timed-out walk is handed to browser hydration (skipped), never shown as
+      // a component with no files.
+      expect(slow.skipped).toBe(true);
       // d-90ad9c: this used to be `elapsed < 500` against a 1 s handler, and flaked under
       // full-suite load (passing alone). The race is proven by ORDER, not by a wall clock:
       // the walk returned while the slow request was still unanswered. A walk that waited
@@ -152,10 +154,11 @@ describe("collectFullTree", () => {
     );
     const tree = await collectFullTree("proj");
     expect(tree.components).toHaveLength(2);
-    // both treated as non-skipped (the cap-skip is unrelated to fetch failure)
+    // d-db0b03: the failed one is left for browser hydration, not shown empty; the good one is loaded.
     const bad = tree.components.find((c) => c.guid === "bad")!;
     expect(bad.skeleton).toEqual([]);
-    expect(bad.skipped).toBe(false);
+    expect(bad.skipped).toBe(true);
+    expect(tree.components.find((c) => c.guid === "good")!.skipped).toBe(false);
     expect(tree.parentTree).toBeNull();
   });
 

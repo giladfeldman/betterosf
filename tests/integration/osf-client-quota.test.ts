@@ -19,15 +19,21 @@ describe("osfGet quota tracking", () => {
     expect(await getCount(`app:osf:calls:${today}`)).toBe(0);
   });
 
-  it("increments app-token counter only when anonymous is rate-limited and app fallback is used", async () => {
+  // d-ff4462: the app-token fallback is gone. A rate-limited anonymous read is reported as
+  // OSF's 429; it is never retried with a shared credential, and nothing is counted.
+  it("an anonymous 429 is reported as rate_limited, with no credentialed retry", async () => {
+    const auths: (string | null)[] = [];
     server.use(
       http.get("https://api.osf.io/v2/nodes/y/", ({ request }) => {
+        auths.push(request.headers.get("authorization"));
         if (!request.headers.get("authorization")) return new HttpResponse(null, { status: 429 });
         return HttpResponse.json({ data: { id: "y", type: "nodes", attributes: {} } });
       })
     );
-    await osfGet("/nodes/y/");
+    await expect(osfGet("/nodes/y/")).rejects.toMatchObject({ status: 429, code: "rate_limited" });
+    expect(auths.length).toBeGreaterThan(0);
+    expect(auths.every((a) => a === null)).toBe(true);
     const today = new Date().toISOString().slice(0, 10);
-    expect(await getCount(`app:osf:calls:${today}`)).toBe(1);
+    expect(await getCount(`app:osf:calls:${today}`)).toBe(0);
   });
 });

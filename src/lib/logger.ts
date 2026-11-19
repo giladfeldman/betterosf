@@ -1,6 +1,7 @@
 import "server-only";
 
 import { sql } from "drizzle-orm";
+import { after } from "next/server";
 import { getDb } from "@/lib/db";
 import { systemLogs } from "@/lib/db/schema";
 import { environmentLabel } from "@/lib/notifications/admin-email";
@@ -105,8 +106,11 @@ async function writeLog(
     await db.insert(systemLogs).values(row);
     // Admin email standard: an error row may raise an issue alert (deduped, production only).
     // Dynamic import avoids a cycle and keeps the SES client out of non-error paths.
+    // Awaited here, so the caller's keepAlive() covers it (d-3fd24d): a floating promise
+    // can be frozen with the function the moment the response is sent, and the alert email
+    // for the error that most needs one never leaves.
     if (level === "error") {
-      void import("./notifications/admin-alert").then((m) =>
+      await import("./notifications/admin-alert").then((m) =>
         m.maybeAlert({
           level,
           event: type,
@@ -121,16 +125,31 @@ async function writeLog(
   }
 }
 
+/**
+ * Run a log write without blocking the caller, but keep the serverless function alive
+ * until it finishes (d-3fd24d). Vercel may freeze a function as soon as its response is
+ * sent; `after()` (Next 15) registers the promise with the platform's waitUntil so the row
+ * and any admin alert email still complete. Outside a request (scripts, tests, build)
+ * `after()` throws, and the promise simply runs as before.
+ */
+export function keepAlive(work: Promise<unknown>): void {
+  try {
+    after(work);
+  } catch {
+    void work;
+  }
+}
+
 export function logInfo(type: LogType, message: string, context?: Record<string, unknown>, userId?: string | null): void {
-  void writeLog("info", type, message, context, userId);
+  keepAlive(writeLog("info", type, message, context, userId));
 }
 
 export function logWarn(type: LogType, message: string, context?: Record<string, unknown>, userId?: string | null): void {
-  void writeLog("warn", type, message, context, userId);
+  keepAlive(writeLog("warn", type, message, context, userId));
 }
 
 export function logError(type: LogType, message: string, context?: Record<string, unknown>, userId?: string | null): void {
-  void writeLog("error", type, message, context, userId);
+  keepAlive(writeLog("error", type, message, context, userId));
 }
 
 /**

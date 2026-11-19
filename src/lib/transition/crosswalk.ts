@@ -20,6 +20,7 @@
  */
 
 import type { ContributorView } from "@/lib/osf/contributors";
+import { escapeHtml } from "@/lib/osf/decode-text";
 
 /**
  * DataCite's `publisher` for a Zenodo deposit.
@@ -430,7 +431,9 @@ export function crosswalk(input: CrosswalkInput): CrosswalkResult {
     creators: creators.creators,
     related_identifiers: related,
   };
-  if (input.description.trim()) metadata.description = input.description;
+  // Zenodo's description is HTML; the OSF text is plain (decoded at parse, d-760cbc), so a
+  // researcher's literal "<b>" or "&" must stay literal.
+  if (input.description.trim()) metadata.description = escapeHtml(input.description);
   if (input.tags.length > 0) metadata.subjects = input.tags.map((t) => ({ subject: t }));
   if (licence.rights) metadata.rights = licence.rights;
 

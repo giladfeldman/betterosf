@@ -267,3 +267,17 @@ describe("LICENSE.txt in the export ZIP", () => {
     expect(text).not.toContain("LICENSE.txt");
   });
 });
+
+describe("a wiki page that could not be fetched (d-927519)", () => {
+  it("keeps the run from reading as complete and names the page in the report", async () => {
+    const clean = await run(plan(2));
+    expect(clean.verdict.blockers).toEqual([]); // control: the same run without it
+
+    const p = plan(2);
+    p.missingExtras = ['The wiki page "Methods" could not be fetched from OSF (HTTP 502), so it is not in this copy.'];
+    const result = await run(p);
+    expect(result.verdict.blockers).toHaveLength(1);
+    expect(result.verdict.status).not.toBe("complete");
+    expect(result.reportMarkdown).toContain('"Methods"');
+  });
+});

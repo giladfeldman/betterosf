@@ -1,8 +1,11 @@
 import { SendEmailCommand } from "@aws-sdk/client-ses";
-import { sql, gte, and, eq, count } from "drizzle-orm";
+import { sql, gte, and, eq, count, like, notLike } from "drizzle-orm";
 import { requireDb } from "@/lib/db";
 import { adminAlerts, systemLogs } from "@/lib/db/schema";
 import { getSesClient, FROM_ADDRESS, FROM_NAME, EMAIL_MODE } from "@/lib/email/client";
+
+/** Event prefix of user-submitted reports (feedback route); they have their own alert budget. */
+export const USER_REPORT_EVENT_PREFIX = "user-report:";
 import {
   classify, emailPolicy, environmentLabel, fingerprint, renderIssueAlert, shouldAlert,
   type AdminIssue, type Importance, type Priority,
@@ -90,7 +93,15 @@ export async function maybeAlert(input: AlertInput): Promise<"sent" | "muted" | 
     if (!policy.send) return "skipped";
 
     const dayAgo = new Date(Date.now() - 24 * 3600 * 1000);
-    const [dayRow] = await db.select({ n: count() }).from(adminAlerts).where(gte(adminAlerts.lastAlertedAt, dayAgo));
+    // Two separate 10-a-day budgets (d-6f9e96): user reports (event "user-report:*") and
+    // everything else. With one shared cap, a flood of reports could use up the day's
+    // alerts and mute a real production error.
+    const userReport = input.event.startsWith(USER_REPORT_EVENT_PREFIX);
+    const sameBudget = userReport
+      ? like(adminAlerts.event, `${USER_REPORT_EVENT_PREFIX}%`)
+      : notLike(adminAlerts.event, `${USER_REPORT_EVENT_PREFIX}%`);
+    const [dayRow] = await db.select({ n: count() }).from(adminAlerts)
+      .where(and(gte(adminAlerts.lastAlertedAt, dayAgo), sameBudget));
     const alertsToday = Number(dayRow?.n ?? 0);
     if (!escalated && !shouldAlert(priority, row.lastAlertedAt, alertsToday)) return "muted";
 
@@ -117,7 +128,9 @@ export async function maybeAlert(input: AlertInput): Promise<"sent" | "muted" | 
       adminLogUrl: input.adminLogUrl ?? (appUrl ? `${appUrl}/admin/logs?q=${encodeURIComponent(input.event)}` : undefined),
     };
     if (alertsToday === 9) {
-      issue.explanation += " Alert cap reached: this is the 10th alert email in 24 hours; further issues go to the fortnight digest until the window clears.";
+      issue.explanation += userReport
+        ? " Alert cap reached: this is the 10th user-report alert in 24 hours; further reports wait on the admin feedback page and in the fortnight digest. Error alerts have their own cap and are unaffected."
+        : " Alert cap reached: this is the 10th alert email in 24 hours; further issues go to the fortnight digest until the window clears.";
     }
     const alert = renderIssueAlert(issue, { prefix: policy.prefix });
 

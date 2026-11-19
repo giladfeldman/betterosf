@@ -626,7 +626,7 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
   // "nothing arrived" and turn a working run into a false failure, while a null tells
   // reconcile() it has no third opinion to offer.
   let destinationKeys: string[] | null = [];
-  const blockers: string[] = [...linkProblems];
+  const blockers: string[] = [...linkProblems, ...(plan.missingExtras ?? [])];
   for (const record of records) {
     try {
       const listed = await listDraftFileEntries(zenodo, record.recordId);
@@ -1086,6 +1086,7 @@ async function runArchiveDeposit(ctx: ArchiveRunContext): Promise<TransferResult
     expected: plan.files.map((f) => ({ osfFileId: f.osfFileId, path: f.path, size: f.size })),
     results: verifications,
     container,
+    blockers: plan.missingExtras ?? [],
   });
 
   const byId = new Map(plan.files.map((f) => [f.osfFileId, f] as const));

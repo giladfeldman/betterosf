@@ -34,9 +34,9 @@ export async function GET(
   // Rate-limited on the SAME budget as `/api/zip/[guid]`, and deliberately on the same key.
   //
   // This endpoint returns a few KB of JSON, but producing it walks up to 500 nodes at
-  // `getNode` + `getProviderRoots` each — up to ~1000 OSF requests per call, made with
-  // BetterOSF's own app token when the caller is anonymous. Left uncapped it would be an
-  // amplifier against OSF under a shared credential, and it would burn the Vercel function
+  // `getNode` + `getProviderRoots` each — up to ~1000 OSF requests per call, made
+  // anonymously when the caller is signed out. Left uncapped it would be an
+  // amplifier against OSF from this server's one IP, and it would burn the Vercel function
   // budget this whole browser-direct feature exists to protect.
   //
   // Sharing the key with the ZIP route matters: a separate budget would let one caller take

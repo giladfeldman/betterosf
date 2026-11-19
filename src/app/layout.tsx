@@ -4,7 +4,6 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { ThemeProvider } from "next-themes";
 import { UserMenu } from "@/components/UserMenu";
-import { QuotaBanner } from "@/components/QuotaBanner";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BetterOsfLogo } from "@/components/BetterOsfLogo";
 import { VersionBadge } from "@/components/VersionBadge";
@@ -60,7 +59,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <MobileNavMenu />
             </div>
           </header>
-          <QuotaBanner />
           <VersionBadge />
           <main id="main-content" className="flex-1 px-4 sm:px-6 py-8">{children}</main>
           <footer className="border-t border-neutral-200 dark:border-neutral-800 px-4 sm:px-6 py-4 text-sm text-neutral-500 flex justify-between flex-wrap gap-2">

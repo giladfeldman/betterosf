@@ -108,7 +108,7 @@ registered), so localhost OAuth remains awkward without a separate dev app.
 OAuth sign-in returned CAS `UnauthorizedServiceException` or `invalid_client`
 for client `3f59c94d4adf45e0a74a60478760114a`. App UI showed the developer app
 as valid; CAS service registry was out of sync. Workaround was anonymous browse
-via `OSF_APP_TOKEN` only.
+only.
 
 </details>
 

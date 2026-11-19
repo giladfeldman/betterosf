@@ -8,7 +8,7 @@
  * costs ~8 function invocations and ZERO bytes, because everything is browser ↔ OSF direct.
  *
  * Moving the bytes out does NOT move the abuse surface out: `/api/zip/[guid]/manifest` still
- * walks the node tree server-side under BetterOSF's app token, so it carries the same
+ * walks the node tree server-side (anonymously, or with the visitor's own token), so it carries the same
  * anonymous rate limit — on the same key — as the route it replaces.
  *
  * This does the same thing for downloads. The pieces already existed:

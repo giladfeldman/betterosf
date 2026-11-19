@@ -112,6 +112,37 @@ describe("issue alerts", () => {
   });
 });
 
+describe("alert cap: user reports and errors have separate daily budgets (d-6f9e96)", () => {
+  async function seedAlerted(prefix: string, n: number) {
+    for (let i = 0; i < n; i++) {
+      await db.execute(sql`INSERT INTO admin_alerts (fingerprint, priority, event, summary, last_alerted_at)
+        VALUES (${`seed-${prefix}-${i}`}, 'P3', ${`${prefix}${i}`}, 'seed', now())`);
+    }
+  }
+
+  it("ten user-report alerts today do not mute a production error", async () => {
+    env.VERCEL_ENV = "production";
+    await seedAlerted("user-report:bug-", 10);
+    expect(await maybeAlert(input)).toBe("sent");
+  });
+
+  it("control: ten error alerts today DO mute the next error (the cap still works)", async () => {
+    env.VERCEL_ENV = "production";
+    await seedAlerted("osf-", 10);
+    expect(await maybeAlert(input)).toBe("muted");
+  });
+
+  it("ten error alerts today do not mute a user report; ten reports mute the eleventh", async () => {
+    env.VERCEL_ENV = "production";
+    await seedAlerted("osf-", 10);
+    const report = { level: "error" as const, event: "user-report:bug", message: "x", priority: "P3" as const, source: "user report" };
+    expect(await maybeAlert(report)).toBe("sent");
+    await db.execute(sql`TRUNCATE admin_alerts`);
+    await seedAlerted("user-report:bug-", 10);
+    expect(await maybeAlert({ ...report, message: "y" })).toBe("muted");
+  });
+});
+
 describe("fortnight digest", () => {
   it("local, no opt-in: not sent", async () => {
     expect((await sendFortnightDigest()).status).toBe("not_production");

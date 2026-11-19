@@ -138,7 +138,7 @@ export function sessionPrompt(i: AdminIssue): string {
     `Stack top: ${stackTop || "not recorded"}`,
     `Admin log: ${i.adminLogUrl ?? "not recorded"}`,
     "Investigate per the never-guess rule: reproduce locally first (never debug against production),",
-    "find the root cause, fix it with a test, then /ship. If it is not a real issue, say why and log it.",
+    "find the root cause, fix it with a test, then release it through the project's full release checks. If it is not a real issue, say why and log it in the project's backlog.",
   ].join("\n");
 }
 
@@ -258,7 +258,7 @@ export function renderDigest(d: DigestInput, opts: { prefix?: string; folder?: s
   const cards = open.map((i) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 10px 0;border:1px solid ${LINE};"><tr><td width="5" bgcolor="${COLOR[i.priority]}" style="background:${COLOR[i.priority]};width:5px;padding:0;font-size:1px;">&nbsp;</td><td class="card" bgcolor="${CARD}" style="background:${CARD};padding:10px 14px;"><span style="color:${COLOR[i.priority]};font-weight:700;font-size:12px;">${i.priority} ${PRIORITY_LABEL[i.priority]}</span><div class="ink" style="color:${INK};font-size:14.5px;">${esc(i.summary)}</div><div class="muted" style="color:${SUB};font-size:12.5px;">${esc(i.event)} · ${i.count}× · first ${esc(i.firstSeen)} · last ${esc(i.lastSeen)} · ${esc(i.fingerprint)}</div>${button(sessionUrl(sessionPrompt(i), folder), "Start a session on this issue", true)}${clear}</td></tr></table>`).join("");
   const wholePrompt = `Fortnight admin digest for ${d.app}, ${d.periodStart} to ${d.periodEnd}: ${open.length} open issues (${p1} P1, ${p2} P2).\n` +
     open.slice(0, 15).map((i) => `- ${i.priority} ${i.summary} [${i.fingerprint}] ${i.count}x`).join("\n") +
-    `\nAdmin: ${d.adminUrl ?? "not recorded"}\nTriage these per the never-guess rule; reproduce locally, fix or log each to TODO.md with debt.py.`;
+    `\nAdmin: ${d.adminUrl ?? "not recorded"}\nTriage these per the never-guess rule; reproduce locally, fix each or log it in the project's backlog.`;
   const nums = d.numbers.map((n) => `<table role="presentation" cellpadding="0" cellspacing="0" align="left" style="margin:0 24px 10px 0;"><tr><td><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:${SUB};">${esc(n.label)}</div><div class="ink" style="font-size:22px;font-weight:600;color:${INK};">${esc(n.value)}</div></td></tr></table>`).join("") + clear;
   const sections =
     section("Headline numbers", nums) +

@@ -45,20 +45,20 @@ describe("osfGet", () => {
     expect(seenAuthHeaders).toEqual([null]);
   });
 
-  it("falls back to the app token only when anonymous public browsing is rate-limited", async () => {
+  it("never falls back to the app token when anonymous browsing is rate-limited (d-ff4462)", async () => {
     const seenAuthHeaders: (string | null)[] = [];
     server.use(
       http.get("https://api.osf.io/v2/nodes/public-rate/", ({ request }) => {
         const authHeader = request.headers.get("authorization");
         seenAuthHeaders.push(authHeader);
         if (!authHeader) return new HttpResponse(null, { status: 429, headers: { "Retry-After": "30" } });
+        // What the app account could read, private projects included.
         return HttpResponse.json({ data: { id: "public-rate", type: "nodes", attributes: {} } });
       })
     );
 
-    const result = await osfGet("/nodes/public-rate/");
-    expect((result as { data: { id: string } }).data.id).toBe("public-rate");
-    expect(seenAuthHeaders).toEqual([null, "Bearer test-token"]);
+    await expect(osfGet("/nodes/public-rate/")).rejects.toMatchObject({ code: "rate_limited" });
+    expect(seenAuthHeaders).toEqual([null]);
   });
 
   it("maps 429 to rate_limited", async () => {
