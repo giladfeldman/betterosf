@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { runTransfer, FILES_PER_RECORD, type TransferProgress, type TransferResult } from "@/lib/transition/run-transfer";
 import { createBrowserLedger, getLocalJob, listLocalJobs } from "@/lib/transition/ledger";
+import { findRunningJob, savedJobForResume } from "@/lib/transition/resume-offer";
 import { crosswalk, blockingGaps, type CrosswalkResult } from "@/lib/transition/crosswalk";
 import {
   planShards,
@@ -28,6 +29,7 @@ import { coveredNodesFrom } from "./covered-nodes";
 import { Stat } from "./Stat";
 import { PublishPanel } from "./PublishPanel";
 import type { PlanResponse } from "./plan-types";
+import { UnsizedFilesNotice, planHasNoFiles } from "./UnsizedFilesNotice";
 import { describeError, type ExportPlan, type RunLogEntry } from "@/lib/transition/run-export";
 
 type Connection =
@@ -79,6 +81,12 @@ export function ZenodoTransferPanel({
   const [result, setResult] = useState<TransferResult | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [resumable, setResumable] = useState<{ jobId: string; records: { recordId: string }[] } | null>(null);
+  // A failed read of the saved progress is shown, never read as "nothing to resume" (d-3812c6).
+  const [resumeUnreadable, setResumeUnreadable] = useState<string | null>(null);
+  // Cross-model review 2026-11-19: a banner alone left "Start transfer" one click away, and a
+  // fresh start beside an unfinished run creates a second set of drafts. When the saved
+  // progress could not be read, starting needs the user to say they checked Zenodo first.
+  const [checkedZenodoDrafts, setCheckedZenodoDrafts] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   /** Owned here so it survives a throw — the case where it is actually needed. */
   const runLog = useRef<RunLogEntry[]>([]);
@@ -135,15 +143,10 @@ export function ZenodoTransferPanel({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      try {
-        const jobs = await listLocalJobs();
-        const match = jobs.find((j) => j.guid === plan.guid && j.status === "running");
-        if (!cancelled && match) {
-          setResumable({ jobId: match.jobId, records: match.records });
-        }
-      } catch {
-        /* no local ledger is not an error — it just means nothing to resume */
-      }
+      const check = await findRunningJob(plan.guid, listLocalJobs);
+      if (cancelled) return;
+      if (check.kind === "found") setResumable({ jobId: check.jobId, records: check.records });
+      else if (check.kind === "unreadable") setResumeUnreadable(check.message);
     })();
     return () => {
       cancelled = true;
@@ -303,7 +306,7 @@ export function ZenodoTransferPanel({
             ? e.message
             : "The transfer failed.",
         action:
-          "Nothing on OSF was changed. The Zenodo draft keeps every file already verified, so starting again continues from there rather than re-uploading.",
+          "Nothing on OSF was changed. The Zenodo draft keeps every file already verified. If a “Continue” button appears, it picks up from that draft without re-uploading; “Start transfer” instead begins a new draft.",
         code: stopped ? "stopped_by_user" : "transfer_failed",
         status: 0,
         detail: (() => {
@@ -323,10 +326,9 @@ export function ZenodoTransferPanel({
       // resume with an empty record list would silently create FRESH drafts and leave the
       // half-filled ones behind as litter in someone's Zenodo account.
       if (runId) {
-        const saved = await getLocalJob(runId).catch(() => null);
-        if (saved && saved.records.length > 0) {
-          setResumable({ jobId: saved.jobId, records: saved.records });
-        }
+        const saved = await savedJobForResume(runId, getLocalJob);
+        if (saved.kind === "found") setResumable({ jobId: saved.jobId, records: saved.records });
+        else if (saved.kind === "unreadable") setResumeUnreadable(saved.message);
       }
     } finally {
       await wakeLock.release();
@@ -550,6 +552,21 @@ export function ZenodoTransferPanel({
         <div className="mb-4">
           <ErrorNotice error={error} title="The transfer did not finish" />
           <RunLog entries={logView} />
+        </div>
+      ) : null}
+
+      {resumeUnreadable && !resumable ? (
+        <div role="status" className="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          {resumeUnreadable}
+          <label className="mt-2 flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={checkedZenodoDrafts}
+              onChange={(e) => setCheckedZenodoDrafts(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>I checked my Zenodo uploads and want to start a new transfer anyway.</span>
+          </label>
         </div>
       ) : null}
 
@@ -817,6 +834,7 @@ export function ZenodoTransferPanel({
             type="button"
             disabled={
               !acknowledged ||
+              (resumeUnreadable !== null && !resumable && !checkedZenodoDrafts) ||
               !opfsAvailable() ||
               plan.files.length === 0 ||
               !destinationReady(destination)
@@ -830,7 +848,8 @@ export function ZenodoTransferPanel({
                 ? "Create the new version"
                 : "Start transfer"}
           </button>
-          {plan.files.length === 0 ? (
+          <UnsizedFilesNotice plan={plan} />
+          {planHasNoFiles(plan) ? (
             <p className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">
               This project has no files, so there is nothing to transfer.
             </p>

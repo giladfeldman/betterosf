@@ -27,6 +27,7 @@ import { Stat } from "./Stat";
 import { RunLog } from "./RunLog";
 import { RelatedNodesPicker, defaultSelection } from "./RelatedNodesPicker";
 import type { PlanResponse } from "./plan-types";
+import { UnsizedFilesNotice, planHasNoFiles } from "./UnsizedFilesNotice";
 
 type Phase = "loading" | "preflight" | "running" | "done" | "error";
 
@@ -497,7 +498,9 @@ export function ExportRunner({ guid, appVersion }: { guid: string; appVersion: s
         </p>
       ) : null}
 
-      {plan.files.length === 0 ? (
+      <UnsizedFilesNotice plan={plan} />
+
+      {planHasNoFiles(plan) ? (
         <p className="mt-4 rounded border border-neutral-300 bg-neutral-50 p-3 text-sm dark:border-neutral-700 dark:bg-neutral-900">
           This project has no files. An export would produce an empty archive, which BetterOSF will
           report as “nothing was transferred” rather than as a success.

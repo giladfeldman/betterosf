@@ -56,10 +56,31 @@ export type ReportInput = {
   appVersion: string;
 };
 
-/** RFC 4180 quoting: wrap in quotes and double any internal quote. */
+/**
+ * Neutralise a cell a spreadsheet would execute as a formula (CSV injection, OWASP).
+ *
+ * Excel, LibreOffice and Google Sheets treat a cell starting with `=`, `+`, `-` or `@` as a
+ * formula, and a leading tab or carriage return can hide one. OSF file names, project titles
+ * and destination names are user-controlled, so a file called `=HYPERLINK("http://x","y")`
+ * would otherwise become a live link (or a DDE command) in the crosswalk CSV a researcher
+ * opens. OWASP's fix: prefix such a cell with a single quote, which spreadsheets display as
+ * text. The quote is visible in a plain-text reader; that cost is accepted for safety.
+ *
+ * Typed numbers are left alone: `size_bytes` is the only numeric column, a JS number cannot
+ * carry a formula, and prefixing `-3` would turn a number into text. A numeric-looking
+ * STRING is still escaped, because a string column can hold anything. (d-33dc2f)
+ */
+export function neutralizeFormula(s: string): string {
+  return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+}
+
+/**
+ * One CSV cell: formula neutralisation, then RFC 4180 quoting (wrap in quotes and double
+ * any internal quote). Every CSV BetterOSF writes goes through this function.
+ */
 export function csvCell(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "";
-  const s = String(value);
+  const s = typeof value === "number" ? String(value) : neutralizeFormula(String(value));
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

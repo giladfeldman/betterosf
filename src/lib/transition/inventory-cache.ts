@@ -28,6 +28,8 @@
  *    page down; a cache that cannot be read is simply a cache miss.
  */
 
+import { safeGet, safeKeys, safeRemove, safeSetJSON } from "@/lib/browser/safe-storage";
+
 /** Bump when the cached shape changes — an old entry is then ignored, never misread. */
 // 2 (2026-11-18): titles are now HTML-decoded at parse time; a v1 entry holds them escaped.
 const CACHE_VERSION = 2;
@@ -71,24 +73,13 @@ function keyFor(osfUserId: string): string {
   return `${KEY_PREFIX}.v${CACHE_VERSION}.${osfUserId}`;
 }
 
-function storage(): Storage | null {
-  try {
-    if (typeof localStorage === "undefined") return null;
-    return localStorage;
-  } catch {
-    // Access itself throws in some privacy modes.
-    return null;
-  }
-}
-
 export function readInventoryCache(osfUserId: string): InventoryCache | null {
   if (!osfUserId) return null;
-  const store = storage();
-  if (!store) return null;
+  // safe-storage never throws: blocked, absent or failing storage reads as a miss.
+  const raw = safeGet(keyFor(osfUserId));
+  if (!raw) return null;
 
   try {
-    const raw = store.getItem(keyFor(osfUserId));
-    if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
     const cache = parsed as InventoryCache;
@@ -118,26 +109,14 @@ export function readInventoryCache(osfUserId: string): InventoryCache | null {
  * nothing, and the user would wonder why every visit is slow.
  */
 export function writeInventoryCache(cache: InventoryCache): boolean {
-  const store = storage();
-  if (!store) return false;
-  try {
-    store.setItem(keyFor(cache.osfUserId), JSON.stringify(cache));
-    return true;
-  } catch {
-    // Quota exceeded, or storage disabled mid-session. A cache miss next time is a
-    // slow page, not a broken one.
-    return false;
-  }
+  // Quota exceeded, or storage disabled mid-session, returns false. A cache miss next
+  // time is a slow page, not a broken one.
+  return safeSetJSON(keyFor(cache.osfUserId), cache);
 }
 
 export function clearInventoryCache(osfUserId: string): void {
-  const store = storage();
-  if (!store) return;
-  try {
-    store.removeItem(keyFor(osfUserId));
-  } catch {
-    /* nothing to do — the next read will simply miss */
-  }
+  // A failed remove needs no handling: the next read will simply miss or be re-validated.
+  safeRemove(keyFor(osfUserId));
 }
 
 /**
@@ -181,38 +160,33 @@ export function isStale(fetchedAt: string, now: Date): boolean {
  * everything" comparison does not start reporting a missing project.
  */
 export function dropFromInventoryCache(guid: string): number {
-  const store = storage();
-  if (!store) return 0;
   let dropped = 0;
-  try {
-    const keys: string[] = [];
-    for (let i = 0; i < store.length; i++) {
-      const k = store.key(i);
-      if (k && k.startsWith(`${KEY_PREFIX}.v${CACHE_VERSION}.`)) keys.push(k);
+  const keys = safeKeys().filter((k) => k.startsWith(`${KEY_PREFIX}.v${CACHE_VERSION}.`));
+  for (const k of keys) {
+    const raw = safeGet(k);
+    if (!raw) continue;
+    let cache: InventoryCache;
+    try {
+      cache = JSON.parse(raw) as InventoryCache;
+    } catch {
+      continue; // a corrupt entry: the user can still refresh the list by hand
     }
-    for (const k of keys) {
-      const raw = store.getItem(k);
-      if (!raw) continue;
-      const cache = JSON.parse(raw) as InventoryCache;
-      if (!Array.isArray(cache.projects)) continue;
-      const kept = cache.projects.filter((p) => p.guid !== guid);
-      if (kept.length === cache.projects.length) continue;
-      const enriched = { ...(cache.enriched ?? {}) };
-      delete enriched[guid];
-      const next: InventoryCache = {
-        ...cache,
-        projects: kept,
-        enriched,
-        total: typeof cache.total === "number" ? Math.max(0, cache.total - 1) : cache.total,
-      };
-      // An emptied list is removed rather than stored: readInventoryCache refuses an empty
-      // one anyway, and the next visit should simply fetch afresh.
-      if (kept.length === 0) store.removeItem(k);
-      else store.setItem(k, JSON.stringify(next));
-      dropped++;
-    }
-  } catch {
-    /* a corrupt or unwritable entry: the user can still refresh the list by hand */
+    if (!cache || !Array.isArray(cache.projects)) continue;
+    const kept = cache.projects.filter((p) => p.guid !== guid);
+    if (kept.length === cache.projects.length) continue;
+    const enriched = { ...(cache.enriched ?? {}) };
+    delete enriched[guid];
+    const next: InventoryCache = {
+      ...cache,
+      projects: kept,
+      enriched,
+      total: typeof cache.total === "number" ? Math.max(0, cache.total - 1) : cache.total,
+    };
+    // An emptied list is removed rather than stored: readInventoryCache refuses an empty
+    // one anyway, and the next visit should simply fetch afresh. Only a write that
+    // actually landed is counted, so the page never claims a drop that did not happen.
+    const ok = kept.length === 0 ? safeRemove(k) : safeSetJSON(k, next);
+    if (ok) dropped++;
   }
   return dropped;
 }

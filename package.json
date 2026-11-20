@@ -1,6 +1,6 @@
 {
   "name": "betterosf",
-  "version": "1.15.1",
+  "version": "1.16.0",
   "description": "A faster, friendlier interface for the Open Science Framework (OSF): browse, search, export and migrate your projects.",
   "scripts": {
     "dev": "next dev -p 4747",
@@ -80,7 +80,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/sns-validator": "^0.3.3",
     "@types/ws": "^8.18.1",
-    "@vitest/ui": "^2.1.9",
+    "@vitest/ui": "^5.1.1",
     "adm-zip": "^0.5.17",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.39.4",
@@ -90,7 +90,8 @@
     "postcss": "^8.5.15",
     "tailwindcss": "^4.3.0",
     "typescript": "^5.9.3",
-    "vitest": "^2.1.9",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1",
     "ws": "^8.21.1"
   },
   "engines": {

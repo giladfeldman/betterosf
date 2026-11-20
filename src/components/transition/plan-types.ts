@@ -38,6 +38,13 @@ export type PlanResponse = {
     /** The node the file lives on: the root guid, or a component/registration's. */
     sourceGuid: string;
   }[];
+  /**
+   * Files OSF listed WITHOUT a size (d-e058e3). Not in `files`: with no declared size the
+   * download and its byte-coverage check cannot be completed, and planning them as 0 bytes
+   * was a false "declared empty". Each becomes a reconcile() blocker naming it. Optional
+   * only for plan responses from before the field existed.
+   */
+  unsizedFiles?: { osfFileId: string; path: string }[];
   wikis: { id: string; name: string; size: number }[] | null;
   contributors: ContributorView[] | null;
   /**

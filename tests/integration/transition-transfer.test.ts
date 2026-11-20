@@ -492,6 +492,30 @@ describe("runTransfer", () => {
     expect(result.verdict.status).toBe("complete");
   });
 
+  it("STOPS a resumed run whose checkpoint cannot be read, instead of re-uploading everything (d-94be77)", async () => {
+    // Unknown is not zero: an unreadable ledger is not "no prior items".
+    const plan = await planWith([{ id: "f1", path: "osfstorage/a.csv", body: "aaa" }]);
+    const first = await run(plan);
+    const recordId = first.records[0]!.recordId;
+
+    const stageFile = vi.mocked((await import("@/lib/transition/stage-opfs")).stageFile);
+    stageFile.mockClear();
+
+    await expect(
+      run(plan, {
+        resumeRecordIds: [recordId],
+        ledger: {
+          saveJob: async () => {},
+          saveItems: async () => {},
+          loadItems: async () => {
+            throw new Error("offline");
+          },
+        },
+      }),
+    ).rejects.toThrow(/progress.*could not be read/i);
+    expect(stageFile).not.toHaveBeenCalled();
+  });
+
   it("resumes into the SAME draft and skips a file the destination still holds", async () => {
     const plan = await planWith([
       { id: "f1", path: "osfstorage/a.csv", body: "aaa" },

@@ -132,6 +132,6 @@ This software is licensed under the [GNU Affero General Public License v3.0](LIC
 
 **How to cite.** If you use this software in research, please cite it. GitHub's *Cite this repository* button (from [CITATION.cff](CITATION.cff)) gives APA and BibTeX. In APA style:
 
-> Feldman, G. (2026). *betterosf: A faster, friendlier interface for the Open Science Framework (OSF): browse, search, export and migrate your projects.* (Version 1.15.1) [Computer software]. https://betterosf.vercel.app
+> Feldman, G. (2026). *betterosf: A faster, friendlier interface for the Open Science Framework (OSF): browse, search, export and migrate your projects.* (Version 1.16.0) [Computer software]. https://betterosf.vercel.app
 
 <!-- license-citation:end -->

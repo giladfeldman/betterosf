@@ -1,6 +1,6 @@
 import "server-only";
 import { collectFolderSkeleton, type SkeletonNode } from "./folder-skeleton";
-import { getAllChildren, getAllLinkedNodes, getParentNode } from "./nodes";
+import { getAllChildren, getAllLinkedNodes, getNode } from "./nodes";
 import { getNodeRegistrations, type RegistrationView } from "./registrations";
 import type { NodeView } from "./parse";
 
@@ -58,6 +58,11 @@ export type FullProjectTree = {
    * full skeleton fetch on every page load).
    */
   parentTree: LinkedTree | null;
+  /** True when this node HAS (or may have) a parent that could not be loaded — the parent
+   *  fetch failed, or the caller could not learn the parent id at all. `parentTree: null`
+   *  alone means "top-level"; with `parentFailed` it means "unknown", and the UI must say
+   *  "could not load" rather than drop the parent silently (d-628841). */
+  parentFailed?: boolean;
   /** True when the ROOT folder skeleton fetch failed (OSF 429/503/timeout) and
    *  was degraded to empty — i.e. this tree may be missing folders that exist on
    *  OSF. Lets the UI show "partially loaded — refresh" instead of a silent empty
@@ -93,6 +98,7 @@ export const EMPTY_TREE: FullProjectTree = {
   linkedTrees: [],
   totalLinked: 0,
   parentTree: null,
+  parentFailed: false,
 };
 
 /**
@@ -144,7 +150,8 @@ export async function collectFullTree(
   // succeeded with no folders" — only the former is a degraded (incomplete) tree.
   const SKELETON_FAILED = Symbol("skeleton-failed");
   // Parallel: root skeleton + direct children list + registrations + linked + parent.
-  const [rootSkeletonResult, childrenResult, registrationsResult, linkedResult, parentNode] = await Promise.all([
+  const PARENT_FAILED = Symbol("parent-failed");
+  const [rootSkeletonResult, childrenResult, registrationsResult, linkedResult, parentNodeResult] = await Promise.all([
     raceTimeout<SkeletonNode[] | typeof SKELETON_FAILED>(
       collectFolderSkeleton(rootGuid),
       rootTimeoutMs,
@@ -156,8 +163,13 @@ export async function collectFullTree(
     // Same for registrations and linked projects (d-99070d).
     getNodeRegistrations(rootGuid).catch((): RegistrationView[] | null => null),
     getAllLinkedNodes(rootGuid).catch((): NodeView[] | null => null),
-    getParentNode(opts.parentId),
+    // A failed parent fetch is NOT "no parent" (d-628841): keep the failure distinct.
+    opts.parentId
+      ? getNode(opts.parentId).catch((): typeof PARENT_FAILED => PARENT_FAILED)
+      : Promise.resolve(null),
   ]);
+  const parentFailed = parentNodeResult === PARENT_FAILED;
+  const parentNode = parentFailed ? null : (parentNodeResult as NodeView | null);
   const registrationsFailed = registrationsResult === null;
   const linkedFailed = linkedResult === null;
   const registrations = registrationsResult ?? [];
@@ -269,6 +281,7 @@ export async function collectFullTree(
     linkedTrees: [...recursedLinked, ...skippedLinked],
     totalLinked: linkedNodes.length,
     parentTree,
+    parentFailed,
     degraded,
   };
 }

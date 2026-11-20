@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { isValidGuid } from "@/lib/osf/guid";
 import { getRegistration, type RegistrationDetailView } from "@/lib/osf/registrations";
 import { OsfError } from "@/lib/osf/types";
+import { isOsfDeleted } from "@/lib/osf/deleted";
+import { OsfDeletedNotice } from "@/components/OsfDeletedNotice";
 import { osfBackpressureKind } from "@/lib/osf/backpressure";
 import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -41,6 +43,7 @@ export default async function CompareRegistrationsPage({
   try {
     [regA, regB] = await Promise.all([getRegistration(a), getRegistration(b)]);
   } catch (e) {
+    if (isOsfDeleted(e)) return <OsfDeletedNotice what="registration" />;
     if (e instanceof OsfError && e.code === "not_found") notFound();
     const bp = osfBackpressureKind(e);
     if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="these registrations" />;

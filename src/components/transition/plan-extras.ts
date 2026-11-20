@@ -36,11 +36,19 @@ export async function fetchExtras(plan: PlanResponse): Promise<{ extras: PlanExt
   if (plan.contributors === null) {
     missing.push("OSF's contributor list could not be read, so the metadata in this copy names no contributors. Run it again before relying on it.");
   }
+  for (const file of plan.unsizedFiles ?? []) {
+    missing.push(`OSF did not report a size for "${file.path}", so BetterOSF cannot check that a copy of it is complete and did not copy it. Download that file from OSF directly.`);
+  }
+  // `?? []` is safe here only because `null` was handled above as missing.
   for (const wiki of plan.wikis ?? []) {
     try {
       const res = await fetch(`/api/transition/wiki/${wiki.id}`, { cache: "no-store" });
       if (res.ok) {
         extras.push({ path: `wikis/${wikiFile(wiki.name, wiki.id)}.md`, text: await res.text(), wikiName: wiki.name });
+      } else if (res.status === 410) {
+        // Deleted on OSF (d-ad230b): a different fact from "could not be fetched" — retrying
+        // cannot bring it back, so do not tell the user to run it again.
+        missing.push(`The wiki page "${wiki.name}" was deleted on OSF, so it is not in this copy. OSF keeps no copy of a deleted page, so retrying cannot bring it back.`);
       } else {
         missing.push(`The wiki page "${wiki.name}" could not be fetched from OSF (HTTP ${res.status}), so it is not in this copy. Run it again, or copy that page from OSF by hand.`);
       }

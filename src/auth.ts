@@ -3,6 +3,7 @@ import type { JWT } from "next-auth/jwt";
 import type { Session } from "next-auth";
 import { hasOsfWriteScope, osfProvider } from "@/lib/auth/osf-provider";
 import { authEnv } from "@/lib/env";
+import { decodeOsfText } from "@/lib/osf/decode-text";
 
 declare module "next-auth" {
   interface Session {
@@ -112,7 +113,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           const { upsertOsfUser } = await import("@/lib/db/users");
           await upsertOsfUser({
             osfUserId: token.osfUserId,
-            name: osfProfile.name ?? osfProfile.data?.attributes?.full_name ?? null,
+            // profile() already decoded .name; the raw userinfo full_name is HTML-escaped by OSF (d-e301b8).
+            name: osfProfile.name ?? (osfProfile.data?.attributes?.full_name != null ? decodeOsfText(osfProfile.data.attributes.full_name) : null),
             email: osfProfile.email ?? osfProfile.data?.attributes?.email ?? null,
           });
         }

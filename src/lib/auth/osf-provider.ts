@@ -1,4 +1,5 @@
 import type { OAuth2Config, OAuthUserConfig } from "next-auth/providers";
+import { decodeOsfText } from "@/lib/osf/decode-text";
 
 type OsfUserinfo = {
   data: {
@@ -126,8 +127,9 @@ export function osfProvider(opts: OAuthUserConfig<OsfProfile>): OAuth2Config<Osf
     },
     profile(profile) {
       const a = profile.data.attributes;
-      const joined = [a.given_name, a.family_name].filter(Boolean).join(" ");
-      const name = a.full_name ?? (joined.length > 0 ? joined : profile.data.id);
+      // OSF escapes user names (& < >): full_name "B&amp;A SMART HOME", user 2gzn5, measured 2026-11-19.
+      const joined = [a.given_name, a.family_name].filter(Boolean).map(decodeOsfText).join(" ");
+      const name = a.full_name != null ? decodeOsfText(a.full_name) : joined.length > 0 ? joined : profile.data.id;
       return {
         id: profile.data.id,
         name: name || profile.data.id,

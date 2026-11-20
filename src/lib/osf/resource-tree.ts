@@ -4,6 +4,7 @@ import { collectFolderSkeleton } from "./folder-skeleton";
 import { getNode, getAllLinkedNodes } from "./nodes";
 import { getRegistration, getNodeRegistrations, type RegistrationView } from "./registrations";
 import { OsfError } from "./types";
+import { isOsfDeleted } from "./deleted";
 import type { NodeView } from "./parse";
 
 const TREE_OPTS = {
@@ -70,7 +71,8 @@ export async function collectResourceTree(guid: string): Promise<ResourceTree> {
       await Promise.all([
         // A total failure here (not just per-provider) is itself a degraded tree.
         collectFullTree(guid, { ...TREE_OPTS, parentId: node.parentId }).catch(
-          (): FullProjectTree => ({ ...EMPTY_TREE, degraded: true })
+          // The parent was never fetched: unknown, not "none" (d-628841).
+          (): FullProjectTree => ({ ...EMPTY_TREE, degraded: true, parentFailed: Boolean(node.parentId) })
         ),
         getAllLinkedNodes(guid).catch((): NodeView[] | null => null),
         getNodeRegistrations(guid).catch((): RegistrationView[] | null => null),
@@ -89,7 +91,11 @@ export async function collectResourceTree(guid: string): Promise<ResourceTree> {
     if (!(e instanceof OsfError && e.code === "not_found")) throw e;
     // Registration path. getRegistration re-throws not_found if the guid is
     // neither a node nor a registration.
-    const reg = await getRegistration(guid);
+    // A deleted NODE answers 410 but the registration endpoint answers 404 for the same id
+    // (measured on k3ny2): keep the 410 so the page says "deleted on OSF", not "not found".
+    const reg = await getRegistration(guid).catch((e2: unknown) => {
+      throw isOsfDeleted(e) && !isOsfDeleted(e2) ? e : e2;
+    });
     let degraded = false;
     const rootSkeleton = await collectFolderSkeleton(guid, { kind: "registration" }).catch(() => {
       degraded = true;

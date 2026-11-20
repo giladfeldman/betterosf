@@ -1,6 +1,7 @@
 import "server-only";
 import { osfGet, osfGetUrl } from "./client";
 import { collectAll } from "./paginate";
+import { decodeOsfText } from "@/lib/osf/decode-text";
 
 /**
  * Node contributors, with the embedded user record so ORCIDs come along.
@@ -73,7 +74,11 @@ type RawContributor = {
 
 type ContributorCollection = { data: RawContributor[]; links: { next: string | null } };
 
-function parseContributor(raw: RawContributor): ContributorView {
+/**
+ * OSF user names arrive HTML-escaped (& < >; ' and " stay raw): full_name "B&amp;A SMART HOME" and
+ * given_name "B&amp;A" for user 2gzn5, measured 2026-11-19 (d-e301b8). Decoded once here.
+ */
+export function parseContributor(raw: RawContributor): ContributorView {
   const user = raw.embeds?.users?.data;
   const attrs = user?.attributes;
   const unregisteredName = raw.attributes?.unregistered_contributor ?? null;
@@ -82,9 +87,9 @@ function parseContributor(raw: RawContributor): ContributorView {
   return {
     id: raw.id,
     userId: user?.id ?? raw.relationships?.users?.data?.id ?? null,
-    fullName: String(attrs?.full_name ?? unregisteredName ?? ""),
-    givenName: attrs?.given_name ? String(attrs.given_name) : null,
-    familyName: attrs?.family_name ? String(attrs.family_name) : null,
+    fullName: decodeOsfText(attrs?.full_name ?? unregisteredName ?? ""),
+    givenName: attrs?.given_name ? decodeOsfText(attrs.given_name) : null,
+    familyName: attrs?.family_name ? decodeOsfText(attrs.family_name) : null,
     orcid: orcid.id,
     orcidStatus: orcid.status,
     index: Number(raw.attributes?.index ?? 0),

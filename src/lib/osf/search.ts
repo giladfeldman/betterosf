@@ -236,7 +236,8 @@ export async function searchUsers(query: string, opts?: { page?: number; perPage
     opts,
     (raw) => (raw.data as RawUser[]).map((r) => ({
       id: r.id,
-      fullName: String(r.attributes.full_name ?? r.id),
+      // full_name is HTML-escaped by OSF ("B&amp;A SMART HOME", 2gzn5, measured 2026-11-19).
+      fullName: r.attributes.full_name != null ? decodeOsfText(r.attributes.full_name) : r.id,
       osfUrl: r.links?.html ?? `https://osf.io/${r.id}/`,
     })),
     (item) => item.id,

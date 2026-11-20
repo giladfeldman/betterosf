@@ -2,8 +2,9 @@ import { defineConfig } from "vitest/config";
 import path from "node:path";
 
 export default defineConfig({
-  esbuild: {
-    jsx: "automatic",
+  // Vite 8 transforms with oxc, not esbuild: the old `esbuild.jsx` option is ignored there.
+  oxc: {
+    jsx: { runtime: "automatic" },
   },
   test: {
     environment: "jsdom",
@@ -15,7 +16,6 @@ export default defineConfig({
     // on a shared machine that took over the 5 s default. Workers come from the machine queue's
     // width (LOADQ_WIDTH), never the core count, and the per-test budget covers a cold import.
     maxWorkers: Math.max(1, Number(process.env.LOADQ_WIDTH) || 4),
-    minWorkers: 1,
     testTimeout: 30_000,
     hookTimeout: 60_000,
   },

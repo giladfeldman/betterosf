@@ -6,9 +6,11 @@ import { getNode, getAllLinkedNodes } from "@/lib/osf/nodes";
 import { getNodeRegistrations, getRegistration, type RegistrationView } from "@/lib/osf/registrations";
 import { collectFullTree, EMPTY_TREE, type FullProjectTree } from "@/lib/osf/full-tree";
 import { OsfError } from "@/lib/osf/types";
+import { isOsfDeleted } from "@/lib/osf/deleted";
+import { OsfDeletedNotice } from "@/components/OsfDeletedNotice";
 import { classifyWalkFailure, classifyEmptyProviders, type WalkFailureReason } from "@/lib/osf/walk-failure";
 import type { NodeView } from "@/lib/osf/parse";
-import { Breadcrumb } from "@/components/Breadcrumb";
+import { Breadcrumb, parentCrumbs } from "@/components/Breadcrumb";
 import { UnifiedTree } from "@/components/UnifiedTree";
 import { SplitPane } from "@/components/SplitPane";
 import { ViewerDispatcher } from "@/components/viewers/Dispatcher";
@@ -71,6 +73,7 @@ export default async function FileViewerPage({
     providers = r.roots;
     resourceKind = r.kind;
   } catch (e) {
+    if (isOsfDeleted(e)) return <OsfDeletedNotice what="project" guid={guid} />;
     if (e instanceof OsfError && e.code === "not_found") notFound();
     // An expired token (401) must NOT blow up the whole route: the walk below
     // re-hits OSF and renders an actionable "reconnect" panel with the page
@@ -86,15 +89,18 @@ export default async function FileViewerPage({
     }
   }
 
-  // Project title + parent (kind-appropriate fetch).
-  const nodeMetaPromise = resourceKind === "registration"
-    ? getRegistration(guid).then((r) => ({ title: r.title, parentId: null as string | null })).catch(() => ({ title: "", parentId: null as string | null }))
-    : getNode(guid).then((n) => ({ title: n.title, parentId: n.parentId })).catch(() => ({ title: "", parentId: null as string | null }));
+  // Project title + parent (kind-appropriate fetch). A failed lookup is marked `failed`,
+  // never read as "untitled, no parent" (d-628841): the breadcrumb then says the parent
+  // could not load instead of silently presenting the node as top-level.
+  type NodeMeta = { title: string; parentId: string | null; failed: boolean };
+  const nodeMetaPromise: Promise<NodeMeta> = resourceKind === "registration"
+    ? getRegistration(guid).then((r): NodeMeta => ({ title: r.title, parentId: null, failed: false })).catch((): NodeMeta => ({ title: "", parentId: null, failed: true }))
+    : getNode(guid).then((n): NodeMeta => ({ title: n.title, parentId: n.parentId, failed: false })).catch((): NodeMeta => ({ title: "", parentId: null, failed: true }));
 
   // Side-pane data: tree, linked projects, registrations. These power the
   // navigation pane but the page is still useful without them. For a
   // registration resource these endpoints don't apply — we skip them.
-  const [nodeMeta, fullTree, linkedResult, registrationsResult]: [{ title: string; parentId: string | null }, FullProjectTree, NodeView[] | null, RegistrationView[] | null] = await Promise.all([
+  const [nodeMeta, treeResult, linkedResult, registrationsResult]: [NodeMeta, FullProjectTree, NodeView[] | null, RegistrationView[] | null] = await Promise.all([
     nodeMetaPromise,
     resourceKind === "registration"
       ? collectFolderSkeleton(guid, { kind: "registration" })
@@ -108,7 +114,7 @@ export default async function FileViewerPage({
             componentTimeoutMs: 5_000,
             rootTimeoutMs: 10_000,
             parentId: meta.parentId,
-          }).catch((): FullProjectTree => ({ ...EMPTY_TREE, degraded: true }))
+          }).catch((): FullProjectTree => ({ ...EMPTY_TREE, degraded: true, parentFailed: Boolean(meta.parentId) }))
         ),
     resourceKind === "registration"
       ? Promise.resolve<NodeView[]>([])
@@ -120,8 +126,11 @@ export default async function FileViewerPage({
   // null = the lookup failed: unknown, not "none" (d-99070d).
   const linked = linkedResult ?? [];
   const registrations = registrationsResult ?? [];
+  // Registrations show no parent crumb here, so only a node's failed lookup makes it unknown.
+  const fullTree: FullProjectTree = nodeMeta.failed && resourceKind === "node"
+    ? { ...treeResult, parentFailed: true }
+    : treeResult;
   const node = { title: nodeMeta.title };
-  const parent = fullTree.parentTree;
 
   const components = fullTree.components.map((c) => ({
     id: c.guid,
@@ -225,7 +234,7 @@ export default async function FileViewerPage({
       <Breadcrumb
         crumbs={[
           { label: "Home", href: "/" },
-          ...(parent ? [{ label: parent.title || parent.guid, href: `/${parent.guid}` }] : []),
+          ...parentCrumbs(fullTree),
           { label: node.title || guid, href: resourceKind === "registration" ? `/registrations/${guid}` : `/${guid}` },
           ...(resourceKind === "registration"
             ? []

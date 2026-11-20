@@ -12,9 +12,11 @@ import { UserProfile } from "@/components/UserProfile";
 import { UnsupportedGuid } from "@/components/UnsupportedGuid";
 import { collectFullTree, EMPTY_TREE } from "@/lib/osf/full-tree";
 import { OsfError } from "@/lib/osf/types";
+import { isOsfDeleted } from "@/lib/osf/deleted";
+import { OsfDeletedNotice } from "@/components/OsfDeletedNotice";
 import { osfBackpressureKind } from "@/lib/osf/backpressure";
 import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
-import { Breadcrumb } from "@/components/Breadcrumb";
+import { Breadcrumb, parentCrumbs } from "@/components/Breadcrumb";
 import { PinButton } from "@/components/PinButton";
 import { RecordView } from "@/components/RecordView";
 import { CitationExport } from "@/components/CitationExport";
@@ -143,6 +145,8 @@ async function renderNonNode(
   try {
     resolved = await resolveGuidType(guid);
   } catch (e) {
+    // The guid resolver can also answer 410 for a deleted non-node (registration, file).
+    if (isOsfDeleted(e)) return <OsfDeletedNotice what="item" guid={guid} />;
     if (e instanceof OsfError && e.code === "not_found") notFound();
     const bp = osfBackpressureKind(e);
     if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="this project" />;
@@ -185,6 +189,9 @@ export default async function ProjectPage({
   } catch (e) {
     // Not a project. OSF guids are a flat namespace — dispatch to the real type
     // (registration/preprint/user/file) instead of a dead-end "not found".
+    // A node OSF deleted answers 410: say so directly (d-0f12b5) rather than asking the
+    // guid resolver, which would also 410 and end on the generic not-found page.
+    if (isOsfDeleted(e)) return <OsfDeletedNotice what="project" guid={guid} />;
     if (e instanceof OsfError && e.code === "not_found") return await renderNonNode(guid, sp);
     const bp = osfBackpressureKind(e);
     if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="this project" />;
@@ -205,6 +212,8 @@ export default async function ProjectPage({
     }).catch(() => ({
       ...EMPTY_TREE,
       degraded: true,
+      // The parent was never fetched: unknown, not "none" (d-628841).
+      parentFailed: Boolean(node.parentId),
     })),
     // null, not [], on failure (d-99070d): "no linked projects" and "OSF did not answer"
     // must not render the same.
@@ -491,6 +500,12 @@ export default async function ProjectPage({
             <h3 className="font-semibold mb-1">Status</h3>
             <p>{node.public ? "Public" : "Private"} · {node.category || "node"}</p>
           </div>
+          {!parent && fullTree.parentFailed && (
+            <div>
+              <h3 className="font-semibold mb-1">Parent project</h3>
+              <p className="text-amber-700 dark:text-amber-300">OSF did not return the parent project just now, so it is unknown. Refresh to try again.</p>
+            </div>
+          )}
           {parent && (
             <div>
               <h3 className="font-semibold mb-1">Parent project</h3>
@@ -527,9 +542,7 @@ export default async function ProjectPage({
       <Breadcrumb
         crumbs={[
           { label: "Home", href: "/" },
-          ...(parent
-            ? [{ label: parent.title || parent.guid, href: `/${parent.guid}` }]
-            : []),
+          ...parentCrumbs(fullTree),
           { label: node.title || guid, href: `/${guid}` },
         ]}
       />

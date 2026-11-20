@@ -3,6 +3,8 @@ import { getUser, getUserNodes } from "@/lib/osf/users";
 import { getUserRegistrations } from "@/lib/osf/registrations";
 import { getUserPreprints } from "@/lib/osf/preprints";
 import { OsfError } from "@/lib/osf/types";
+import { isOsfDeleted } from "@/lib/osf/deleted";
+import { OsfDeletedNotice } from "@/components/OsfDeletedNotice";
 import { osfBackpressureKind } from "@/lib/osf/backpressure";
 import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
 import type { NodeView } from "@/lib/osf/parse";
@@ -31,6 +33,7 @@ export async function UserProfile({
   try {
     user = await getUser(guid);
   } catch (e) {
+    if (isOsfDeleted(e)) return <OsfDeletedNotice what="profile" guid={guid} />;
     if (e instanceof OsfError && e.code === "not_found") notFound();
     const bp = osfBackpressureKind(e);
     if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="this profile" />;

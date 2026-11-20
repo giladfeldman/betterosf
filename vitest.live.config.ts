@@ -12,7 +12,7 @@ import path from "node:path";
  * only, never wired into CI.
  */
 export default defineConfig({
-  esbuild: { jsx: "automatic" },
+  oxc: { jsx: { runtime: "automatic" } }, // Vite 8: oxc replaced esbuild
   test: {
     environment: "node",
     include: ["tests/live/**/*.live.test.ts"],

@@ -142,7 +142,11 @@ export async function getProviderRootsAuto(guid: string): Promise<{ roots: Provi
     // Lazy import to avoid circular deps via client.ts.
     const { OsfError } = await import("./types");
     if (e instanceof OsfError && e.code === "not_found") {
-      const roots = await getProviderRoots(guid, { kind: "registration" });
+      // A deleted NODE answers 410 here but the registration endpoint answers 404 for the same
+      // id (measured on k3ny2): keep the 410 so the page says "deleted on OSF", not "not found".
+      const roots = await getProviderRoots(guid, { kind: "registration" }).catch((e2: unknown) => {
+        throw e.status === 410 && !(e2 instanceof OsfError && e2.status === 410) ? e : e2;
+      });
       return { roots, kind: "registration" };
     }
     throw e;

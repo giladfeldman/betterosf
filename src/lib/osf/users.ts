@@ -5,6 +5,7 @@ import { collectAll } from "./paginate";
 import { parseQuery } from "@/lib/search/parser";
 import { compileQuery, MAX_QUERY_BRANCHES } from "@/lib/search/compile";
 import { sanitizeSort } from "./sort";
+import { decodeOsfText } from "@/lib/osf/decode-text";
 
 export type UserView = {
   id: string;
@@ -27,12 +28,20 @@ type RawUser = {
   };
 };
 
+/**
+ * OSF returns user names HTML-escaped (& < >): full_name "B&amp;A SMART HOME", given_name "B&amp;A"
+ * for user 2gzn5, measured 2026-11-19 (d-e301b8). Decoded once here.
+ */
+function userDisplayName(a: RawUser["data"]["attributes"], id: string): string {
+  const joined = [a.given_name, a.family_name].filter(Boolean).map(decodeOsfText).join(" ");
+  return a.full_name != null ? decodeOsfText(a.full_name) : joined.length > 0 ? joined : id;
+}
+
 /** Fetch any OSF user by guid (used by the /<guid> dispatcher + /users/<guid>). */
 export async function getUser(guid: string): Promise<UserView> {
   const raw = await osfGet<RawUser>(`/users/${guid}/`, { tags: [`user:${guid}`], revalidate: 300 });
   const a = raw.data.attributes;
-  const joined = [a.given_name, a.family_name].filter(Boolean).join(" ");
-  const fullName = a.full_name ?? (joined.length > 0 ? joined : raw.data.id);
+  const fullName = userDisplayName(a, raw.data.id);
   const job = Array.isArray(a.employment) ? a.employment[0] : undefined;
   const employment = job
     ? [job.title, job.department, job.institution].filter(Boolean).join(", ")
@@ -48,8 +57,7 @@ export async function getUser(guid: string): Promise<UserView> {
 export async function getCurrentUser(): Promise<UserView> {
   const raw = await osfGet<RawUser>("/users/me/", { tags: ["users:me"], revalidate: 60 });
   const a = raw.data.attributes;
-  const joined = [a.given_name, a.family_name].filter(Boolean).join(" ");
-  const fullName = a.full_name ?? (joined.length > 0 ? joined : raw.data.id);
+  const fullName = userDisplayName(a, raw.data.id);
   return {
     id: raw.data.id,
     fullName,

@@ -3,6 +3,7 @@
 import type { FavoriteRef } from "@/lib/favorites";
 import { listPins } from "@/lib/favorites";
 import { getPref, setPref } from "@/lib/prefs";
+import { safeGet, safeKeys } from "@/lib/browser/safe-storage";
 
 const PINS_KEY = "favorites.pins";
 const SYNCED_FLAG = "sync.bookmarksImported";
@@ -88,20 +89,16 @@ export async function syncPrefsOnSignIn(): Promise<void> {
     const data = (await res.json()) as { prefs?: Record<string, unknown> };
     const server = data.prefs ?? {};
     const localPatch: Record<string, unknown> = {};
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (!key?.startsWith("betterosf:")) continue;
-        const short = key.slice("betterosf:".length);
-        if (short.startsWith("favorites.") || short.startsWith("sync.")) continue;
-        try {
-          localPatch[short] = JSON.parse(localStorage.getItem(key) ?? "null");
-        } catch {
-          /* skip */
-        }
+    // safeKeys/safeGet never throw: blocked or absent storage reads as "no local prefs".
+    for (const key of safeKeys()) {
+      if (!key.startsWith("betterosf:")) continue;
+      const short = key.slice("betterosf:".length);
+      if (short.startsWith("favorites.") || short.startsWith("sync.")) continue;
+      try {
+        localPatch[short] = JSON.parse(safeGet(key) ?? "null");
+      } catch {
+        /* skip */
       }
-    } catch {
-      /* no localStorage */
     }
     const merged = { ...server, ...localPatch };
     for (const [k, v] of Object.entries(merged)) {

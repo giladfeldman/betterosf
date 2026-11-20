@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.16.0 — 2026-11-20
+
+### Added
+- **Resuming a transfer is safer.** If BetterOSF cannot read your saved Zenodo transfer progress, the Start button is held behind a checkbox ("I checked my Zenodo uploads..."), so a fresh start cannot silently duplicate files you already uploaded. When the server has no record of a run but this browser has its own saved copy, that now counts as "nothing saved there" and the browser copy is used.
+- **Files OSF could not size are listed as "not counted".** In both the export and the Zenodo transfer, a file whose size OSF did not report is named in a notice and never shown as 0 bytes. Per-component file counts include these files.
+- **Pages for a project deleted on OSF say so.** They now read "deleted on OSF" instead of "not found", including the files pages and wiki export.
+
+### Fixed
+- **Breadcrumbs say the parent is unknown** when looking up the parent failed, instead of implying there is none.
+- **Malformed ids give a clear 400 error** rather than a server error.
+- **OSF text is decoded everywhere.** Names, titles, wiki page names and contributor names containing HTML entities such as `&amp;` now read correctly.
+- **Private browsing and full browser storage no longer crash the app.** All browser storage goes through one safe wrapper.
+- **CSV exports neutralise spreadsheet formulas**, so a project title starting with `=` or `+` cannot run as a formula when opened in Excel.
+
+### Privacy
+- The privacy page now discloses the in-memory rate-limit counters and that server functions run in Frankfurt (EU), pinned in `vercel.json` to region `fra1`.
+
+### Development
+- Test tooling moved to vitest 5 and vite 8. `npm audit` findings went from 32 to 14, none critical.
+
 ## 1.15.1 — 2026-11-19
 
 ### Security

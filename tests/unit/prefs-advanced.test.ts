@@ -37,43 +37,44 @@ describe("prefs — arrays + nested objects", () => {
 
 describe("prefs — quota / write failures", () => {
   it("swallows setItem quota errors silently", () => {
-    const orig = window.localStorage.setItem;
+    // Patch the prototype: assigning `localStorage.setItem = fn` stores an item named
+    // "setItem" (as browsers do) rather than replacing the method, under vitest 5's jsdom.
     let called = false;
-    window.localStorage.setItem = function () {
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function () {
       called = true;
       throw new DOMException("Quota exceeded", "QuotaExceededError");
-    };
+    });
     try {
       expect(() => setPref("big", "x".repeat(10))).not.toThrow();
       expect(called).toBe(true);
       // And nothing was stored, since the write threw
       expect(window.localStorage.getItem("betterosf:big")).toBeNull();
     } finally {
-      window.localStorage.setItem = orig;
+      spy.mockRestore();
     }
   });
 
   it("swallows removeItem failures silently", () => {
-    const orig = window.localStorage.removeItem;
-    window.localStorage.removeItem = function () {
+    const spy = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
       throw new Error("boom");
-    };
+    });
     try {
       expect(() => removePref("foo")).not.toThrow();
     } finally {
-      window.localStorage.removeItem = orig;
+      expect(spy).toHaveBeenCalled();
+      spy.mockRestore();
     }
   });
 
   it("swallows getItem failures and returns fallback", () => {
-    const orig = window.localStorage.getItem;
-    window.localStorage.getItem = function () {
+    const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("boom");
-    };
+    });
     try {
       expect(getPref("foo", "default")).toBe("default");
     } finally {
-      window.localStorage.getItem = orig;
+      expect(spy).toHaveBeenCalled();
+      spy.mockRestore();
     }
   });
 });

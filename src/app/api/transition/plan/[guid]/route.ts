@@ -95,6 +95,8 @@ export async function GET(
       ]);
 
     const files: PlanFile[] = [];
+    /** Files OSF listed without a size — see the walk below (d-e058e3). */
+    const unsizedFiles: { osfFileId: string; path: string }[] = [];
     let truncated = false;
 
     async function walk(
@@ -161,11 +163,23 @@ export async function GET(
         const rawPath = `${rawPrefix}${entry.name}`;
         const safePath = `${prefix}${safeNameSegment(entry.name)}`;
 
+        // Unknown is not zero (d-e058e3). A file OSF lists without a size used to be planned
+        // as `size: 0` — a DECLARED empty file — so staging then failed it with "Staged N
+        // bytes but OSF declared 0. The download is incomplete." (a false reason), and the
+        // report and RO-Crate printed 0 as its size. Without a declared size neither the
+        // download nor the byte-coverage check can be completed, so it is not planned for
+        // transfer; it is listed instead, and `fetchExtras` turns each one into a
+        // reconcile() blocker that names it.
+        if (typeof entry.size !== "number" || !Number.isFinite(entry.size) || entry.size < 0) {
+          unsizedFiles.push({ osfFileId: entry.id, path: safePath });
+          continue;
+        }
+
         files.push({
           osfFileId: entry.id,
           path: safePath,
           ...(safePath === rawPath ? {} : { osfPath: rawPath }),
-          size: entry.size ?? 0,
+          size: entry.size,
           downloadUrl,
           md5: entry.md5,
           sha256: entry.sha256,
@@ -208,6 +222,8 @@ export async function GET(
       const meta = catalogue.get(relatedGuid)!;
       const prefix = relatedNodePrefix(meta.kind, relatedGuid, meta.title);
       const before = files.length;
+      // Files OSF listed without a size are still this node's files (unknown is not zero).
+      const unsizedBefore = unsizedFiles.length;
       try {
         // Registrations live under /v2/registrations/{id}/files/, and their listing URLs
         // are what keeps them immutable everywhere else in the app — read here, never
@@ -221,7 +237,7 @@ export async function GET(
           title: meta.title,
           kind: meta.kind,
           prefix,
-          fileCount: files.length - before,
+          fileCount: files.length - before + (unsizedFiles.length - unsizedBefore),
           error: null,
         });
       } catch (e) {
@@ -232,7 +248,7 @@ export async function GET(
           title: meta.title,
           kind: meta.kind,
           prefix,
-          fileCount: files.length - before,
+          fileCount: files.length - before + (unsizedFiles.length - unsizedBefore),
           error: e instanceof Error ? e.message : "Could not read this node's files from OSF.",
         });
       }
@@ -254,6 +270,7 @@ export async function GET(
         license: license === undefined ? undefined : license,
         licenseLookupFailed: license === undefined,
         files,
+        unsizedFiles,
         wikis: wikis?.map((w) => ({ id: w.id, name: w.name, size: w.size })) ?? null,
         contributors,
         /** True when a cap was hit. The UI must refuse to call such an export complete. */

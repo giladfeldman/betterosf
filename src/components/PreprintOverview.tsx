@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { getPreprint } from "@/lib/osf/preprints";
 import { OsfError } from "@/lib/osf/types";
+import { isOsfDeleted } from "@/lib/osf/deleted";
+import { OsfDeletedNotice } from "@/components/OsfDeletedNotice";
 import { osfBackpressureKind } from "@/lib/osf/backpressure";
 import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -19,6 +21,7 @@ export async function PreprintOverview({ guid }: { guid: string }) {
   try {
     pp = await getPreprint(guid);
   } catch (e) {
+    if (isOsfDeleted(e)) return <OsfDeletedNotice what="preprint" guid={guid} />;
     if (e instanceof OsfError && e.code === "not_found") notFound();
     const bp = osfBackpressureKind(e);
     if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="this preprint" />;

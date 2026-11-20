@@ -82,6 +82,9 @@ export async function putLocalJob(job: TransferJobSnapshot): Promise<void> {
 }
 
 export async function getLocalJob(jobId: string): Promise<TransferJobSnapshot | null> {
+  // A browser without IndexedDB never saved a job here (every writer checks
+  // `indexedDbAvailable()` first), so "no job" is a known fact, not a failed read.
+  if (!indexedDbAvailable()) return null;
   const db = await openDb();
   try {
     const tx = db.transaction(JOBS_STORE, "readonly");
@@ -96,6 +99,8 @@ export async function getLocalJob(jobId: string): Promise<TransferJobSnapshot | 
 
 /** Every run this browser knows about, newest first. */
 export async function listLocalJobs(): Promise<TransferJobSnapshot[]> {
+  // Same reasoning as `getLocalJob`: nothing can have been saved without IndexedDB.
+  if (!indexedDbAvailable()) return [];
   const db = await openDb();
   try {
     const tx = db.transaction(JOBS_STORE, "readonly");
@@ -247,19 +252,46 @@ export function createBrowserLedger(options: { syncToServer?: boolean } = {}): B
       }
     },
 
+    // Unknown is not zero (d-94be77). A checkpoint that could not be READ is not a
+    // checkpoint with no rows: returning [] here made a resumed run believe nothing had been
+    // done and re-upload every file already on the draft. Any configured source that fails
+    // rejects the whole load; the caller decides what a resume does without it.
     async loadItems(jobId) {
-      const local = indexedDbAvailable() ? await getLocalItems(jobId).catch(() => []) : [];
+      let local: TransferItemSnapshot[] = [];
+      if (indexedDbAvailable()) {
+        try {
+          local = await getLocalItems(jobId);
+        } catch (e) {
+          throw new Error(
+            `The saved progress in this browser could not be read (${e instanceof Error ? e.message : String(e)}).`,
+          );
+        }
+      }
       if (!syncToServer) return local;
+      let res: Response;
       try {
-        const res = await fetch(`/api/transition/jobs/${encodeURIComponent(jobId)}/items`, {
+        res = await fetch(`/api/transition/jobs/${encodeURIComponent(jobId)}/items`, {
           cache: "no-store",
         });
-        if (!res.ok) return local;
-        const body: { items?: TransferItemSnapshot[] } = await res.json();
-        return mergeItems(local, body.items ?? []);
-      } catch {
-        return local;
+      } catch (e) {
+        throw new Error(
+          `The saved progress on the server could not be read (${e instanceof Error ? e.message : String(e)}).`,
+        );
       }
+      // 404 is a definite answer, not an unknown: the server has no record of this run (its
+      // first checkpoint POST failed, which `saveJob` tolerates). This browser's copy is then
+      // the whole truth — but only if this browser HAS a copy; with no IndexedDB a 404 leaves
+      // nothing known about prior uploads, and a resume must not proceed on that.
+      if (res.status === 404 && indexedDbAvailable()) return local;
+      if (!res.ok) {
+        throw new Error(`The saved progress on the server could not be read (HTTP ${res.status}).`);
+      }
+      const body: { items?: unknown } = await res.json().catch(() => ({ items: undefined }));
+      // A 200 whose body is not a list is as unreadable as a 500.
+      if (!Array.isArray(body.items)) {
+        throw new Error("The saved progress on the server could not be read (malformed response).");
+      }
+      return mergeItems(local, body.items as TransferItemSnapshot[]);
     },
   };
 }

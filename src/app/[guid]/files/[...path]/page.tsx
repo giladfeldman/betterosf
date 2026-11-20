@@ -3,10 +3,12 @@ import { isValidGuid } from "@/lib/osf/guid";
 import { getFolderContents, type FileEntry } from "@/lib/osf/files";
 import { collectResourceTree } from "@/lib/osf/resource-tree";
 import { OsfError } from "@/lib/osf/types";
+import { isOsfDeleted } from "@/lib/osf/deleted";
+import { OsfDeletedNotice } from "@/components/OsfDeletedNotice";
 import { classifyWalkFailure, type WalkFailureReason } from "@/lib/osf/walk-failure";
 import { osfBackpressureKind } from "@/lib/osf/backpressure";
 import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
-import { Breadcrumb } from "@/components/Breadcrumb";
+import { Breadcrumb, parentCrumbs } from "@/components/Breadcrumb";
 import { UnifiedTree } from "@/components/UnifiedTree";
 import { SplitPane } from "@/components/SplitPane";
 import { FileMissing } from "@/components/FileMissing";
@@ -56,6 +58,7 @@ export default async function DeepFilesPage({
   try {
     resource = await collectResourceTree(guid);
   } catch (e) {
+    if (isOsfDeleted(e)) return <OsfDeletedNotice what="project" guid={guid} />;
     if (e instanceof OsfError && e.code === "not_found") notFound();
     const bp = osfBackpressureKind(e);
     if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="these files" />;
@@ -72,7 +75,6 @@ export default async function DeepFilesPage({
   }
   const { kind, title, fullTree, linked, registrations, components, linkedFailed, registrationsFailed } = resource;
   const node = { title };
-  const parent = fullTree.parentTree;
   const providers = fullTree.rootSkeleton.map((p) => ({
     provider: p.provider,
     name: p.name,
@@ -134,7 +136,7 @@ export default async function DeepFilesPage({
       <Breadcrumb
         crumbs={[
           { label: "Home", href: "/" },
-          ...(parent ? [{ label: parent.title || parent.guid, href: `/${parent.guid}` }] : []),
+          ...parentCrumbs(fullTree),
           { label: node.title || guid, href: `/${guid}` },
           { label: "Files", href: `/${guid}/files` },
           { label: provider!, href: `/${guid}/files/${encodeURIComponent(provider!)}` },

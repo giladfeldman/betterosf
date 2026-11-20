@@ -415,6 +415,31 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
     shardCount: Math.max(1, shardCount),
   });
 
+  // ---------------------------------------------------------------- prior progress
+  //
+  // Read BEFORE any draft, review request or upload. Unknown is not zero (d-94be77): for a
+  // RESUMED run an unreadable checkpoint must stop the run — reading it as "no prior items"
+  // re-uploaded every file already on the draft. A fresh run has a new job id and so no
+  // prior items by construction; a failed read there loses nothing, and refusing would
+  // block a transfer that is otherwise working.
+  const priorItems = new Map<string, TransferItemSnapshot>();
+  if (opts.ledger) {
+    let loaded: TransferItemSnapshot[];
+    try {
+      loaded = await opts.ledger.loadItems(opts.jobId);
+    } catch (e) {
+      if (resumed) {
+        throw new Error(
+          `This transfer's saved progress could not be read, so resuming it now would re-upload ` +
+            `files that may already be on the draft. Nothing was uploaded. Try again in a moment. ` +
+            `(${e instanceof Error ? e.message : String(e)})`,
+        );
+      }
+      loaded = [];
+    }
+    for (const item of loaded) priorItems.set(item.osfFileId, item);
+  }
+
   // ---------------------------------------------------------------- drafts (or resume)
   const records: { recordId: string; paths: string[] }[] = [];
 
@@ -504,12 +529,6 @@ export async function runTransfer(opts: RunTransferOptions): Promise<TransferRes
   }
 
   // ------------------------------------------------------------------- transfer files
-  const priorItems = new Map<string, TransferItemSnapshot>();
-  if (opts.ledger) {
-    for (const item of await opts.ledger.loadItems(opts.jobId).catch(() => [])) {
-      priorItems.set(item.osfFileId, item);
-    }
-  }
 
   const pendingItems: TransferItemSnapshot[] = [];
   let lastCheckpoint = Date.now();

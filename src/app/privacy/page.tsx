@@ -9,6 +9,10 @@ export default function PrivacyPage() {
         <a href="https://osf.io" className="text-blue-600 hover:underline">Open Science Framework</a>.
         All data shown comes from OSF&apos;s public API. We don&apos;t own any of it.
       </p>
+      <p>
+        BetterOSF&apos;s server functions run in the EU, in Vercel&apos;s Frankfurt region (<code>fra1</code>), next
+        to the database.
+      </p>
 
       <h2>What we store</h2>
       <ul>
@@ -27,11 +31,27 @@ export default function PrivacyPage() {
         </li>
         <li>
           <strong>Operational logs</strong> (errors and diagnostics) in the same EU database for
-          administrators, retained for a short window and redacted of secrets.
+          administrators, redacted of secrets. Log entries older than 14 days are deleted: the clean-up runs
+          during routine logging rather than on a timer, so an entry can outlast 14 days by a short while. A
+          short summary of each recurring error (used to alert the administrator) is kept with it.
+        </li>
+        <li>
+          <strong>Bug reports and feedback</strong> you send from the feedback form, in the same EU database.
+          A report holds your message, what kind of report it is, the page you were on, the BetterOSF version,
+          your browser&apos;s user-agent string, a contact email only if you chose to give one, and your OSF user
+          id if you were signed in (you can report without signing in). Each report is also emailed to the
+          administrator. Reports are kept until an administrator deletes them; to have yours removed, email{" "}
+          <a href="mailto:betterosf@scimeto.app" className="text-blue-600 hover:underline">betterosf@scimeto.app</a>.
         </li>
         <li>
           <strong>Short-lived counters</strong> for rate-limiting and quota tracking, such as per-IP navigation
-          counts and per-IP request budgets. These expire automatically.
+          counts and per-IP request budgets. These expire automatically (after one minute for page and API
+          requests, one hour for the feedback form). Each counter is keyed by your IP address and kept only in the memory of the server instance
+          that handled your request: it is not written to our database, a log or any shared store, and it
+          disappears when that instance restarts. The per-IP check runs in Vercel&apos;s Routing Middleware,
+          which Vercel runs in its region nearest to you rather than only in Frankfurt, so for a visitor
+          outside the EU that short-lived counter is held outside the EU. Like any web host, Vercel itself
+          also sees your IP address when it serves a request.
         </li>
         <li>
           <strong>A record of your agreement to the transition terms</strong>, if you use the export and

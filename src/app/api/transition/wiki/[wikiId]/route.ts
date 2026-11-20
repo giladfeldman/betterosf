@@ -52,6 +52,15 @@ export async function GET(
     );
   }
 
+  // 410 = the page was DELETED on OSF (d-ad230b). Same contract as osfErrorResponse: 410 +
+  // code "osf_deleted", so the export says "deleted on OSF", never an OSF outage (502).
+  if (upstream.status === 410) {
+    return Response.json(
+      { error: "This wiki page was deleted on OSF, so there is nothing left to read.", code: "osf_deleted" },
+      { status: 410, headers: noStore },
+    );
+  }
+
   if (!upstream.ok) {
     return Response.json(
       { error: `OSF returned ${upstream.status} for this wiki page.` },

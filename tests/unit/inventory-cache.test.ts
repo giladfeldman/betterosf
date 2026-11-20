@@ -5,7 +5,7 @@
  * what to migrate before OSF goes read-only. Both facts set the bar: it must never be
  * shown to the wrong account, and it must never present a partial list as a whole one.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   readInventoryCache,
   writeInventoryCache,
@@ -117,14 +117,16 @@ describe("it refuses to misread anything", () => {
 
 describe("a failed write is reported, not assumed", () => {
   it("returns false when storage refuses, so the UI does not claim it cached", () => {
-    const original = localStorage.setItem;
-    localStorage.setItem = () => {
+    // Patch the prototype: assigning `localStorage.setItem = fn` stores an item named
+    // "setItem" (as browsers do) rather than replacing the method, under vitest 5's jsdom.
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("QuotaExceededError");
-    };
+    });
     try {
       expect(writeInventoryCache(cacheFor("osf-1"))).toBe(false);
+      expect(spy).toHaveBeenCalled();
     } finally {
-      localStorage.setItem = original;
+      spy.mockRestore();
     }
   });
 });

@@ -51,6 +51,13 @@ type RawContribs = {
   }>;
 };
 
+/** Author names, decoded: OSF escapes user full_name like titles (2gzn5, measured 2026-11-19, d-e301b8). */
+export function preprintAuthorNames(contribs: RawContribs): string[] {
+  return contribs.data
+    .map((c) => decodeOsfText(c.embeds?.users?.data?.attributes?.full_name ?? ""))
+    .filter((n) => n.length > 0);
+}
+
 function parse(raw: RawPreprint): PreprintView {
   const a = raw.data.attributes;
   return {
@@ -135,9 +142,7 @@ export async function getPreprint(guid: string): Promise<PreprintView> {
       `/preprints/${guid}/bibliographic_contributors/?embed=users&page[size]=100`,
       { tags: [`preprint:${guid}`], revalidate: 300 },
     );
-    view.authors = contribs.data
-      .map((c) => c.embeds?.users?.data?.attributes?.full_name ?? "")
-      .filter((n) => n.length > 0);
+    view.authors = preprintAuthorNames(contribs);
   } catch {
     /* leave authors empty */
   }

@@ -2,9 +2,11 @@ import { notFound } from "next/navigation";
 import { isValidGuid } from "@/lib/osf/guid";
 import { collectResourceTree } from "@/lib/osf/resource-tree";
 import { OsfError } from "@/lib/osf/types";
+import { isOsfDeleted } from "@/lib/osf/deleted";
+import { OsfDeletedNotice } from "@/components/OsfDeletedNotice";
 import { osfBackpressureKind } from "@/lib/osf/backpressure";
 import { OsfBackpressureNotice } from "@/components/OsfBackpressureNotice";
-import { Breadcrumb } from "@/components/Breadcrumb";
+import { Breadcrumb, parentCrumbs } from "@/components/Breadcrumb";
 import { UnifiedTree } from "@/components/UnifiedTree";
 import { SplitPane } from "@/components/SplitPane";
 import { UploadFilesButton } from "@/components/UploadFilesButton";
@@ -20,6 +22,7 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
   try {
     resource = await collectResourceTree(guid);
   } catch (e) {
+    if (isOsfDeleted(e)) return <OsfDeletedNotice what="project" guid={guid} />;
     if (e instanceof OsfError && e.code === "not_found") notFound();
     const bp = osfBackpressureKind(e);
     if (bp) return <OsfBackpressureNotice kind={bp} resourceLabel="these files" />;
@@ -28,14 +31,13 @@ export default async function FilesPage({ params }: { params: Promise<{ guid: st
   const { kind, title, fullTree, linked, registrations, components, linkedFailed, registrationsFailed } = resource;
   const node = { title };
   const isRegistration = kind === "registration";
-  const parent = fullTree.parentTree;
 
   return (
     <div>
       <Breadcrumb
         crumbs={[
           { label: "Home", href: "/" },
-          ...(parent ? [{ label: parent.title || parent.guid, href: `/${parent.guid}` }] : []),
+          ...parentCrumbs(fullTree),
           { label: node.title || guid, href: `/${guid}` },
           { label: "Files", href: `/${guid}/files` },
         ]}

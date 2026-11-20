@@ -1,6 +1,7 @@
 import "server-only";
 import { osfGet, osfGetUrl } from "./client";
 import { collectAll } from "./paginate";
+import { decodeOsfText } from "./decode-text";
 
 /**
  * OSF wikis.
@@ -46,7 +47,10 @@ type WikiCollection = { data: RawWiki[]; links: { next: string | null } };
 function parseWiki(raw: RawWiki): WikiPageView {
   return {
     id: raw.id,
-    name: String(raw.attributes?.name ?? ""),
+    // MEASURED 2026-11-19 on the throwaway account (wiki 34sqv): OSF stores a wiki name
+    // HTML-escaped — "R&D" comes back as "R&amp;D" (and a "<b>" tag is stripped on save).
+    // Decoded once here, like node titles; ZIP names still go through safeNameSegment.
+    name: decodeOsfText(raw.attributes?.name),
     size: Number(raw.attributes?.size ?? 0),
     contentType: String(raw.attributes?.content_type ?? "text/markdown"),
     dateModified: String(raw.attributes?.date_modified ?? ""),
